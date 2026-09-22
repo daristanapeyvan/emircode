@@ -28,6 +28,7 @@ import {
   ChevronUp,
   X,
   ArrowUp,
+  Zap,
 } from 'lucide-react';
 import { AppLogo } from '../common/AppLogo';
 import { useSettingsStore } from '@/stores/settingsStore';
@@ -67,6 +68,7 @@ export const AgentWorkspace: React.FC = () => {
     setActiveTabId,
     startGoal,
     stopGoal,
+    interruptGoal,
     rollbackAll,
     clearSession,
     submitAnswer,
@@ -94,9 +96,23 @@ export const AgentWorkspace: React.FC = () => {
     }
   }, [goalInput]);
 
+  const handleInterrupt = () => {
+    if (!goalInput.trim()) return;
+    const text = goalInput.trim();
+    setGoalInput('');
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+    }
+    interruptGoal(text);
+  };
+
   const handleStart = () => {
     if (isBusy) {
-      stopGoal();
+      if (goalInput.trim()) {
+        handleInterrupt();
+      } else {
+        stopGoal();
+      }
       return;
     }
     if (!goalInput.trim() || !workspaceRoot) return;
@@ -448,6 +464,28 @@ export const AgentWorkspace: React.FC = () => {
                       );
                     }
 
+                    if (step.type === 'user_steering') {
+                      return (
+                        <div
+                          key={step.id}
+                          className="p-3 rounded-lg bg-amber-950/20 border border-amber-500/40 text-xs text-amber-200 space-y-1.5 shadow-sm animate-in fade-in duration-200"
+                        >
+                          <div className="flex items-center justify-between text-[11px] text-amber-400">
+                            <div className="flex items-center gap-1.5 font-medium">
+                              <Zap size={12} className="text-amber-400 fill-amber-400/40" />
+                              <span>{step.title || t.agent?.userIntervention || 'Kullanıcı Müdahalesi (Araya Girildi)'}</span>
+                            </div>
+                            <span className="text-amber-500/70 font-mono text-[10px]">
+                              {new Date(step.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                            </span>
+                          </div>
+                          <p className="text-zinc-100 font-medium leading-relaxed select-text whitespace-pre-wrap font-sans text-xs">
+                            {step.content}
+                          </p>
+                        </div>
+                      );
+                    }
+
                     if (step.type === 'final_answer') {
                       return (
                         <div
@@ -659,27 +697,40 @@ export const AgentWorkspace: React.FC = () => {
                     }
                   }}
                   rows={1}
-                  disabled={!workspaceRoot || isBusy}
+                  disabled={!workspaceRoot}
                   placeholder={
-                    workspaceRoot
-                      ? (t.agent?.inputPlaceholder ||
-                        'Ajan için bir hedef yazın... (Göndermek için Enter, yeni satır için Shift+Enter)')
-                      : (t.agent?.noFolderSelected ||
-                        'Ajanı çalıştırmak için önce yukarıdan bir proje klasörü açın.')
+                    !workspaceRoot
+                      ? (t.agent?.noFolderSelected || 'Ajanı çalıştırmak için önce yukarıdan bir proje klasörü açın.')
+                      : isBusy
+                      ? (t.agent?.interruptPlaceholder || 'Ajan çalışıyor... Araya girip yeni talimat vermek için buraya yazın (Enter)...')
+                      : (t.agent?.inputPlaceholder || 'Ajan için bir hedef yazın... (Göndermek için Enter, yeni satır için Shift+Enter)')
                   }
                   className="flex-1 bg-transparent border-0 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:ring-0 resize-none max-h-44 py-1.5 leading-relaxed font-sans selectable-text"
                 />
 
-                {/* Send / Stop Button */}
+                {/* Send / Stop / Interrupt Actions */}
                 {isBusy ? (
-                  <button
-                    type="button"
-                    onClick={stopGoal}
-                    title={t.agent?.stop || 'Durdur'}
-                    className="p-1.5 rounded-lg bg-red-600/90 hover:bg-red-500 text-white transition-colors cursor-pointer shrink-0 mb-0.5 shadow-sm"
-                  >
-                    <Square size={16} strokeWidth={2} />
-                  </button>
+                  <div className="flex items-center gap-1.5 mb-0.5 shrink-0">
+                    {goalInput.trim() && (
+                      <button
+                        type="button"
+                        onClick={handleInterrupt}
+                        title={t.agent?.interruptAndSteer || 'Araya Gir & Yönlendir (Enter)'}
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 font-medium text-xs transition-colors cursor-pointer shadow-sm animate-in fade-in"
+                      >
+                        <Zap size={14} className="fill-zinc-950" />
+                        <span className="hidden sm:inline font-semibold">{t.agent?.interruptAndSteer || 'Araya Gir'}</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={stopGoal}
+                      title={t.agent?.stop || 'Durdur (Görevi İptal Et)'}
+                      className="p-1.5 rounded-lg bg-red-600/90 hover:bg-red-500 text-white transition-colors cursor-pointer shadow-sm"
+                    >
+                      <Square size={16} strokeWidth={2} />
+                    </button>
+                  </div>
                 ) : (
                   <button
                     type="button"

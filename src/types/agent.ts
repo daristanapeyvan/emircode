@@ -53,6 +53,7 @@ export interface AgentStep {
     | 'command_proposal'
     | 'clarification'
     | 'system_notice'
+    | 'user_steering'
     | 'final_answer';
   title?: string;
   content: string;

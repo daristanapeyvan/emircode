@@ -324,14 +324,30 @@ export function compressConversationContext(
 
 export class AgentEngine {
   private abortController: AbortController | null = null;
+  private stepAbortController: AbortController | null = null;
   private isRunning: boolean = false;
+  private pendingInterruptDirective: string | null = null;
 
   stop() {
+    this.isRunning = false;
+    this.pendingInterruptDirective = null;
+    if (this.stepAbortController) {
+      this.stepAbortController.abort();
+      this.stepAbortController = null;
+    }
     if (this.abortController) {
       this.abortController.abort();
       this.abortController = null;
     }
-    this.isRunning = false;
+  }
+
+  interrupt(userDirective: string) {
+    if (!this.isRunning) return;
+    this.pendingInterruptDirective = userDirective.trim();
+    if (this.stepAbortController) {
+      this.stepAbortController.abort();
+      this.stepAbortController = null;
+    }
   }
 
   async runGoal(
@@ -343,6 +359,8 @@ export class AgentEngine {
   ) {
     this.isRunning = true;
     this.abortController = new AbortController();
+    this.stepAbortController = null;
+    this.pendingInterruptDirective = null;
 
     // Circuit Breakers: Minimum 30 minutes for slow CPU/GPU inference
     const MAX_STEPS = 35;
@@ -439,6 +457,27 @@ export class AgentEngine {
     callbacks.onStatusChange('thinking');
 
     while (this.isRunning && stepCount < MAX_STEPS) {
+      // Check if user provided an interrupt steering directive before step begins
+      if (this.pendingInterruptDirective) {
+        const directive = this.pendingInterruptDirective;
+        this.pendingInterruptDirective = null;
+        consecutiveErrors = 0;
+        callbacks.onLog(`[Kullanıcı Müdahalesi]: ${directive}`);
+        callbacks.onStep({
+          id: `step_steer_${Date.now()}`,
+          timestamp: Date.now(),
+          type: 'user_steering',
+          title: 'Kullanıcı Müdahalesi (Araya Girildi)',
+          content: directive,
+          status: 'success',
+        });
+        ledger.userDecisions.push({ question: 'Kullanıcı Canlı Müdahalesi', answer: directive });
+        conversation.push({
+          role: 'user',
+          content: `[KULLANICI CANLI MÜDAHALESİ - ACİL TALİMAT]: "${directive}". Lütfen önceki planı bırakıp derhal bu yeni direktif doğrultusunda göreve devam et.`,
+        });
+      }
+
       stepCount++;
 
       // Circuit Breaker: Max Active Time Check (ignoring paused user confirmation time)
@@ -505,21 +544,32 @@ export class AgentEngine {
         const dynamicSystemPrompt = `${systemPrompt}\n\n${ledgerContext}`;
         const compressedMessages = compressConversationContext(conversation);
 
-        await ollamaClient.chatStream(
-          {
-            model,
-            system: dynamicSystemPrompt,
-            messages: compressedMessages,
-            options: { temperature: 0.1 },
-          },
-          (chunk) => {
-            if (chunk.message?.content) {
-              fullResponse += chunk.message.content;
-              callbacks.onStreamChunk?.(chunk.message.content, fullResponse);
-            }
-          },
-          this.abortController?.signal
-        );
+        this.stepAbortController = new AbortController();
+        const onGlobalAbort = () => {
+          this.stepAbortController?.abort();
+        };
+        this.abortController?.signal.addEventListener('abort', onGlobalAbort, { once: true });
+
+        try {
+          await ollamaClient.chatStream(
+            {
+              model,
+              system: dynamicSystemPrompt,
+              messages: compressedMessages,
+              options: { temperature: 0.1 },
+            },
+            (chunk) => {
+              if (chunk.message?.content) {
+                fullResponse += chunk.message.content;
+                callbacks.onStreamChunk?.(chunk.message.content, fullResponse);
+              }
+            },
+            this.stepAbortController.signal
+          );
+        } finally {
+          this.abortController?.signal.removeEventListener('abort', onGlobalAbort);
+          this.stepAbortController = null;
+        }
 
         if (!this.isRunning) break;
 
@@ -1416,6 +1466,13 @@ export class AgentEngine {
               });
             }
 
+            // Flash window and notify user that command execution has finished
+            window.electronAPI?.notifyUser?.({
+              title: cmdRes?.success ? 'Emir Code - Komut Başarıyla Çalıştı' : 'Emir Code - Komut Hatası',
+              body: `"${binary} ${args.join(' ')}" ${cmdRes?.success ? 'tamamlandı' : 'hata verdi'} (Exit: ${cmdRes?.exitCode ?? (cmdRes?.success ? 0 : 1)}).`,
+              flash: true,
+            });
+
             conversation.push({ role: 'assistant', content: fullResponse });
             conversation.push({ role: 'user', content: observation });
           } else {
@@ -1484,7 +1541,31 @@ export class AgentEngine {
           continue;
         }
       } catch (err: any) {
-        if (err.name === 'AbortError' || this.abortController?.signal.aborted) {
+        if (this.pendingInterruptDirective) {
+          // User interrupted the current step/stream with an active steering directive
+          const directive = this.pendingInterruptDirective;
+          this.pendingInterruptDirective = null;
+          consecutiveErrors = 0;
+          callbacks.onStreamChunk?.('', '');
+          callbacks.onLog(`[Kullanıcı Müdahalesi]: "${directive}". Görev bu talimatla güncelleniyor.`);
+          callbacks.onStep({
+            id: `step_steer_${Date.now()}`,
+            timestamp: Date.now(),
+            type: 'user_steering',
+            title: 'Kullanıcı Müdahalesi (Araya Girildi)',
+            content: directive,
+            status: 'success',
+          });
+          ledger.userDecisions.push({ question: 'Kullanıcı Canlı Müdahalesi', answer: directive });
+          conversation.push({
+            role: 'user',
+            content: `[KULLANICI CANLI MÜDAHALESİ - ACİL TALİMAT]: "${directive}". Lütfen önceki planı bırakıp derhal bu yeni direktif doğrultusunda göreve devam et.`,
+          });
+          callbacks.onStatusChange('thinking');
+          continue;
+        }
+
+        if (err.name === 'AbortError' || this.abortController?.signal.aborted || !this.isRunning) {
           callbacks.onLog('Kullanıcı tarafından durduruldu.');
           callbacks.onStatusChange('idle');
           break;
@@ -1514,6 +1595,8 @@ export class AgentEngine {
     }
 
     this.isRunning = false;
+    this.stepAbortController = null;
+    this.pendingInterruptDirective = null;
   }
 }
 

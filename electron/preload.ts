@@ -17,6 +17,24 @@ export interface RunCommandResult {
   error?: string;
 }
 
+export interface PrerequisiteStatus {
+  ollama: {
+    installed: boolean;
+    running: boolean;
+    path?: string;
+    version?: string;
+  };
+  node: {
+    installed: boolean;
+    version?: string;
+    satisfiesVersion: boolean;
+  };
+  npm: {
+    installed: boolean;
+    version?: string;
+  };
+}
+
 export interface ElectronAPI {
   // Window controls
   minimize: () => void;
@@ -24,6 +42,13 @@ export interface ElectronAPI {
   close: () => void;
   isMaximized: () => Promise<boolean>;
   onMaximizeChange: (callback: (isMaximized: boolean) => void) => () => void;
+  flashFrame: (flag?: boolean) => Promise<boolean>;
+  notifyUser: (options: { title: string; body: string; flash?: boolean }) => Promise<boolean>;
+
+  // System Prerequisites & Installer
+  checkPrerequisites: () => Promise<PrerequisiteStatus>;
+  startOllamaService: () => Promise<boolean>;
+  installPrerequisite: (target: 'ollama' | 'node') => Promise<{ success: boolean; alreadyInstalled?: boolean; message?: string; error?: string }>;
 
   // Native Dialogs & Files
   saveFileDialog: (options: { title?: string; defaultPath?: string; filters?: { name: string; extensions: string[] }[]; content: string }) => Promise<{ success: boolean; filePath?: string }>;
@@ -85,6 +110,13 @@ const electronAPI: ElectronAPI = {
     ipcRenderer.on('window:maximizeChanged', handler);
     return () => ipcRenderer.removeListener('window:maximizeChanged', handler);
   },
+  flashFrame: (flag = true) => ipcRenderer.invoke('window:flashFrame', flag),
+  notifyUser: (options) => ipcRenderer.invoke('app:notify', options),
+
+  // System Prerequisites & Installer
+  checkPrerequisites: () => ipcRenderer.invoke('system:checkPrerequisites'),
+  startOllamaService: () => ipcRenderer.invoke('system:startOllama'),
+  installPrerequisite: (target: 'ollama' | 'node') => ipcRenderer.invoke('system:installPrerequisite', { target }),
 
   saveFileDialog: (options) => ipcRenderer.invoke('dialog:saveFile', options),
   openFileDialog: (options) => ipcRenderer.invoke('dialog:openFile', options),

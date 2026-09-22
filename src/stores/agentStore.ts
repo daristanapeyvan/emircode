@@ -57,6 +57,7 @@ interface AgentState {
 
   startGoal: (goal: string) => Promise<void>;
   stopGoal: () => void;
+  interruptGoal: (directive: string) => void;
   clearSession: () => void;
 
   // Changeset Actions
@@ -263,6 +264,13 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         },
         onStatusChange: (status: AgentStatus) => {
           set({ agentStatus: status });
+          if (status === 'finished') {
+            window.electronAPI?.notifyUser?.({
+              title: 'Emir Code - Görev Tamamlandı',
+              body: `"${get().currentGoal || 'Görev'}" başarıyla tamamlandı.`,
+              flash: true,
+            });
+          }
           if (status === 'finished' || status === 'error' || status === 'idle') {
             set({ isStreamingResponse: false });
           }
@@ -276,21 +284,41 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           set({ activeStreamText: fullResponseSoFar, isStreamingResponse: true });
         },
         onRequestChangesetApproval: (items: ChangesetItem[]) => {
+          window.electronAPI?.notifyUser?.({
+            title: 'Emir Code - Kod Değişikliği Onayı',
+            body: `${items.length} dosya için değişiklik onayı bekleniyor.`,
+            flash: true,
+          });
           return new Promise<boolean>((resolve) => {
             get().setPendingChangeset(items, resolve);
           });
         },
         onRequestDeleteApproval: (item: ChangesetItem) => {
+          window.electronAPI?.notifyUser?.({
+            title: 'Emir Code - Dosya Silme Onayı',
+            body: `"${item.relativePath}" dosyasını silmek için onay bekleniyor.`,
+            flash: true,
+          });
           return new Promise<boolean>((resolve) => {
             get().setPendingDelete(item, resolve);
           });
         },
         onRequestCommandApproval: (item: CommandApprovalItem) => {
+          window.electronAPI?.notifyUser?.({
+            title: 'Emir Code - Komut Onayı',
+            body: `"${item.binary} ${item.args.join(' ')}" komutunu çalıştırmak için onay bekleniyor.`,
+            flash: true,
+          });
           return new Promise<boolean>((resolve) => {
             get().setPendingCommand(item, resolve);
           });
         },
         onRequestClarification: (item: ClarificationItem) => {
+          window.electronAPI?.notifyUser?.({
+            title: 'Emir Code - Soru Soruldu',
+            body: item.question || 'Ajan yanıtınızı bekliyor.',
+            flash: true,
+          });
           return new Promise<string>((resolve) => {
             get().setPendingQuestion(item, resolve);
           });
@@ -308,6 +336,37 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   stopGoal: () => {
     agentEngine.stop();
     set({ agentStatus: 'idle', isStreamingResponse: false });
+  },
+
+  interruptGoal: (directive: string) => {
+    const trimmed = directive.trim();
+    if (!trimmed) return;
+
+    // If agent was waiting for a clarification question, resolve it with the user's directive
+    const questionResolver = get().questionResolver;
+    if (questionResolver) {
+      get().submitAnswer(trimmed);
+      return;
+    }
+
+    // If agent was waiting for changeset approval, reject current pending mutation and redirect
+    const changesetResolver = get().changesetResolver;
+    if (changesetResolver) {
+      get().rejectChangeset();
+    }
+
+    const commandResolver = get().commandResolver;
+    if (commandResolver) {
+      get().rejectCommand();
+    }
+
+    const deleteResolver = get().deleteResolver;
+    if (deleteResolver) {
+      get().rejectDelete();
+    }
+
+    agentEngine.interrupt(trimmed);
+    set({ isStreamingResponse: false, activeStreamText: '' });
   },
 
   clearSession: () => {

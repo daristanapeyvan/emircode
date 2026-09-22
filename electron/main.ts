@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, Notification } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
@@ -52,6 +52,10 @@ function createWindow() {
     mainWindow?.webContents.send('window:maximizeChanged', false);
   });
 
+  mainWindow.on('focus', () => {
+    mainWindow?.flashFrame(false);
+  });
+
   if (process.env.VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
   } else {
@@ -82,6 +86,287 @@ ipcMain.handle('window:isMaximized', () => {
 
 ipcMain.handle('app:getLocale', () => {
   return app.getLocale();
+});
+
+// Flash Window Frame (Windows Taskbar Yellow Blinking)
+ipcMain.handle('window:flashFrame', (_event, flag: boolean = true) => {
+  if (mainWindow && !mainWindow.isFocused()) {
+    mainWindow.flashFrame(flag);
+    return true;
+  }
+  return false;
+});
+
+// User Attention Notification & Window Flash
+ipcMain.handle('app:notify', (_event, options: { title: string; body: string; flash?: boolean }) => {
+  const iconPng = path.join(__dirname, '../dist/icon.png');
+  const iconIco = path.join(__dirname, '../build/icon.ico');
+  const appIcon = fs.existsSync(iconPng) ? iconPng : (fs.existsSync(iconIco) ? iconIco : undefined);
+
+  if (options.flash !== false && mainWindow && !mainWindow.isFocused()) {
+    mainWindow.flashFrame(true);
+  }
+
+  if (Notification.isSupported()) {
+    try {
+      const notification = new Notification({
+        title: options.title || 'Emir Code',
+        body: options.body || '',
+        icon: appIcon,
+      });
+
+      notification.on('click', () => {
+        if (mainWindow) {
+          if (mainWindow.isMinimized()) mainWindow.restore();
+          mainWindow.focus();
+          mainWindow.flashFrame(false);
+        }
+      });
+
+      notification.show();
+    } catch {
+      // Ignore notification failures on systems without toast support
+    }
+  }
+
+  return true;
+});
+
+// ============================================
+// SYSTEM PREREQUISITES (Ollama, Node.js, npm)
+// ============================================
+
+async function checkOllamaStatus(): Promise<{ installed: boolean; running: boolean; path?: string; version?: string }> {
+  let running = false;
+  let installed = false;
+  let version: string | undefined;
+  let resolvedPath: string | undefined;
+
+  // 1. Check if server is running on http://127.0.0.1:11434
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 1200);
+    const res = await fetch('http://127.0.0.1:11434/api/tags', { signal: controller.signal });
+    clearTimeout(timeout);
+    if (res.ok) {
+      running = true;
+      installed = true;
+    }
+  } catch {
+    running = false;
+  }
+
+  // 2. Check executable paths on Windows
+  const localAppOllama = path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Ollama', 'ollama.exe');
+  const progFilesOllama = path.join(process.env.ProgramFiles || '', 'Ollama', 'ollama.exe');
+
+  if (fs.existsSync(localAppOllama)) {
+    installed = true;
+    resolvedPath = localAppOllama;
+  } else if (fs.existsSync(progFilesOllama)) {
+    installed = true;
+    resolvedPath = progFilesOllama;
+  }
+
+  // 3. If not found in known paths, check CLI via where/which
+  if (!resolvedPath) {
+    try {
+      const whichCmd = process.platform === 'win32' ? 'where ollama' : 'which ollama';
+      const stdout = await new Promise<string>((resolve, reject) => {
+        exec(whichCmd, (err, stdout) => {
+          if (err) reject(err);
+          else resolve(stdout.trim());
+        });
+      });
+      if (stdout) {
+        installed = true;
+        resolvedPath = stdout.split('\n')[0].trim();
+      }
+    } catch {
+      // not in PATH
+    }
+  }
+
+  // 4. Try getting version
+  if (installed) {
+    try {
+      const vOut = await new Promise<string>((resolve) => {
+        const cmd = resolvedPath ? `"${resolvedPath}" --version` : 'ollama --version';
+        exec(cmd, { timeout: 2000 }, (err, stdout) => {
+          resolve(err ? '' : stdout.trim());
+        });
+      });
+      if (vOut) {
+        version = vOut.replace(/ollama version is/i, '').replace(/ollama/i, '').trim();
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  return { installed, running, path: resolvedPath, version };
+}
+
+async function checkNodeStatus(): Promise<{ installed: boolean; version?: string; satisfiesVersion: boolean }> {
+  try {
+    const stdout = await new Promise<string>((resolve, reject) => {
+      exec('node -v', { timeout: 2000 }, (err, stdout) => {
+        if (err) reject(err);
+        else resolve(stdout.trim());
+      });
+    });
+    const ver = stdout.replace(/^v/, '');
+    const major = parseInt(ver.split('.')[0], 10);
+    return {
+      installed: true,
+      version: stdout,
+      satisfiesVersion: !isNaN(major) && major >= 18,
+    };
+  } catch {
+    return { installed: false, satisfiesVersion: false };
+  }
+}
+
+async function checkNpmStatus(): Promise<{ installed: boolean; version?: string }> {
+  try {
+    const stdout = await new Promise<string>((resolve, reject) => {
+      exec('npm -v', { timeout: 2000 }, (err, stdout) => {
+        if (err) reject(err);
+        else resolve(stdout.trim());
+      });
+    });
+    return { installed: true, version: stdout };
+  } catch {
+    return { installed: false };
+  }
+}
+
+ipcMain.handle('system:checkPrerequisites', async () => {
+  const [ollama, node, npm] = await Promise.all([
+    checkOllamaStatus(),
+    checkNodeStatus(),
+    checkNpmStatus(),
+  ]);
+  return { ollama, node, npm };
+});
+
+ipcMain.handle('system:startOllama', async () => {
+  const status = await checkOllamaStatus();
+  if (status.running) return true;
+  if (!status.installed) return false;
+
+  const ollamaCmd = status.path || 'ollama';
+  try {
+    const child = spawn(ollamaCmd, ['serve'], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    child.unref();
+
+    for (let i = 0; i < 10; i++) {
+      await new Promise((r) => setTimeout(r, 500));
+      const s = await checkOllamaStatus();
+      if (s.running) return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+});
+
+ipcMain.handle('system:installPrerequisite', async (_event, params: { target: 'ollama' | 'node' }) => {
+  const { target } = params;
+
+  // IMPORTANT: Idempotency check! Do NOT re-install if already installed!
+  if (target === 'ollama') {
+    const status = await checkOllamaStatus();
+    if (status.installed) {
+      if (!status.running) {
+        // Try starting it if installed
+        const startResult = await checkOllamaStatus();
+        if (!startResult.running) {
+          const ollamaCmd = status.path || 'ollama';
+          try {
+            const child = spawn(ollamaCmd, ['serve'], { detached: true, stdio: 'ignore', windowsHide: true });
+            child.unref();
+          } catch {}
+        }
+      }
+      return {
+        success: true,
+        alreadyInstalled: true,
+        message: 'Ollama sisteminizde zaten kurulu olduğu için tekrar indirilmedi.',
+      };
+    }
+
+    // Download official Ollama installer from official URL
+    try {
+      const url = 'https://ollama.com/download/OllamaSetup.exe';
+      const tempDir = os.tmpdir();
+      const installerPath = path.join(tempDir, 'OllamaSetup.exe');
+
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`İndirme başarısız: HTTP ${res.status}`);
+      const arrayBuffer = await res.arrayBuffer();
+      await fs.promises.writeFile(installerPath, Buffer.from(arrayBuffer));
+
+      // Execute installer
+      const child = spawn(installerPath, [], { detached: true, stdio: 'ignore' });
+      child.unref();
+
+      return {
+        success: true,
+        alreadyInstalled: false,
+        message: 'Ollama kurulum aracı resmi kaynaktan (ollama.com) indirildi ve başlatıldı.',
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        error: `Ollama indirilemedi: ${err.message}`,
+      };
+    }
+  }
+
+  if (target === 'node') {
+    const nodeStatus = await checkNodeStatus();
+    if (nodeStatus.installed && nodeStatus.satisfiesVersion) {
+      return {
+        success: true,
+        alreadyInstalled: true,
+        message: `Node.js (${nodeStatus.version}) sisteminizde zaten kurulu olduğu için tekrar indirilmedi.`,
+      };
+    }
+
+    // Download official Node.js installer from nodejs.org
+    try {
+      const url = 'https://nodejs.org/dist/v22.14.0/node-v22.14.0-x64.msi';
+      const tempDir = os.tmpdir();
+      const installerPath = path.join(tempDir, 'node-v22-x64.msi');
+
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`İndirme başarısız: HTTP ${res.status}`);
+      const arrayBuffer = await res.arrayBuffer();
+      await fs.promises.writeFile(installerPath, Buffer.from(arrayBuffer));
+
+      // Execute MSI installer
+      const child = spawn('msiexec', ['/i', installerPath], { detached: true, stdio: 'ignore' });
+      child.unref();
+
+      return {
+        success: true,
+        alreadyInstalled: false,
+        message: 'Node.js resmi kaynaktan (nodejs.org) indirildi ve kurulum başlatıldı.',
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        error: `Node.js indirilemedi: ${err.message}`,
+      };
+    }
+  }
+
+  return { success: false, error: 'Bilinmeyen kurulum hedefi' };
 });
 
 // Storage IPC

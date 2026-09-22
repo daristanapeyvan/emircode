@@ -66,6 +66,21 @@ export const GeneralSettings: React.FC = () => {
           onChange={(checked) => updateSettings({ confirmDestructive: checked })}
         />
       </SettingsRow>
+
+      <SettingsRow
+        label="Sistem ve Model Kurulum Sihirbazı"
+        description="Ollama, Node.js gereksinimlerini kontrol edin veya yerel model seçim sihirbazını yeniden açın"
+      >
+        <button
+          onClick={() => {
+            localStorage.removeItem('emir_code_onboarding_completed');
+            window.location.reload();
+          }}
+          className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-medium transition-colors cursor-pointer"
+        >
+          Sihirbazı Aç
+        </button>
+      </SettingsRow>
     </div>
   );
 };

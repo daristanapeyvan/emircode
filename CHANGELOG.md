@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-09-22
+
+### Added
+- **Live Model Interruption & Steering (Araya Girip Yönlendirme)**:
+  - Users can interrupt active local model generation or agent reasoning steps mid-flight without losing state or aborting the task.
+  - Real-time steering prompt injection into session memory ledger and conversation context.
+  - Dual-action composer: Stop (full abort) vs. Amber-accented "Interrupt & Steer" button (with `Enter` shortcut).
+  - High-visibility `user_steering` timeline cards documenting live interventions.
+- **Windows Taskbar Yellow Blinking & Desktop Notifications**:
+  - Automatic `flashFrame(true)` causing Windows taskbar icon to flash orange/yellow upon code/command completion or when clarification/approvals are requested.
+  - Immediate reset of flashing upon window focus.
+  - Native toast notifications linking directly back to focused window.
+- **Automated Prerequisites Scanner & Interactive Model Onboarding Wizard**:
+  - Automated detection of Ollama, Node.js (v18+), and npm with version verification.
+  - Idempotent installer: skips downloading/installing components already present on the system.
+  - Transparent external download disclaimer banner citing official download sources (`ollama.com`, `nodejs.org`, `registry.ollama.ai`).
+  - 3-step interactive onboarding wizard displaying all installed local models with 1-click activation, alongside real-time download progress for curated coding models.
+
 ## [1.0.0] - 2026-09-22
 
 ### Added

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Paperclip, ArrowUp, Square } from 'lucide-react';
+import { Paperclip, ArrowUp, Square, Zap } from 'lucide-react';
 import { AttachmentTray } from './AttachmentTray';
 import { useChatStore } from '@/stores/chatStore';
 import { useSettingsStore } from '@/stores/settingsStore';
@@ -14,7 +14,7 @@ export const Composer: React.FC = () => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const { isStreaming, sendMessage, stopStreaming, addAttachment } = useChatStore();
+  const { isStreaming, sendMessage, stopStreaming, interruptAndSend, addAttachment } = useChatStore();
   const { selectedModelDetails, selectedModel } = useModelStore();
   const { settings } = useSettingsStore();
   const t = getTranslations(settings.language);
@@ -35,7 +35,16 @@ export const Composer: React.FC = () => {
 
   const handleSend = () => {
     if (isStreaming) {
-      stopStreaming();
+      if (content.trim()) {
+        const textToSend = content;
+        setContent('');
+        if (textareaRef.current) {
+          textareaRef.current.style.height = 'auto';
+        }
+        interruptAndSend(textToSend);
+      } else {
+        stopStreaming();
+      }
       return;
     }
 
@@ -215,6 +224,8 @@ export const Composer: React.FC = () => {
             placeholder={
               !selectedModel
                 ? t.chat.selectModelFirst
+                : isStreaming
+                ? (t.agent?.interruptPlaceholder || 'Araya girip yeni talimat vermek için buraya yazın (Enter)...')
                 : t.chat.inputPlaceholder
             }
             disabled={!selectedModel}
@@ -222,16 +233,29 @@ export const Composer: React.FC = () => {
             className="flex-1 bg-transparent border-0 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:ring-0 resize-none max-h-44 py-1.5 leading-relaxed font-sans selectable-text"
           />
 
-          {/* Send / Stop Button */}
+          {/* Send / Stop / Interrupt Actions */}
           {isStreaming ? (
-            <button
-              type="button"
-              onClick={stopStreaming}
-              title={t.chat.stop}
-              className="p-1.5 rounded-lg bg-red-600/90 hover:bg-red-500 text-white transition-colors cursor-pointer shrink-0 mb-0.5 shadow-sm"
-            >
-              <Square size={16} strokeWidth={2} />
-            </button>
+            <div className="flex items-center gap-1.5 mb-0.5 shrink-0">
+              {content.trim() && (
+                <button
+                  type="button"
+                  onClick={handleSend}
+                  title={t.chat.interruptAndSend || 'Araya Gir & Gönder (Enter)'}
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 font-medium text-xs transition-colors cursor-pointer shadow-sm animate-in fade-in"
+                >
+                  <Zap size={14} className="fill-zinc-950" />
+                  <span className="hidden sm:inline font-semibold">{t.chat.interruptAndSend || 'Araya Gir'}</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={stopStreaming}
+                title={t.chat.stop}
+                className="p-1.5 rounded-lg bg-red-600/90 hover:bg-red-500 text-white transition-colors cursor-pointer shadow-sm"
+              >
+                <Square size={16} strokeWidth={2} />
+              </button>
+            </div>
           ) : (
             <button
               type="button"

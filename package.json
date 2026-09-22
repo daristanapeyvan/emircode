@@ -1,6 +1,6 @@
 {
   "name": "emir-code",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Emir Code - AI Native Coding Agent Desktop Client",
   "main": "dist-electron/main.js",
   "author": "Agah Emir",

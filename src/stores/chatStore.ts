@@ -29,6 +29,7 @@ interface ChatState {
 
   sendMessage: (content: string) => Promise<void>;
   stopStreaming: () => void;
+  interruptAndSend: (content: string) => Promise<void>;
   regenerateResponse: () => Promise<void>;
 
   addAttachment: (attachment: Attachment) => void;
@@ -241,6 +242,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
           // Refresh running models
           useModelStore.getState().fetchRunning();
+
+          // Flash window and notify user when generation finishes
+          window.electronAPI?.notifyUser?.({
+            title: 'Emir Code - Yanıt Tamamlandı',
+            body: 'Yerel model yanıt üretimini tamamladı.',
+            flash: true,
+          });
         },
         onError: (error: Error) => {
           set((state) => {
@@ -275,6 +283,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
     }
     set({ isStreaming: false, streamingMessageId: null });
+  },
+
+  interruptAndSend: async (content: string) => {
+    const activeMsgId = get().streamingMessageId;
+    chatService.stopGeneration();
+    if (activeMsgId) {
+      const msgs = [...get().messages];
+      const target = msgs.find((m) => m.id === activeMsgId);
+      if (target) {
+        if (target.content) {
+          target.content += '\n\n*(Kullanıcı araya girdi)*';
+        }
+        storageService.saveMessage(target);
+      }
+    }
+    set({ isStreaming: false, streamingMessageId: null });
+    await get().sendMessage(content);
   },
 
   regenerateResponse: async () => {
