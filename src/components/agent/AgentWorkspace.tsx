@@ -600,6 +600,11 @@ export const AgentWorkspace: React.FC = () => {
                         <span className="font-medium text-zinc-300">
                           {isBusy ? 'Düşünülüyor...' : 'Muhakeme süreci'}
                         </span>
+                        {isStreamingResponse && (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold bg-blue-500/20 text-blue-400 border border-blue-500/30 uppercase tracking-wider animate-pulse">
+                            CANLI TOKEN AKIŞI
+                          </span>
+                        )}
                       </div>
 
                       <div className="flex items-center gap-2 text-zinc-500 group-hover:text-zinc-300 transition-colors">

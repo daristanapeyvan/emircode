@@ -124,14 +124,21 @@ flowchart TD
 
 ### Installation Options
 
+You can download pre-built Windows binaries directly from the [GitHub Releases](https://github.com/daristanapeyvan/emircode/releases) section:
+
 #### Option A: Windows NSIS Installer (Recommended)
 Download and run the official multilingual installer:
-- `Emir Code Setup 1.0.0.exe`
+- `Emir Code Setup 1.1.0.exe`
 - Choose custom installation directory, Start Menu, and Desktop shortcuts.
 - Fully detects your operating system language (Turkish or English) automatically.
 
-#### Option B: Portable Unpacked
-Run the standalone portable executable directly:
+#### Option B: Standalone Portable Executable (.exe)
+Download and run directly without installation:
+- `Emir Code 1.1.0.exe`
+- Completely self-contained single executable. Zero installation required.
+
+#### Option C: Portable Unpacked
+Run the unpacked standalone executable directly:
 ```
 release/win-unpacked/EmirCode.exe
 ```

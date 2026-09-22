@@ -26,7 +26,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: 'npm'
 
       - name: Install Dependencies
@@ -38,8 +38,8 @@ jobs:
       - name: Build Vite & Electron Main
         run: npm run build:vite
 
-      - name: Build Windows NSIS Installer
-        run: npx electron-builder --win
+      - name: Build Windows Executables (Installer & Portable)
+        run: npx electron-builder --win --publish never
 
       - name: Post-build Metadata & Icon Embed
         run: node ./scripts/postbuild.js
