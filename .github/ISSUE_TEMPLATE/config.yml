@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: GitHub Discussions
+    url: https://github.com/daristanapeyvan/emircode/discussions
+    about: Ask questions, discuss local LLMs, and share workflows.
+  - name: Security Vulnerability Reporting
+    url: https://github.com/daristanapeyvan/emircode/security/policy
+    about: Privately report security concerns or potential sandbox escape vectors.

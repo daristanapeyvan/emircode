@@ -139,8 +139,8 @@ release/win-unpacked/EmirCode.exe
 #### Option C: Build from Source
 ```bash
 # Clone the repository
-git clone https://github.com/emir/emir-code.git
-cd emir-code
+git clone https://github.com/daristanapeyvan/emircode.git
+cd emircode
 
 # Install dependencies
 npm install
@@ -149,7 +149,7 @@ npm install
 npm run dev
 
 # Build Windows NSIS Installer & Unpacked Distribution
-npm run build
+npm run build:installer
 ```
 
 ---
@@ -162,12 +162,15 @@ npm run build
 
 ---
 
-## 📜 Documentation
+## 📜 Documentation & Guides
 
-- **[ARCHITECTURE.md](./ARCHITECTURE.md)**: Deep technical architecture, security boundaries, and token mechanics.
-- **[SECURITY.md](./SECURITY.md)**: Threat model, Realpath jail design, command allowlist policy, and disclosure process.
-- **[CONTRIBUTING.md](./CONTRIBUTING.md)**: Development guidelines, coding conventions, and pull request workflow.
-- **[LICENSE](./LICENSE)**: MIT License.
+- **[System Architecture (ARCHITECTURE.md)](./ARCHITECTURE.md)**: Deep technical architecture, sequence diagrams, process isolation, and token mechanics.
+- **[Practical Workflow Examples (docs/EXAMPLES.md)](./docs/EXAMPLES.md)**: Real-world walkthroughs of autonomous debugging, inline clarification, refactoring, and rollback.
+- **[Security Model (docs/SECURITY_MODEL.md)](./docs/SECURITY_MODEL.md)**: Comprehensive threat analysis, Realpath Jail guarantees, and atomic swap details.
+- **[Security Policy (SECURITY.md)](./SECURITY.md)**: Vulnerability reporting and responsible disclosure.
+- **[Contributing Guidelines (CONTRIBUTING.md)](./CONTRIBUTING.md)**: Development guidelines, coding conventions, and pull request workflow.
+- **[Changelog (CHANGELOG.md)](./CHANGELOG.md)**: Release history and version notes.
+- **[License (LICENSE)](./LICENSE)**: MIT License.
 
 ---
 

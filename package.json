@@ -5,6 +5,14 @@
   "main": "dist-electron/main.js",
   "author": "Agah Emir",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/daristanapeyvan/emircode.git"
+  },
+  "homepage": "https://github.com/daristanapeyvan/emircode#readme",
+  "bugs": {
+    "url": "https://github.com/daristanapeyvan/emircode/issues"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build && electron-builder --win && node ./scripts/postbuild.js",

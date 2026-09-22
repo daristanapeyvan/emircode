@@ -1,133 +1,216 @@
-# 🏛️ Emir Code Architecture
+# 🏛️ Emir Code System Architecture
 
-This document details the software architecture, process boundaries, security model, and execution lifecycle of **Emir Code**.
+This document provides a comprehensive technical breakdown of **Emir Code**, an AI-native autonomous coding assistant built with Electron, React 19, TypeScript, and Tailwind CSS, pairing locally with Ollama.
 
 ---
 
-## 1. Process Separation & Security Boundaries
+## 1. Architectural Philosophy
 
-Emir Code strictly follows the Chromium and Electron multi-process security model:
+Emir Code was designed around four non-negotiable principles:
+
+1. **Ironclad Local Privacy**: Zero telemetry, zero cloud dependencies. Your source code and intellectual property never leave your workstation.
+2. **Cryptographic Sandbox Containment**: Autonomous agents should never have arbitrary write authority. All operations run inside an unbypassable, operating-system-level Realpath jail.
+3. **Deterministic Anti-Loop Reliability**: Local models (such as `qwen2.5-coder:1.5b` or `deepseek-coder-v2`) have constrained reasoning horizons. The engine provides deterministic scaffolding so smaller models cannot enter infinite repetitive loops.
+4. **AAA Minimalist User Experience**: Inspired by Linear, Cursor, and Raycast, the interface emphasizes subdued typography, 95% neutral zinc surfaces, and zero "AI slop" (no flashy ping animations, no redundant neon tags, no intrusive modal popups).
+
+---
+
+## 2. Multi-Process System Topology
+
+Emir Code enforces a strict multi-process isolation model following Chromium and Electron best practices:
 
 ```
-+-------------------------------------------------------------+
-|                      Operating System                       |
-+-------------------------------------------------------------+
-                               ^
-                               | (Restricted Win32 / fs calls)
-                               v
-+-------------------------------------------------------------+
-|                 Electron Main Process (Node.js)             |
-|  - Realpath Path Resolution & Jail Validator                |
-|  - Cryptographic 256-bit Mutation Token Vault               |
-|  - Authentic SHA-256 Base Hash Verifier                     |
-|  - Atomic Temporary File Swap & Rollback Registry           |
-|  - Strict Command Allowlist & Executable Validator          |
-+-------------------------------------------------------------+
-                               ^
-                               | (contextBridge / IPC only)
-                               v
-+-------------------------------------------------------------+
-|                   Preload Script (Isolated)                 |
-|  - Context Isolation: contextIsolation=true                 |
-|  - Node Integration: nodeIntegration=false                  |
-|  - Typed window.electronAPI Interface                       |
-+-------------------------------------------------------------+
-                               ^
-                               |
-                               v
-+-------------------------------------------------------------+
-|               Renderer Process (Vite + React 19)            |
-|  - UI State (Zustand: chatStore, agentStore, settingsStore) |
-|  - Agent Engine & Tool Dispatcher                           |
-|  - Session Memory Ledger & Context Sliding Window           |
-|  - Myers/LCS Line-by-Line Diff Viewer                       |
-|  - Live Reasoning & Execution Dump Stream                   |
-+-------------------------------------------------------------+
++-------------------------------------------------------------------------+
+|                            Operating System                             |
++-------------------------------------------------------------------------+
+                                    ^
+                                    | (Restricted Win32 / fs calls)
+                                    v
++-------------------------------------------------------------------------+
+|                     Electron Main Process (Node.js)                     |
+|  - Realpath Path Resolution & Workspace Jail Containment                |
+|  - Cryptographic 256-bit Mutation Token Vault                           |
+|  - Authentic SHA-256 Base Hash Integrity Verifier                       |
+|  - Atomic Temporary-File Swap Engine (fs.renameSync)                    |
+|  - Snapshot & Rollback Registry                                         |
+|  - Strict Command Allowlist & Executable Validator                      |
++-------------------------------------------------------------------------+
+                                    ^
+                                    | (contextBridge / Typed IPC only)
+                                    v
++-------------------------------------------------------------------------+
+|                        Preload Script (Isolated)                        |
+|  - contextIsolation: true                                               |
+|  - nodeIntegration: false                                               |
+|  - Typed window.electronAPI Interface                                   |
++-------------------------------------------------------------------------+
+                                    ^
+                                    | (Asynchronous IPC messaging)
+                                    v
++-------------------------------------------------------------------------+
+|                  Renderer Process (Vite + React 19)                     |
+|  +-------------------------------------------------------------------+  |
+|  | State Stores (Zustand: chatStore, agentStore, settingsStore)      |  |
+|  +-------------------------------------------------------------------+  |
+|  | Autonomous Agent Engine (AgentEngine.ts)                          |  |
+|  |  - Goal Decomposition & Step Execution Loop                       |  |
+|  |  - Anti-Loop Guard (Pre-flight Probing & 4-Step Cycle Breaker)    |  |
+|  |  - Fuzzy Path Matcher (findClosestPath)                           |  |
+|  |  - Two-Tier Sliding-Window Context Compressor                     |  |
+|  +-------------------------------------------------------------------+  |
+|  | Local LLM Communication (OllamaClient.ts - NDJSON Streaming)      |  |
+|  +-------------------------------------------------------------------+  |
+|  | AAA Minimalist Presentation Layer                                 |  |
+|  |  - Breadcrumb Sub-Header & Unified Security Selector              |  |
+|  |  - Collapsible Monochromatic Thought Accordion                    |  |
+|  |  - Inline Clarification Question Stream (Zero Popups)             |  |
+|  |  - Myers / LCS Line-by-Line Diff Viewer                           |  |
+|  +-------------------------------------------------------------------+  |
++-------------------------------------------------------------------------+
 ```
 
 ---
 
-## 2. The Realpath Jail Guarantee
+## 3. Autonomous Execution Lifecycle
 
-A common vulnerability in autonomous coding agents is directory traversal (e.g., `../../Windows/System32` or resolving symlinks/junctions pointing outside the intended folder).
-
-In Emir Code:
-1. When a user opens a project workspace, the Main process evaluates:
-   ```ts
-   activeWorkspaceRoot = fs.realpathSync(folderPath);
-   ```
-2. Before ANY file read, listing, search, or mutation, the path is resolved via:
-   ```ts
-   const targetRealPath = fs.realpathSync(resolvedPath);
-   if (!targetRealPath.startsWith(activeWorkspaceRoot + path.sep) && targetRealPath !== activeWorkspaceRoot) {
-     throw new SecurityError('Path traversal detected outside active workspace jail');
-   }
-   ```
-3. Even if the Renderer process or LLM is maliciously prompted to escape the sandbox, the Main process denies the operation.
-
----
-
-## 3. Cryptographic Mutation Token Lifecycle
-
-No code in the Renderer or Agent Engine can directly modify or delete files. All mutations require an explicit cryptographic transaction token:
+The diagram below illustrates how a developer's high-level goal translates into safe, verified disk mutations:
 
 ```mermaid
 sequenceDiagram
-    participant LLM as Ollama (Local Model)
-    participant Engine as AgentEngine (Renderer)
-    participant UI as DiffViewer / User
-    participant Main as Electron Main Process
+    autonumber
+    actor Dev as Developer
+    participant UI as AgentWorkspace (React)
+    participant Engine as AgentEngine
+    participant Ollama as Local Ollama Server
+    participant Main as Electron Main (Privileged)
     participant Disk as Local Filesystem
 
-    LLM->>Engine: Propose Edit (path, original_chunk, new_chunk)
-    Engine->>UI: Render Line-by-Line Diff in Timeline/Modal
-    UI->>Engine: User Clicks "Approve" (or Auto-Approved by Profile)
-    Engine->>Main: requestMutationToken(path, operation, baseHash)
-    Note over Main: Verify Realpath jail & match file baseHash
-    Main-->>Engine: singleUseToken (256-bit crypto hex)
-    Engine->>Main: applyApprovedMutation(token, path, operation, newContent)
-    Note over Main: Invalidate token immediately (single-use)
-    Note over Main: Atomic swap via temp file + fs.rename
-    Main->>Disk: Write atomically
-    Main-->>Engine: Transaction Applied (TxHash, Timestamp)
+    Dev->>UI: Submits Goal ("Fix null pointer in UserProfile.tsx")
+    UI->>Engine: startGoal(goalText)
+    
+    rect rgb(24, 24, 27)
+        Note over Engine,Main: Phase 1: Pre-Flight Environment Probing
+        Engine->>Main: probeGitStatus() & listWorkspaceFiles()
+        Main-->>Engine: { gitAvailable: true/false, projectTree: [...] }
+        Engine->>Engine: Mask non-existent tools from JSON schema
+    end
+
+    loop Autonomous Reasoning Cycle (Max 30 iterations)
+        Engine->>Ollama: Stream Prompt + Ledger Block (Sliding Window)
+        Ollama-->>Engine: Reasoning Stream (NDJSON tokens)
+        Engine->>UI: Update Live Thought Accordion (Monochrome)
+        
+        alt Tool Call: read_file
+            Engine->>Main: readFile(path)
+            Main->>Main: Verify Realpath Jail
+            Main-->>Engine: fileContent + baseHash
+            Engine->>Engine: Record file in Memory Ledger
+        else Tool Call: propose_edit
+            Engine->>UI: Render Myers/LCS Diff Reviewer
+            alt Security Profile: Strict
+                Dev->>UI: Click "Approve Changes"
+                UI->>Engine: Confirm Approval
+            else Security Profile: Balanced (Non-conflicting)
+                Engine->>Engine: Auto-Approve inside Jail
+            end
+            
+            Engine->>Main: requestMutationToken(path, 'modify', baseHash)
+            Main->>Main: Validate 256-bit crypto token
+            Main-->>Engine: singleUseToken
+            Engine->>Main: applyApprovedMutation(token, path, newContent)
+            Main->>Disk: Atomic temp file swap (fs.renameSync)
+            Main-->>Engine: Mutation Applied (txHash)
+            Engine->>Engine: Record Milestone in Ledger
+        else Tool Call: ask_clarification
+            Engine->>UI: Render Inline Question Card
+            Dev->>UI: Select Option Chip or Enter Custom Answer
+            UI->>Engine: submitAnswer(answer)
+            Engine->>Engine: Record Decision in Ledger
+        else Tool Call: finish
+            Engine->>UI: Display Completion Summary
+        end
+    end
 ```
 
 ---
 
-## 4. Session Memory Ledger & Context Optimization
+## 4. Anti-Loop Guard & Small Model Resilience
 
-Local LLMs have finite context limits (2,048 to 8,192 tokens). Reading two large code files can quickly exhaust the context window, causing models to forget instructions, repeat questions, or enter infinite loops.
+Smaller local language models (1.5B to 7B parameters) frequently enter infinite loops when encountering unfamiliar environments. Emir Code embeds a deterministic four-part defense:
 
-To solve this, Emir Code employs a two-tier context system:
+### 1. Pre-Flight Environment Probing
+Before inference starts, the engine determines whether external binaries (such as `git`) exist:
+```ts
+// src/lib/agent/AgentEngine.ts
+try {
+  await window.electronAPI.git.status(this.workspaceRoot);
+  this.gitAvailable = true;
+} catch {
+  this.gitAvailable = false;
+  this.ledger.unavailableBinaries.push('git');
+}
+```
+If Git is missing, `read_git_status` and `read_git_diff` are dynamically removed from the tool definitions. **Models cannot call tools they cannot see.**
 
-1. **Session Memory Ledger (`AgentMemoryLedger`)**:
-   - Maintains a structured state of:
-     - `goal`: Active objective
-     - `knownFiles`: Files inspected and their summaries
-     - `userDecisions`: Exact questions asked and user answers
-     - `appliedChanges`: Diff history applied so far
-   - Pre-pended dynamically to each prompt iteration, guaranteeing the agent retains critical memory across infinite steps.
+### 2. Fuzzy "Did-You-Mean?" Path Matcher
+When small models guess approximate file paths (e.g., `App.js` instead of `src/App.tsx`), `findClosestPath` evaluates basename, extension, and Levenshtein similarity:
+```ts
+// Suggests exact match and injects hint directly into ledger
+const suggested = findClosestPath(requestedPath, this.ledger.projectTree);
+if (suggested) {
+  return `[Hata]: '${requestedPath}' bulunamadı. 💡 İPUCU: Aradığınız dosya muhtemelen '${suggested}'!`;
+}
+```
 
-2. **Context Sliding Window Compression**:
-   - For turns older than the last 4 steps, large raw observations (`read_file` contents, search results) are compressed into concise pointers like:
-     `[Özet Gözlem: "src/App.tsx" dosyası incelendi. Önemli detaylar oturum hafıza defterindedir.]`
-   - Keeps context consumption tiny while maintaining 100% semantic coherence.
+### 3. Deterministic Ping-Pong Cycle Breaker
+If the agent repeats the same sequence of actions within the last 4 iterations (e.g., Tool A -> Tool B -> Tool A -> Tool B), the Anti-Loop Guard triggers an immediate circuit interrupt:
+```ts
+// Prevents endless read/re-read cycles
+if (this.detectActionLoop(recentActions)) {
+  this.injectPromptDirective("DÖNGÜ UYARISI: Aynı adımları tekrarlıyorsunuz. Mevcut bulgularınızla bir sonraki aşamaya geçin veya 'finish' çağırın.");
+}
+```
 
 ---
 
-## 5. Active-Execution Time Tracking
+## 5. Sliding-Window Memory Ledger
 
-Runaway agent loops can consume CPU, RAM, and battery. Emir Code implements a 10-minute circuit breaker:
-- Conventional implementations use `Date.now() - startTime > 10min`, which prematurely aborts sessions when a user spends time carefully inspecting a diff.
-- Emir Code pauses the active timer whenever the engine awaits human guidance (`onRequestClarification`, `onRequestChangesetApproval`, `onRequestCommandApproval`, `onRequestDeleteApproval`).
-- Only active token inference and tool dispatch count toward the circuit breaker.
+To prevent 8K-token context exhaustion when reading multiple files, Emir Code partitions context into two tiers:
+
+1. **Active Structured Ledger**:
+   - `goal`: Active objective
+   - `projectTree`: Verified disk directory map
+   - `milestones`: Completed phases (e.g., `[TAMAMLANDI] Dosya okundu: src/App.tsx`)
+   - `userDecisions`: Architectural choices made by the user
+2. **Observation Compression**:
+   Turns older than 4 steps have their voluminous outputs compressed into semantic pointers:
+   ```
+   [Özet Gözlem: "src/components/agent/AgentWorkspace.tsx" incelendi (870 satır). Kritik detaylar oturum defterinde kayıtlıdır.]
+   ```
 
 ---
 
-## 6. Security Profiles Matrix
+## 6. The Realpath Jail & Mutation Vault
 
-| Profile | File Edits (`propose_edit`) | New Files (`propose_create`) | Deletions (`propose_delete`) | Safe Commands (`npm test`, etc.) | Main Realpath Jail Enforced? |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **Strict** | Manual Approval | Manual Approval | Manual Approval | Manual Approval | ✅ Always |
-| **Balanced** | Auto (Non-conflicting) | Auto | Manual Approval | Manual Approval | ✅ Always |
-| **Autonomous** | Auto | Auto | Manual Approval | Auto | ✅ Always |
+The filesystem security layer guarantees that under no circumstances can an LLM escape the workspace folder:
+
+```ts
+// electron/main.ts - Realpath verification
+const resolvedTarget = path.resolve(activeWorkspaceRoot, requestedRelativePath);
+const targetRealPath = fs.realpathSync(resolvedTarget);
+
+if (!targetRealPath.startsWith(activeWorkspaceRoot + path.sep) && targetRealPath !== activeWorkspaceRoot) {
+  throw new SecurityError("Sandbox Escape Attempt: Path resolved outside workspace boundary.");
+}
+```
+
+Every write operation requires an unforgeable, single-use 256-bit token tied to the file's SHA-256 base hash. Writes are staged in a `.tmp` sibling file and swapped atomically using `fs.renameSync`.
+
+---
+
+## 7. AAA Minimalist UI Principles
+
+The interface adheres to strict aesthetic guidelines:
+- **Zero AI Slop**: No excessive pulsating neon dots, no purple sparkles, no generic marketing template animations.
+- **Micro-Interactions**: Calm, single-state micro-spinners (`Loader2`) and quiet icons (`PanelRight`, `RotateCcw`, `FolderTree`).
+- **Consistent Message Bar**: The Code Composer shares 100% visual and functional identity with the Chat Composer (same border, focus ring, dynamic `scrollHeight` expansion, and square action button).
