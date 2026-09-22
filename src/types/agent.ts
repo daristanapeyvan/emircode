@@ -80,6 +80,14 @@ export interface MilestoneItem {
   timestamp: number;
 }
 
+export interface TaskChecklistItem {
+  id: string;
+  description: string;
+  status: 'pending' | 'in_progress' | 'completed';
+  startedAt?: number;
+  completedAt?: number;
+}
+
 export interface AgentMemoryLedger {
   goal: string;
   projectTree: string[];
@@ -90,6 +98,8 @@ export interface AgentMemoryLedger {
   unavailableBinaries: string[];
   invalidPaths: string[];
   milestones: MilestoneItem[];
+  subtasks: TaskChecklistItem[];
+  activeSubtaskId?: string;
   currentPhase: 'investigation' | 'modification' | 'verification' | 'completion';
 }
 

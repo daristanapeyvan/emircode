@@ -62,6 +62,12 @@ Customize the autonomous threshold to match your personal workflow while keeping
 ### 🔍 7. Optional Live Reasoning & Trace Dump
 - **Deep Observability**: Toggle the "Reasoning & Dump" panel anytime to follow the model's chain-of-thought, tool invocation parameters, and live system logs in real-time.
 
+### 📋 8. Multi-Instruction Task Decomposition & Anti-Premature Termination Guard
+- **No Early Dropouts**: Prevents local models from getting distracted by a single instruction and quitting early.
+- **Automated Decomposition**: Automatically identifies compound prompts, numbered steps, bullet points, and sequential phrases (`daha sonra`, `ardından`, `then`, `after that`).
+- **Live Memory Checklist**: Tracks subtasks in real-time (`[TAMAMLANDI]`, `[ŞU ANKİ ODAK]`, `[BEKLEMEDE]`) in the system context.
+- **Interception Safeguard**: Automatically intercepts early `finish` action calls or conversational plain-text exits, steering the model systematically until every subtask is satisfied.
+
 ---
 
 ## 🏛️ Architecture Overview

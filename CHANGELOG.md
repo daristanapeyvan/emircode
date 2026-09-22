@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-09-22
+
+### Added
+- **Multi-Instruction Task Decomposition & Checklist Engine (Çoklu Talimat Ayrıştırma & Kontrol Listesi)**:
+  - Automatically parses compound user prompts containing multiple instructions, bullet points, numbers, or sequential phrases (`daha sonra`, `ardından`, `ve son olarak`, `then`, `after that`).
+  - Maintains a structured task checklist (`TaskChecklistItem[]`) directly in the Session Memory Ledger.
+  - Distinct status tracking: `✅ [TAMAMLANDI]`, `🔄 [ŞU ANKİ AKTİF ODAK]`, and `⏳ [BEKLEMEDE]`.
+- **Anti-Premature Termination Guard (Erken Kapanış Bariyeri)**:
+  - Eliminates "premature stopping" where models focus on one instruction and immediately terminate the task.
+  - Automatically intercepts early `finish` action calls or premature plain-text responses when pending subtasks remain.
+  - Advances subtask state sequentially and dynamically injects next-task steering prompts into the conversation.
+  - Replaced misleading tool observation advice urging premature task completion with subtask-aware progress feedback.
+- **Multi-Task Prompting Directive**:
+  - Enhanced system prompt with strict rules forbidding early termination until all subtasks in the checklist are completely satisfied.
+
 ## [1.1.0] - 2026-09-22
 
 ### Added

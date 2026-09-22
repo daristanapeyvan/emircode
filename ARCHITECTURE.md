@@ -214,3 +214,41 @@ The interface adheres to strict aesthetic guidelines:
 - **Zero AI Slop**: No excessive pulsating neon dots, no purple sparkles, no generic marketing template animations.
 - **Micro-Interactions**: Calm, single-state micro-spinners (`Loader2`) and quiet icons (`PanelRight`, `RotateCcw`, `FolderTree`).
 - **Consistent Message Bar**: The Code Composer shares 100% visual and functional identity with the Chat Composer (same border, focus ring, dynamic `scrollHeight` expansion, and square action button).
+
+---
+
+## 8. Multi-Instruction Task Decomposition & Anti-Premature Termination Guard
+
+A common defect in autonomous LLM agents is **Instruction Dropout / Premature Termination**: when a user specifies multiple tasks in a single prompt (e.g. *"Fix bug A, then implement feature B, update docs, and commit"*), models often resolve only the first task and prematurely call `finish` or write an exit summary.
+
+Emir Code implements a deterministic, multi-tiered safeguard:
+
+### 1. Goal Decomposition & Structured Checklist
+When `AgentEngine.runGoal` starts, `decomposeGoalIntoSubtasks` analyzes the prompt across numbered lists, bullet points, and sequential natural language clauses (Turkish and English: `daha sonra`, `ardından`, `ve son olarak`, `then`, `after that`, semicolons). It establishes a typed checklist:
+```ts
+export interface TaskChecklistItem {
+  id: string;
+  description: string;
+  status: 'pending' | 'in_progress' | 'completed';
+  startedAt?: number;
+  completedAt?: number;
+}
+```
+
+### 2. Live Checklist in Session Memory Ledger
+The dynamic memory ledger maintains and renders the checklist into the system context on every inference turn:
+```
+📋 GÖREV KONTROL LİSTESİ (TASK CHECKLIST - HEPSİ TAMAMLANMALIDIR):
+  1. ✅ [TAMAMLANDI] İlk hatayı düzelt
+  2. 🔄 [ŞU ANKİ AKTİF ODAK] Yeni kurucu üret
+  3. ⏳ [BEKLEMEDE] Belgeleri güncelle ve commit et
+```
+The dynamic advice string directs the model to focus strictly on the current active subtask and explicitly forbids invoking `finish` while other subtasks are pending.
+
+### 3. Anti-Premature Termination Interceptor
+If the model prematurely attempts to:
+- Invoke the `finish` tool action while subtasks remain pending, or
+- Output conversational plain text without a JSON tool action,
+
+the engine intercepts the action, marks the current subtask as completed, transitions the next subtask to `in_progress`, and returns a high-priority system feedback message (`[ERKEN BİTİRME ENGELİ]`) steering the model directly into the next subtask. Only when all subtasks have verified completion is the final `finished` status permitted.
+

@@ -7,6 +7,7 @@ import {
   ClarificationItem,
   AppliedTransaction,
   AgentMemoryLedger,
+  TaskChecklistItem,
 } from '@/types/agent';
 import { WorkspaceFileInfo } from '../../../electron/preload';
 import { OllamaChatMessage } from '@/types/ollama';
@@ -70,6 +71,60 @@ export function findClosestPath(requestedPath: string, projectFiles: string[]): 
   return null;
 }
 
+export function decomposeGoalIntoSubtasks(goal: string): TaskChecklistItem[] {
+  const trimmed = goal.trim();
+  if (!trimmed) return [];
+  const rawTasks: string[] = [];
+
+  // 1. Numbered lists (1. ... 2. ...)
+  if (/\b(?:1\.|1\))\s+/.test(trimmed)) {
+    const parts = trimmed.split(/(?=(?:^|\n|\s)\d+[\.\)]\s+)/);
+    for (const part of parts) {
+      const clean = part.replace(/^[\s\n]*\d+[\.\)]\s*/, '').trim();
+      if (clean.length > 0) rawTasks.push(clean);
+    }
+  }
+  // 2. Bullet points
+  else if (/(?:^|\n)\s*[-*•]\s+/.test(trimmed)) {
+    const lines = trimmed.split(/\n+/);
+    for (const line of lines) {
+      const clean = line.replace(/^\s*[-*•]\s+/, '').trim();
+      if (clean.length > 0) rawTasks.push(clean);
+    }
+  }
+  // 3. Sequential conjunctions & commas with verbs
+  else {
+    let normalized = trimmed
+      .replace(/,\s*(?:daha\s+sonra|ardından|sonrasında|ve\s+son\s+olarak|ve\s+sonra|sonra|then|after\s+that|and\s+then|finally)\s+/gi, ' <__SPLIT__> ')
+      .replace(/;\s*/g, ' <__SPLIT__> ')
+      .replace(/\n+/g, ' <__SPLIT__> ')
+      .replace(/(?:(?:elim|alım|in|ın|ün|un|iniz|ınız|yap|et|üret|güncelle|oluştur),\s*)/gi, (m) => m.slice(0, -2) + ' <__SPLIT__> ')
+      .replace(/\s+(?:ve\s+commit|and\s+commit|ve\s+test\s+et|and\s+test)\b/gi, (m) => ' <__SPLIT__> ' + m.trim())
+      .replace(/,\s*ve\s+|\s+ve\s+(?=[a-zğüşıöçA-ZĞÜŞİÖÇ]+(?:elim|alım|in|ın|ün|un|iniz|ınız|yap|et|oluştur|üret|yaz|güncelle|derle|commit)\b)/gi, ' <__SPLIT__> ')
+      .replace(/,\s*and\s+(?:finally|then)\s+/gi, ' <__SPLIT__> ');
+
+    const segments = normalized.split(' <__SPLIT__> ');
+    for (const seg of segments) {
+      let clean = seg.trim().replace(/^(?:ve\s+|and\s+|daha\s+sonra\s+|ardından\s+|sonrasında\s+|then\s+)/i, '').trim();
+      if (clean.length > 0) rawTasks.push(clean);
+    }
+  }
+
+  const tasks: TaskChecklistItem[] = [];
+  const list = rawTasks.length > 1 ? rawTasks : [trimmed];
+  list.forEach((desc, idx) => {
+    const cleanDesc = desc.replace(/^[,;.\s]+|[,;.\s]+$/g, '').trim();
+    if (cleanDesc.length >= 2) {
+      tasks.push({
+        id: `task_${idx + 1}`,
+        description: cleanDesc,
+        status: idx === 0 ? 'in_progress' : 'pending',
+      });
+    }
+  });
+  return tasks;
+}
+
 export function buildSystemPrompt(gitAvailable: boolean): string {
   const gitRule = gitAvailable
     ? `5. READ-ONLY GIT:\n   Git durumunu incelemek için 'read_git_status' veya 'read_git_diff' kullan.`
@@ -103,6 +158,10 @@ GÜVENLİK VE ÇALIŞMA KURALLARI:
 ${gitRule}
 6. KULLANICIYA DANIŞMA:
    Mimari bir seçimde veya kararsızlıkta 'ask_question' ile kullanıcıya soru sor. Sorduğun sorular ve kullanıcının verdiği cevaplar Hafıza Defteri'ne işlenecektir.
+7. ÇOKLU TALİMAT VE KONTROL LİSTESİ DİREKTİFİ (MULTI-TASK DIRECTIVE):
+   Kullanıcı birden fazla talimat verdiğinde (örneğin "şunu yap, sonra bunu yap, belgeleri güncelle ve commit et"), ASLA sadece ilkine odaklanıp erken durma.
+   Oturum Hafıza Defteri'ndeki "GÖREV KONTROL LİSTESİ"ni sırayla takip et. Bir alt görevi bitirdiğinde derhal sıradaki göreve geç.
+   TÜM alt görevler ve gereksinimler eksiksiz tamamlanmadan 'finish' eylemini KESİNLİKLE ÇAĞIRMA ve süreci erken sonlandırma.
 
 ÇIKTI FORMATI:
 Her adımda düşünceni <thought> ... </thought> etiketleri içine yaz.
@@ -202,7 +261,25 @@ export function formatLedgerBlock(ledger: AgentMemoryLedger): string {
       ? filesList.map((f) => `  - ${f} (${ledger.knownFiles[f].lastAction || 'incelendi'})`).join('\n')
       : '  (Henüz detaylı dosya okunmadı)';
 
-  // 3. Milestones & Task Progress
+  // 3. Task Checklist Progress
+  let checklistStr = '';
+  if (ledger.subtasks && ledger.subtasks.length > 0) {
+    checklistStr = ledger.subtasks
+      .map((t, idx) => {
+        const mark =
+          t.status === 'completed'
+            ? '✅ [TAMAMLANDI]'
+            : t.status === 'in_progress'
+            ? '🔄 [ŞU ANKİ AKTİF ODAK]'
+            : '⏳ [BEKLEMEDE]';
+        return `  ${idx + 1}. ${mark} ${t.description}`;
+      })
+      .join('\n');
+  } else {
+    checklistStr = '  (Tek aşamalı hedef)';
+  }
+
+  // 4. Milestones & Historical Progress
   let milestonesStr = '';
   if (ledger.milestones && ledger.milestones.length > 0) {
     milestonesStr = ledger.milestones
@@ -212,7 +289,7 @@ export function formatLedgerBlock(ledger: AgentMemoryLedger): string {
     milestonesStr = '  (Başlangıç aşaması)';
   }
 
-  // 4. User decisions
+  // 5. User decisions
   const decisionsStr =
     ledger.userDecisions.length > 0
       ? ledger.userDecisions
@@ -220,29 +297,34 @@ export function formatLedgerBlock(ledger: AgentMemoryLedger): string {
           .join('\n')
       : '  (Henüz soru sorulmadı)';
 
-  // 5. Applied changes
+  // 6. Applied changes
   const changesStr =
     ledger.appliedChanges.length > 0
       ? ledger.appliedChanges.map((c) => `  - ✅ ${c}`).join('\n')
       : '  (Henüz değişiklik uygulanmadı)';
 
-  // 6. Next step recommendation based on current phase and changes
+  // 7. Next step recommendation based on checklist and current phase
   let nextStepAdvice = '';
-  if (ledger.appliedChanges.length > 0) {
-    nextStepAdvice = "Gerekli kod değişiklikleri uygulandı. Başka değiştirilecek dosya yoksa görevi tamamlamak için 'finish' eylemini çağırın veya gerekiyorsa 'propose_command' ile test edin. ASLA başa dönüp az önce değiştirdiğiniz dosyaları tekrar okumayın veya aynı değişikliği tekrar yapmayın!";
+  const pendingSubtask = ledger.subtasks?.find((t) => t.status === 'pending' || t.status === 'in_progress');
+  if (pendingSubtask) {
+    nextStepAdvice = `Şu anki aktif alt göreve odaklanın: "${pendingSubtask.description}". Henüz tüm alt görevler tamamlanmadığı için KESİNLİKLE 'finish' ÇAĞIRMAYIN! Bu görevi tamamlayacak inceleme, düzenleme veya komut adımlarını uygulayın.`;
+  } else if (ledger.subtasks && ledger.subtasks.length > 0 && ledger.subtasks.every((t) => t.status === 'completed')) {
+    nextStepAdvice = "Tüm alt görevler ve talimatlar başarıyla tamamlandı. Artık 'finish' eylemini çağırarak görevi sonuçlandırabilirsiniz.";
+  } else if (ledger.appliedChanges.length > 0) {
+    nextStepAdvice = "Gerekli kod değişiklikleri uygulandı. Başka değiştirilecek dosya veya bekleyen talimat yoksa 'finish' çağırabilir veya gerekiyorsa 'propose_command' ile test edin. ASLA başa dönüp az önce değiştirdiğiniz dosyaları tekrar okumayın veya aynı değişikliği tekrar yapmayın!";
   } else if (filesList.length > 0) {
     nextStepAdvice = "İlgili dosyalar okundu ve incelendi. Şimdi hedefe uygun olarak 'propose_edit' veya 'propose_create' ile çözümü diske uygulayın.";
   } else {
     nextStepAdvice = "Hedefle ilgili dosyayı yukarıdaki 'PROJE DOSYA AĞACI' listesinden tespit edip 'read_file' ile inceleyin.";
   }
 
-  // 7. Unavailable binaries
+  // 8. Unavailable binaries
   const unavailStr =
     ledger.unavailableBinaries && ledger.unavailableBinaries.length > 0
       ? `\n🔴 KULLANILAMAYAN / KURULU OLMAYAN KOMUTLAR (KESİNLİKLE ÇAĞIRMA!):\n${ledger.unavailableBinaries.map((b) => `  - ${b} (Sistemde mevcut değil veya hata verdi)`).join('\n')}\n`
       : '';
 
-  // 8. Invalid paths
+  // 9. Invalid paths
   const invalidPathsStr =
     ledger.invalidPaths && ledger.invalidPaths.length > 0
       ? `\n❌ DİSKTE BULUNAMAYAN HATALI YOLLAR (TEKRAR DENEME!):\n${ledger.invalidPaths.map((p) => `  - ${p}`).join('\n')}\n`
@@ -253,13 +335,16 @@ export function formatLedgerBlock(ledger: AgentMemoryLedger): string {
 HEDEF: ${ledger.goal}
 AKTİF AŞAMA: ${ledger.currentPhase ? ledger.currentPhase.toUpperCase() : 'INVESTIGATION'}
 
+📋 GÖREV KONTROL LİSTESİ (TASK CHECKLIST - HEPSİ TAMAMLANMALIDIR):
+${checklistStr}
+
 📁 PROJE DOSYA AĞACI (GERÇEK DİSKTEKİ DOSYALAR - SADECE BU LİSTEDEN SEÇİN):
 ${treeStr}
 
 🔍 İNCELENEN VE BİLİNEN DOSYALAR:
 ${filesStr}
 
-✅ TAMAMLANAN AŞAMALAR (GERİYE DÖNÜP AYNI ŞEYLERİ TEKRARLAMA!):
+✅ TAMAMLANAN GEÇMİŞ AŞAMALAR:
 ${milestonesStr}
 
 📝 UYGULANMIŞ DEĞİŞİKLİKLER:
@@ -275,6 +360,7 @@ ${nextStepAdvice}
 1. Hafıza defterindeki soruları ASLA kullanıcıya tekrar sorma.
 2. Zaten tamamlanmış adımları (okunan dosyayı tekrar okumak, yapılan düzenlemeyi tekrar yapmak) ASLA TEKRARLAMA.
 3. Yalnızca 'PROJE DOSYA AĞACI'nda listelenen gerçek dosya yollarını kullan, asla dosya yolu uydurma.
+4. Kontrol listesindeki tüm maddeler bitmeden asla 'finish' çağırma.
 `.trim();
 }
 
@@ -428,6 +514,7 @@ export class AgentEngine {
       projectFiles = [];
     }
 
+    const subtasks = decomposeGoalIntoSubtasks(goal);
     const ledger: AgentMemoryLedger = {
       goal,
       projectTree: projectFiles,
@@ -438,8 +525,22 @@ export class AgentEngine {
       unavailableBinaries: gitAvailable ? [] : ['git'],
       invalidPaths: [],
       milestones: [],
+      subtasks,
+      activeSubtaskId: subtasks.length > 0 ? subtasks[0].id : undefined,
       currentPhase: 'investigation',
     };
+
+    if (subtasks.length > 1) {
+      callbacks.onStep({
+        id: `step_tasks_init_${Date.now()}`,
+        timestamp: Date.now(),
+        type: 'system_notice',
+        content: `📋 Çoklu Görev Ayrıştırıldı (${subtasks.length} Alt Görev):\n${subtasks
+          .map((s, i) => `  ${i + 1}. [${s.status === 'in_progress' ? 'Aktif Odak' : 'Beklemede'}] ${s.description}`)
+          .join('\n')}`,
+        status: 'success',
+      });
+    }
 
     const systemPrompt = buildSystemPrompt(gitAvailable);
 
@@ -592,6 +693,23 @@ export class AgentEngine {
         const parsed = ToolDispatcher.parseActionFromResponse(fullResponse);
 
         if (parsed.type === 'unknown' || !parsed.payload) {
+          const incompleteSubtasks = ledger.subtasks?.filter((t) => t.status !== 'completed') || [];
+          if (incompleteSubtasks.length > 0 && consecutiveErrors < MAX_CONSECUTIVE_ERRORS) {
+            consecutiveErrors++;
+            const nextTask = incompleteSubtasks.find((t) => t.status === 'in_progress') || incompleteSubtasks[0];
+            const observation = `[ERKEN BİTİRME ENGELİ]: Yanıtınızda bir JSON araç çağrısı bulunamadı ve henüz tamamlanmamış görevler var!\n⏳ Aktif/Bekleyen Görev: "${nextTask.description}"\nLütfen görevi erken sonlandırmayın. Sıradaki adımı gerçekleştirmek için geçerli bir JSON araç çağrısı (ör. 'read_file', 'propose_edit', 'propose_command') üretin.`;
+            callbacks.onStep({
+              id: `step_guard_txt_${Date.now()}`,
+              timestamp: Date.now(),
+              type: 'system_notice',
+              content: `Erken Bitirme Engellendi: Bekleyen alt görevler mevcut ("${nextTask.description}").`,
+              status: 'rejected',
+            });
+            conversation.push({ role: 'assistant', content: fullResponse });
+            conversation.push({ role: 'user', content: observation });
+            continue;
+          }
+
           // Plain text final answer
           callbacks.onStep({
             id: `step_txt_${Date.now()}`,
@@ -655,7 +773,7 @@ export class AgentEngine {
             lastAction.key === reqPath &&
             ledger.knownFiles[reqPath]
           ) {
-            const observation = `[DÖNGÜ KORUMASI]: "${reqPath}" dosyasını zaten az önce okudunuz ve içeriği hafızanızda mevcuttur. Aynı dosyayı tekrar okumak yerine kod değişikliği önerin ('propose_edit') veya hedefinizi tamamlayın ('finish').`;
+            const observation = `[DÖNGÜ KORUMASI]: "${reqPath}" dosyasını zaten az önce okudunuz ve içeriği hafızanızda mevcuttur. Aynı dosyayı tekrar okumak yerine kod değişikliği önerin ('propose_edit') veya bekleyen sıradaki alt göreve geçin.`;
             callbacks.onStep({
               id: `step_loop_read_${Date.now()}`,
               timestamp: Date.now(),
@@ -677,7 +795,7 @@ export class AgentEngine {
             (a) => a.action === 'propose_edit_success' && a.key === editSig
           );
           if (alreadyApplied) {
-            const observation = `[DÖNGÜ KORUMASI]: Bu kod değişikliği "${filePath}" dosyasına zaten başarıyla uygulandı! Başa sarıp aynı değişikliği tekrar teklif etmeyin. Eğer tüm değişiklikler bittiyse 'finish' eylemini çağırarak görevi tamamlayın.`;
+            const observation = `[DÖNGÜ KORUMASI]: Bu kod değişikliği "${filePath}" dosyasına zaten başarıyla uygulandı! Başa sarıp aynı değişikliği tekrar teklif etmeyin. Eğer bekleyen başka alt görevler varsa sıradaki göreve geçin; tüm görevler bittiyse 'finish' çağırın.`;
             callbacks.onStep({
               id: `step_loop_edit_${Date.now()}`,
               timestamp: Date.now(),
@@ -703,7 +821,7 @@ export class AgentEngine {
             a2.action === a4.action &&
             a2.key === a4.key
           ) {
-            const observation = `[SİSTEM MÜDAHALESİ]: Sürekli tekrarlayan bir eylem döngüsüne girdiniz (${a2.action} <-> ${a1.action}). Lütfen bu eylemleri tekrarlamayı bırakın. Hedefiniz tamamlandıysa 'finish' çağırın veya kullanıcıya soru sormak için 'ask_question' kullanın.`;
+            const observation = `[SİSTEM MÜDAHALESİ]: Sürekli tekrarlayan bir eylem döngüsüne girdiniz (${a2.action} <-> ${a1.action}). Lütfen bu eylemleri tekrarlamayı bırakın. Sıradaki alt göreve geçin veya kullanıcıya soru sormak için 'ask_question' kullanın.`;
             callbacks.onStep({
               id: `step_loop_cycle_${Date.now()}`,
               timestamp: Date.now(),
@@ -719,6 +837,42 @@ export class AgentEngine {
 
         // Action Handlers
         if (parsed.type === 'finish') {
+          const incompleteSubtasks = ledger.subtasks?.filter((t) => t.status !== 'completed') || [];
+          if (incompleteSubtasks.length > 1) {
+            // Mark the active/first incomplete subtask as completed
+            const currentTask = incompleteSubtasks.find((t) => t.status === 'in_progress') || incompleteSubtasks[0];
+            currentTask.status = 'completed';
+            currentTask.completedAt = Date.now();
+
+            const remaining = ledger.subtasks.filter((t) => t.status !== 'completed');
+            if (remaining.length > 0) {
+              const nextTask = remaining[0];
+              nextTask.status = 'in_progress';
+              nextTask.startedAt = Date.now();
+              ledger.activeSubtaskId = nextTask.id;
+
+              const observation = `[ERKEN BİTİRME ENGELİ]: "${currentTask.description}" tamamlandı olarak kaydedildi. Ancak kullanıcının hedefindeki tüm görevler henüz bitmedi!\n👉 SIRADAKİ ALT GÖREV: "${nextTask.description}"\nLütfen süreci sonlandırmayın ve sıradaki göreve devam edin.`;
+              callbacks.onStep({
+                id: `step_subtask_prog_${Date.now()}`,
+                timestamp: Date.now(),
+                type: 'system_notice',
+                content: `Alt Görev Tamamlandı: "${currentTask.description}". Sıradaki görev: "${nextTask.description}".`,
+                status: 'success',
+              });
+              conversation.push({ role: 'assistant', content: fullResponse });
+              conversation.push({ role: 'user', content: observation });
+              continue;
+            }
+          }
+
+          // Mark all subtasks as completed if finishing
+          if (ledger.subtasks) {
+            for (const t of ledger.subtasks) {
+              t.status = 'completed';
+              if (!t.completedAt) t.completedAt = Date.now();
+            }
+          }
+
           callbacks.onStep({
             id: `step_fin_${Date.now()}`,
             timestamp: Date.now(),
@@ -749,7 +903,7 @@ export class AgentEngine {
           if (readRes?.success && readRes.content !== undefined) {
             consecutiveErrors = 0;
             const wrapped = wrapUntrustedFileContent(filePath, readRes.content.slice(0, 15000));
-            observation = `${wrapped}\n\n[İLERLEME BİLGİSİ]: "${filePath}" başarıyla okundu. Şimdi hedefe uygun olarak 'propose_edit' ile değişikliği önerin veya işiniz bittiyse 'finish' çağırın.`;
+            observation = `${wrapped}\n\n[İLERLEME BİLGİSİ]: "${filePath}" başarıyla okundu. Şimdi aktif alt göreve uygun olarak 'propose_edit' ile değişikliği önerin.`;
             ledger.knownFiles[filePath] = {
               size: readRes.content.length,
               lastAction: 'okundu',
@@ -1039,7 +1193,7 @@ export class AgentEngine {
                 conversation.push({ role: 'assistant', content: fullResponse });
                 conversation.push({
                   role: 'user',
-                  content: `[BAŞARILI]: "${filePath}" yeni dosyası oluşturuldu ve diske kaydedildi. Bu adımı tekrar etmeyin. Göreviniz tamamlandıysa 'finish' çağırın.`,
+                  content: `[BAŞARILI]: "${filePath}" yeni dosyası oluşturuldu ve diske kaydedildi. Bu adımı tekrar etmeyin. Eğer bekleyen başka alt görevler varsa sıradaki göreve geçin. Tüm görevler tamamlandıysa 'finish' çağırın.`,
                 });
               } else {
                 consecutiveErrors++;
@@ -1198,7 +1352,7 @@ export class AgentEngine {
                 conversation.push({ role: 'assistant', content: fullResponse });
                 conversation.push({
                   role: 'user',
-                  content: `[BAŞARILI]: Değişiklik "${filePath}" dosyasına başarıyla uygulandı ve diske kaydedildi. Bu adımı tekrar etmeyin. Başka değiştirilecek dosya yoksa artık 'finish' eylemini çağırarak görevi tamamlayın!`,
+                  content: `[BAŞARILI]: Değişiklik "${filePath}" dosyasına başarıyla uygulandı ve diske kaydedildi. Bu adımı tekrar etmeyin. Eğer bekleyen başka alt görevler varsa sıradaki göreve devam edin. Tüm görevler tamamlandıysa 'finish' çağırın!`,
                 });
               } else {
                 consecutiveErrors++;
@@ -1328,7 +1482,7 @@ export class AgentEngine {
                 conversation.push({ role: 'assistant', content: fullResponse });
                 conversation.push({
                   role: 'user',
-                  content: `[Kullanıcı Onayı]: "${filePath}" dosyası silindi. Başka işlem yoksa 'finish' çağırın.`,
+                  content: `[Kullanıcı Onayı]: "${filePath}" dosyası silindi. Eğer bekleyen başka alt görevler varsa sıradaki göreve devam edin. Tüm işlemler bittiyse 'finish' çağırın.`,
                 });
               } else {
                 consecutiveErrors++;
@@ -1422,7 +1576,7 @@ export class AgentEngine {
 
             if (cmdRes?.success) {
               consecutiveErrors = 0;
-              observation = `[Komut Çıktısı (Exit Code: 0)]:\n${cmdRes.output || '(Çıktı yok)'}\n\n[İLERLEME BİLGİSİ]: Komut başarıyla çalıştı. Görevi tamamlamak için 'finish' çağırabilirsiniz.`;
+              observation = `[Komut Çıktısı (Exit Code: 0)]:\n${cmdRes.output || '(Çıktı yok)'}\n\n[İLERLEME BİLGİSİ]: Komut başarıyla çalıştı. Eğer bekleyen başka alt görevler varsa sıradaki göreve geçin. Tüm görevler tamamlandıysa 'finish' çağırabilirsiniz.`;
               ledger.milestones.push({
                 id: `m_cmd_${Date.now()}`,
                 description: `Komut çalıştırıldı: ${binary} ${args.join(' ')}`,
@@ -1452,7 +1606,7 @@ export class AgentEngine {
                 if (!ledger.unavailableBinaries.includes(binary)) {
                   ledger.unavailableBinaries.push(binary);
                 }
-                observation = `[KOMUT BULUNAMADI]: "${binary}" sistemde kurulu veya erişilebilir değil! Bu komut kara listeye alındı. Lütfen '${binary}' komutunu tekrar ÇAĞIRMAYIN. Göreve dosya inceleme/düzenleme araçlarıyla devam edin veya 'finish' çağırın.`;
+                observation = `[KOMUT BULUNAMADI]: "${binary}" sistemde kurulu veya erişilebilir değil! Bu komut kara listeye alındı. Lütfen '${binary}' komutunu tekrar ÇAĞIRMAYIN. Göreve dosya inceleme/düzenleme araçlarıyla devam edin.`;
               } else {
                 observation = `[Komut Hatası (Exit Code: ${cmdRes?.exitCode})]:\n${cmdRes?.output || ''}\n${cmdRes?.error || ''}`;
               }
