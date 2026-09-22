@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Search, Plus, Trash2, Edit3, MessageSquare, Code2, Check, X } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
+import { useAgentStore } from '@/stores/agentStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useUIStore } from '@/stores/uiStore';
 import { storageService } from '@/lib/storage/StorageService';
@@ -76,28 +77,40 @@ export const HistorySidebar: React.FC = () => {
     if (settings.confirmDestructive) {
       setChatToDelete({ id: chat.id, title: chat.title });
     } else {
+      if (chat.id === activeChatId && chat.mode === 'agent') {
+        useAgentStore.getState().clearSession();
+      }
       deleteChat(chat.id);
     }
   };
 
   const handleConfirmDelete = () => {
     if (chatToDelete) {
+      if (chatToDelete.id === activeChatId) {
+        useAgentStore.getState().clearSession();
+      }
       deleteChat(chatToDelete.id);
       setChatToDelete(null);
     }
   };
 
-  const handleSelectChat = (chat: Chat) => {
+  const handleSelectChat = async (chat: Chat) => {
     if (chat.mode === 'agent') {
       setActiveAppMode('agent');
+      selectChat(chat.id);
+      await useAgentStore.getState().loadSession(chat.id);
     } else {
       setActiveAppMode('chat');
+      selectChat(chat.id);
     }
-    selectChat(chat.id);
   };
 
   const handleCreateNew = () => {
-    createNewChat(undefined, activeAppMode);
+    if (activeAppMode === 'agent') {
+      useAgentStore.getState().clearSession();
+    } else {
+      createNewChat(undefined, 'chat');
+    }
   };
 
   function renderGroup(title: string, items: Chat[]) {

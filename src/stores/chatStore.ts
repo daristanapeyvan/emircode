@@ -50,29 +50,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
   init: async () => {
     await storageService.init();
     const chats = storageService.getChats();
-    const defaultModel = useModelStore.getState().selectedModel || 'qwen3:8b';
-
-    if (chats.length > 0) {
-      const active = chats[0];
-      const messages = storageService.getMessages(active.id);
-      set({ chats, activeChatId: active.id, messages });
-      if (active.model) {
-        useModelStore.getState().selectModel(active.model);
-      }
-    } else {
-      // Create initial chat
-      const newId = `chat_${Date.now()}`;
-      const initialChat: Chat = {
-        id: newId,
-        title: 'Yeni Sohbet',
-        model: defaultModel,
-        mode: 'chat',
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      };
-      storageService.saveChat(initialChat);
-      set({ chats: [initialChat], activeChatId: newId, messages: [] });
+    if (chats.length > 0 && chats[0].model) {
+      useModelStore.getState().selectModel(chats[0].model);
     }
+    // Clean slate on startup: do not pre-select or highlight any conversation
+    set({ chats, activeChatId: null, messages: [] });
   },
 
   selectChat: (id: string) => {
@@ -144,8 +126,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   sendMessage: async (content: string) => {
-    const activeId = get().activeChatId;
-    if (!activeId) return;
+    let activeId = get().activeChatId;
+    if (!activeId) {
+      activeId = get().createNewChat();
+    }
 
     let chat = storageService.getChat(activeId);
     if (!chat) return;
@@ -242,13 +226,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
           // Refresh running models
           useModelStore.getState().fetchRunning();
-
-          // Flash window and notify user when generation finishes
-          window.electronAPI?.notifyUser?.({
-            title: 'Emir Code - Yanıt Tamamlandı',
-            body: 'Yerel model yanıt üretimini tamamladı.',
-            flash: true,
-          });
         },
         onError: (error: Error) => {
           set((state) => {

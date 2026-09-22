@@ -68,6 +68,7 @@ export interface ElectronAPI {
 
   // Emir Code: Enterprise Workspace & Coding Agent Security Layer
   openWorkspaceDialog: () => Promise<{ success: boolean; rootPath?: string; folderName?: string; error?: string }>;
+  setWorkspacePath: (targetPath: string) => Promise<{ success: boolean; rootPath?: string; folderName?: string; error?: string }>;
   getWorkspaceStatus: () => Promise<{ hasActiveWorkspace: boolean; rootPath?: string; folderName?: string }>;
   listWorkspaceFiles: (options?: { subPath?: string; maxDepth?: number }) => Promise<{ success: boolean; files?: WorkspaceFileInfo[]; error?: string }>;
   readWorkspaceFile: (relativePath: string) => Promise<{ success: boolean; content?: string; hash?: string; error?: string }>;
@@ -129,6 +130,7 @@ const electronAPI: ElectronAPI = {
 
   // Emir Code Workspace Bridge
   openWorkspaceDialog: () => ipcRenderer.invoke('workspace:open'),
+  setWorkspacePath: (targetPath) => ipcRenderer.invoke('workspace:setPath', targetPath),
   getWorkspaceStatus: () => ipcRenderer.invoke('workspace:status'),
   listWorkspaceFiles: (options) => ipcRenderer.invoke('workspace:listFiles', options),
   readWorkspaceFile: (relativePath) => ipcRenderer.invoke('workspace:readFile', relativePath),

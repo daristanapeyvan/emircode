@@ -40,6 +40,7 @@ export const App: React.FC = () => {
       await initSettings();
       await checkConnection();
       await initChat();
+      await useAgentStore.getState().init();
     })();
   }, []);
 

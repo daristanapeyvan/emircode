@@ -252,3 +252,14 @@ If the model prematurely attempts to:
 
 the engine intercepts the action, marks the current subtask as completed, transitions the next subtask to `in_progress`, and returns a high-priority system feedback message (`[ERKEN BİTİRME ENGELİ]`) steering the model directly into the next subtask. Only when all subtasks have verified completion is the final `finished` status permitted.
 
+---
+
+## 9. Session Persistence & Workspace State Synchronization
+
+Emir Code guarantees zero state loss across application restarts through unified JSON schema storage:
+- **Session Serialization**: Every coding agent session (`mode: 'agent'`) serializes its goal, execution timeline (`AgentStep[]`), system logs, and transaction rollback snapshots directly to disk via atomic write operations.
+- **Dynamic Workspace Reconnection**: Selecting any historical session automatically triggers the native `workspace:setPath` IPC handler, validating and binding the project folder and refreshing the filesystem tree in real time.
+- **Smart Directory Memory**: The application remembers the last active project folder, allowing instant continuation upon reboot.
+- **Startup Clean Slate**: The application launches in a clean, unselected state (`activeChatId: null`), eliminating misleading visual selection of previous sessions while maintaining instantaneous access through the unified history sidebar.
+
+

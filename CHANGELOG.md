@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-09-22
+
+### Added
+- **Emir Code Workspace & Session Persistence (Oturum ve Proje Klasörü Kalıcılığı)**:
+  - Agent conversations (`mode: 'agent'`) now fully persist their workspace folder (`workspaceRoot`), goal, multi-step execution timeline (`agentSteps`), system logs (`executionLogs`), and rollback transaction history (`appliedTransactions`).
+  - Closing and reopening the app seamlessly restores the previously opened project directory without requiring re-selection.
+  - Selecting any historical coding agent session dynamically restores its project folder, refreshes the file explorer tree, and renders its complete historical timeline.
+  - Added native `workspace:setPath` IPC handler with path existence and directory verification.
+
+### Fixed
+- **Startup Chat Highlighting Bug (Açılışta Sahte Sohbet Vurgulaması Giderildi)**:
+  - Fixed issue where the first conversation in history was automatically selected on application launch (`activeChatId: null`), creating a false impression that a chat was open while the main viewport was clean.
+  - Clicking "Yeni Görev" or "Yeni Sohbet" cleanly resets the active session without pre-highlighting other sessions.
+  - Automatic on-demand chat creation when typing a prompt in composer without an active session.
+
+### Changed
+- **Long-Running Notification Throttling (Uzun Süreli Görevler İçin Akıllı Bildirim)**:
+  - Removed noisy desktop toast notifications from regular chat interactions.
+  - "Emir Code - Yanıt Tamamlandı" native desktop notification is now strictly limited to long-running Emir Code sessions (task execution duration >= 20 seconds).
+  - Silenced repetitive command execution desktop toasts to prevent toast notification spam.
+
 ## [1.2.0] - 2026-09-22
 
 ### Added

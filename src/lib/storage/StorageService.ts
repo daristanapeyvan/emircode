@@ -9,6 +9,8 @@ export interface StorageData {
   presets: GenerationPreset[];
   systemPrompts: SystemPromptPreset[];
   settings: AppSettings;
+  lastWorkspaceRoot?: string;
+  lastWorkspaceName?: string;
 }
 
 const STORAGE_VERSION = 1;
@@ -47,6 +49,8 @@ export class StorageService {
           presets: parsed.presets || DEFAULT_PRESETS,
           systemPrompts: parsed.systemPrompts || DEFAULT_SYSTEM_PROMPTS,
           settings: { ...DEFAULT_SETTINGS, ...(parsed.settings || {}) },
+          lastWorkspaceRoot: parsed.lastWorkspaceRoot,
+          lastWorkspaceName: parsed.lastWorkspaceName,
         };
       }
     } catch (err) {
@@ -56,6 +60,20 @@ export class StorageService {
     this.isLoaded = true;
     return this.data;
   }
+
+  getLastWorkspace(): { rootPath?: string; folderName?: string } {
+    return {
+      rootPath: this.data.lastWorkspaceRoot,
+      folderName: this.data.lastWorkspaceName,
+    };
+  }
+
+  setLastWorkspace(rootPath?: string, folderName?: string) {
+    this.data.lastWorkspaceRoot = rootPath;
+    this.data.lastWorkspaceName = folderName;
+    this.save();
+  }
+
 
   getData(): StorageData {
     return this.data;

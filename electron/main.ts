@@ -675,6 +675,31 @@ ipcMain.handle('workspace:status', async () => {
   };
 });
 
+ipcMain.handle('workspace:setPath', async (_, targetPath: string) => {
+  if (!targetPath || typeof targetPath !== 'string') {
+    return { success: false, error: 'Geçersiz klasör yolu.' };
+  }
+  try {
+    const resolved = path.resolve(targetPath);
+    if (!fs.existsSync(resolved)) {
+      return { success: false, error: 'Klasör bulunamadı.' };
+    }
+    const stat = await fs.promises.stat(resolved);
+    if (!stat.isDirectory()) {
+      return { success: false, error: 'Belirtilen yol bir klasör değil.' };
+    }
+    currentWorkspaceRoot = resolved;
+    canonicalWorkspaceRoot = await fs.promises.realpath(resolved);
+    return {
+      success: true,
+      rootPath: currentWorkspaceRoot,
+      folderName: path.basename(currentWorkspaceRoot),
+    };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Klasör açılamadı.' };
+  }
+});
+
 // Recursive safe file tree reader
 async function scanDirectoryTree(dirPath: string, currentDepth: number, maxDepth: number): Promise<any[]> {
   if (currentDepth > maxDepth || !canonicalWorkspaceRoot) return [];

@@ -68,6 +68,11 @@ Customize the autonomous threshold to match your personal workflow while keeping
 - **Live Memory Checklist**: Tracks subtasks in real-time (`[TAMAMLANDI]`, `[ŞU ANKİ ODAK]`, `[BEKLEMEDE]`) in the system context.
 - **Interception Safeguard**: Automatically intercepts early `finish` action calls or conversational plain-text exits, steering the model systematically until every subtask is satisfied.
 
+### 💾 9. Workspace & Session Persistence (Oturum ve Klasör Kalıcılığı)
+- **Zero State Loss**: Coding agent sessions persist their complete multi-step execution timeline, logs, applied transaction snapshots, and target folder directory across app restarts.
+- **Smart Directory Memory**: Remembers the last opened workspace directory and restores historical sessions along with their respective project trees on demand.
+- **Startup Clean State**: Launching the app presents a clean, unselected slate without false visual session locks, while maintaining full one-click historical accessibility.
+
 ---
 
 ## 🏛️ Architecture Overview

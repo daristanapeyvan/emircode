@@ -1,4 +1,5 @@
 import { GenerationOptions } from './ollama';
+import { AgentStep, AppliedTransaction } from './agent';
 
 export interface Attachment {
   id: string;
@@ -38,9 +39,15 @@ export interface Chat {
   model: string;
   mode?: 'chat' | 'agent';
   agentGoal?: string;
+  workspaceRoot?: string;
+  workspaceName?: string;
+  agentSteps?: AgentStep[];
+  executionLogs?: string[];
+  appliedTransactions?: AppliedTransaction[];
   systemPrompt?: string;
   presetId?: string;
   options?: GenerationOptions;
   createdAt: number;
   updatedAt: number;
 }
+

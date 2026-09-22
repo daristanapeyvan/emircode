@@ -9,6 +9,7 @@ import {
 } from '@/types/agent';
 import { WorkspaceFileInfo } from '../../electron/preload';
 import { agentEngine } from '@/lib/agent/AgentEngine';
+import { storageService } from '@/lib/storage/StorageService';
 import { useModelStore } from './modelStore';
 import { useChatStore } from './chatStore';
 import { useSettingsStore } from './settingsStore';
@@ -22,6 +23,7 @@ interface AgentState {
   activeTabId: string;
   agentStatus: AgentStatus;
   currentGoal: string;
+  taskStartTime: number | null;
   steps: AgentStep[];
   executionLogs: string[];
   appliedTransactions: AppliedTransaction[];
@@ -47,6 +49,8 @@ interface AgentState {
   toggleInlineTranscript: () => void;
   setInlineTranscriptOpen: (open: boolean) => void;
   init: () => Promise<void>;
+  persistCurrentSession: () => void;
+  loadSession: (chatId: string) => Promise<void>;
   openWorkspaceDialog: () => Promise<void>;
   refreshFiles: () => Promise<void>;
   openFile: (relativePath: string) => Promise<void>;
@@ -95,6 +99,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   activeTabId: 'timeline',
   agentStatus: 'idle',
   currentGoal: '',
+  taskStartTime: null,
   steps: [],
   executionLogs: [],
   appliedTransactions: [],
@@ -117,9 +122,77 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   commandResolver: null,
   questionResolver: null,
 
+  persistCurrentSession: () => {
+    const activeChatId = useChatStore.getState().activeChatId;
+    if (!activeChatId) return;
+    const chat = storageService.getChat(activeChatId);
+    if (!chat || chat.mode !== 'agent') return;
+
+    chat.workspaceRoot = get().workspaceRoot || undefined;
+    chat.workspaceName = get().workspaceName || undefined;
+    chat.agentGoal = get().currentGoal || undefined;
+    chat.agentSteps = get().steps;
+    chat.executionLogs = get().executionLogs;
+    chat.appliedTransactions = get().appliedTransactions;
+    storageService.saveChat(chat);
+  },
+
+  loadSession: async (chatId: string) => {
+    const chat = storageService.getChat(chatId);
+    if (!chat) return;
+
+    // 1. Restore workspace directory if stored
+    if (chat.workspaceRoot && window.electronAPI?.setWorkspacePath) {
+      const res = await window.electronAPI.setWorkspacePath(chat.workspaceRoot);
+      if (res.success && res.rootPath) {
+        set({
+          workspaceRoot: res.rootPath,
+          workspaceName: res.folderName || 'Project',
+        });
+        storageService.setLastWorkspace(res.rootPath, res.folderName);
+        await get().refreshFiles();
+      } else {
+        set({
+          workspaceRoot: null,
+          workspaceName: null,
+          workspaceFiles: [],
+        });
+      }
+    }
+
+    // 2. Restore steps, logs, transactions, and goal
+    set({
+      currentGoal: chat.agentGoal || (chat.title !== 'Yeni Görev' ? chat.title : ''),
+      steps: chat.agentSteps || [],
+      executionLogs: chat.executionLogs || [],
+      appliedTransactions: chat.appliedTransactions || [],
+      agentStatus: 'idle',
+      activeTabId: 'timeline',
+      activeFile: null,
+      openFiles: [],
+      activeStreamText: '',
+      isStreamingResponse: false,
+      taskStartTime: null,
+    });
+  },
+
   init: async () => {
     if (!window.electronAPI) return;
-    const status = await window.electronAPI.getWorkspaceStatus();
+    let status = await window.electronAPI.getWorkspaceStatus();
+    if (!status.hasActiveWorkspace) {
+      const lastWs = storageService.getLastWorkspace();
+      if (lastWs?.rootPath && window.electronAPI.setWorkspacePath) {
+        const res = await window.electronAPI.setWorkspacePath(lastWs.rootPath);
+        if (res.success && res.rootPath) {
+          status = {
+            hasActiveWorkspace: true,
+            rootPath: res.rootPath,
+            folderName: res.folderName,
+          };
+        }
+      }
+    }
+
     if (status.hasActiveWorkspace && status.rootPath) {
       set({
         workspaceRoot: status.rootPath,
@@ -140,6 +213,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         openFiles: [],
         activeTabId: 'timeline',
       });
+      storageService.setLastWorkspace(res.rootPath, res.folderName);
+      get().persistCurrentSession();
       await get().refreshFiles();
     }
   },
@@ -232,13 +307,15 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       chatStore.updateChatTitle(activeChatId!, trimmed.slice(0, 32));
     }
 
+    const startTime = Date.now();
     set({
       currentGoal: trimmed,
       agentStatus: 'thinking',
+      taskStartTime: startTime,
       steps: [
         {
-          id: `step_init_${Date.now()}`,
-          timestamp: Date.now(),
+          id: `step_init_${startTime}`,
+          timestamp: startTime,
           type: 'system_notice',
           content: `Görev Başlatıldı: "${trimmed}" (Model: ${selectedModel})`,
           status: 'success',
@@ -246,6 +323,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       ],
       executionLogs: [`[${new Date().toLocaleTimeString()}] Görev başlatıldı: ${trimmed}`],
     });
+    get().persistCurrentSession();
 
     const securityProfile = useSettingsStore.getState().settings.securityProfile || 'strict';
     const timeoutMinutes = useSettingsStore.getState().settings.circuitBreakerMinutes || 30;
@@ -261,18 +339,26 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             activeStreamText: '',
             isStreamingResponse: false,
           }));
+          get().persistCurrentSession();
         },
         onStatusChange: (status: AgentStatus) => {
           set({ agentStatus: status });
           if (status === 'finished') {
-            window.electronAPI?.notifyUser?.({
-              title: 'Emir Code - Görev Tamamlandı',
-              body: `"${get().currentGoal || 'Görev'}" başarıyla tamamlandı.`,
-              flash: true,
-            });
+            const start = get().taskStartTime;
+            const durationMs = start ? Date.now() - start : 0;
+            // Bildirim sadece çok uzun süren Emir Code oturumlarında gönderilecek (>= 20 saniye)
+            if (durationMs >= 20000) {
+              const seconds = Math.round(durationMs / 1000);
+              window.electronAPI?.notifyUser?.({
+                title: 'Emir Code - Yanıt Tamamlandı',
+                body: `"${get().currentGoal || 'Görev'}" başarıyla tamamlandı (${seconds} sn).`,
+                flash: true,
+              });
+            }
+            get().persistCurrentSession();
           }
           if (status === 'finished' || status === 'error' || status === 'idle') {
-            set({ isStreamingResponse: false });
+            set({ isStreamingResponse: false, taskStartTime: null });
           }
         },
         onLog: (msg: string) => {
@@ -325,6 +411,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         },
         onTransactionApplied: (tx: AppliedTransaction) => {
           set((state) => ({ appliedTransactions: [tx, ...state.appliedTransactions] }));
+          get().persistCurrentSession();
           get().refreshFiles();
         },
       },
@@ -370,9 +457,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
 
   clearSession: () => {
+    useChatStore.setState({ activeChatId: null, messages: [] });
     set({
       currentGoal: '',
       agentStatus: 'idle',
+      taskStartTime: null,
       steps: [],
       executionLogs: [],
       activeStreamText: '',

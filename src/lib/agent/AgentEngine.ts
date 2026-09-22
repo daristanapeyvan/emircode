@@ -1620,13 +1620,6 @@ export class AgentEngine {
               });
             }
 
-            // Flash window and notify user that command execution has finished
-            window.electronAPI?.notifyUser?.({
-              title: cmdRes?.success ? 'Emir Code - Komut Başarıyla Çalıştı' : 'Emir Code - Komut Hatası',
-              body: `"${binary} ${args.join(' ')}" ${cmdRes?.success ? 'tamamlandı' : 'hata verdi'} (Exit: ${cmdRes?.exitCode ?? (cmdRes?.success ? 0 : 1)}).`,
-              flash: true,
-            });
-
             conversation.push({ role: 'assistant', content: fullResponse });
             conversation.push({ role: 'user', content: observation });
           } else {
