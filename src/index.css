@@ -1,0 +1,47 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --bg-canvas: #f9f9fb;
+    --text-main: #18181b;
+  }
+
+  .dark {
+    --bg-canvas: #121316;
+    --text-main: #e4e4e7;
+  }
+
+  *, ::before, ::after {
+    border-color: rgba(255, 255, 255, 0.07);
+  }
+
+  html:not(.dark) *, html:not(.dark) ::before, html:not(.dark) ::after {
+    border-color: rgba(0, 0, 0, 0.08);
+  }
+
+  body {
+    background-color: var(--bg-canvas);
+    color: var(--text-main);
+  }
+}
+
+/* Minimalist scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(120, 120, 130, 0.25);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(120, 120, 130, 0.45);
+}

@@ -1,0 +1,447 @@
+import { create } from 'zustand';
+import {
+  AgentStatus,
+  AgentStep,
+  ChangesetItem,
+  CommandApprovalItem,
+  ClarificationItem,
+  AppliedTransaction,
+} from '@/types/agent';
+import { WorkspaceFileInfo } from '../../electron/preload';
+import { agentEngine } from '@/lib/agent/AgentEngine';
+import { useModelStore } from './modelStore';
+import { useChatStore } from './chatStore';
+import { useSettingsStore } from './settingsStore';
+
+interface AgentState {
+  workspaceRoot: string | null;
+  workspaceName: string | null;
+  workspaceFiles: WorkspaceFileInfo[];
+  activeFile: { relativePath: string; content: string; hash: string } | null;
+  openFiles: Array<{ relativePath: string; content: string; hash: string }>;
+  activeTabId: string;
+  agentStatus: AgentStatus;
+  currentGoal: string;
+  steps: AgentStep[];
+  executionLogs: string[];
+  appliedTransactions: AppliedTransaction[];
+  showReasoningDump: boolean;
+  activeStreamText: string;
+  isStreamingResponse: boolean;
+  inlineTranscriptOpen: boolean;
+
+  // Pending user approvals
+  pendingChangeset: ChangesetItem[];
+  pendingDelete: ChangesetItem | null;
+  pendingCommand: CommandApprovalItem | null;
+  pendingQuestion: ClarificationItem | null;
+
+  // Resolvers for asynchronous user interactions
+  changesetResolver: ((value: boolean) => void) | null;
+  deleteResolver: ((value: boolean) => void) | null;
+  commandResolver: ((value: boolean) => void) | null;
+  questionResolver: ((value: string) => void) | null;
+
+  // Actions
+  toggleReasoningDump: () => void;
+  toggleInlineTranscript: () => void;
+  setInlineTranscriptOpen: (open: boolean) => void;
+  init: () => Promise<void>;
+  openWorkspaceDialog: () => Promise<void>;
+  refreshFiles: () => Promise<void>;
+  openFile: (relativePath: string) => Promise<void>;
+  closeFileTab: (relativePath: string) => void;
+  closeAllFileTabs: () => void;
+  setActiveTabId: (id: string) => void;
+  closeFile: () => void;
+
+  startGoal: (goal: string) => Promise<void>;
+  stopGoal: () => void;
+  clearSession: () => void;
+
+  // Changeset Actions
+  setPendingChangeset: (items: ChangesetItem[], resolver: (value: boolean) => void) => void;
+  toggleChangesetItem: (id: string) => void;
+  selectAllChangeset: (selected: boolean) => void;
+  approveSelectedChangeset: () => Promise<void>;
+  rejectChangeset: () => void;
+
+  // Delete Actions
+  setPendingDelete: (item: ChangesetItem, resolver: (value: boolean) => void) => void;
+  approveDelete: () => Promise<void>;
+  rejectDelete: () => void;
+
+  // Command Actions
+  setPendingCommand: (item: CommandApprovalItem, resolver: (value: boolean) => void) => void;
+  approveCommand: () => Promise<void>;
+  rejectCommand: () => void;
+
+  // Clarification Actions
+  setPendingQuestion: (item: ClarificationItem, resolver: (value: string) => void) => void;
+  submitAnswer: (answer: string) => void;
+
+  // Rollback Actions
+  rollbackTransaction: (txId: string, force?: boolean) => Promise<{ success: boolean; conflict?: boolean; error?: string }>;
+  rollbackAll: () => Promise<void>;
+}
+
+export const useAgentStore = create<AgentState>((set, get) => ({
+  workspaceRoot: null,
+  workspaceName: null,
+  workspaceFiles: [],
+  activeFile: null,
+  openFiles: [],
+  activeTabId: 'timeline',
+  agentStatus: 'idle',
+  currentGoal: '',
+  steps: [],
+  executionLogs: [],
+  appliedTransactions: [],
+  showReasoningDump: false,
+  activeStreamText: '',
+  isStreamingResponse: false,
+  inlineTranscriptOpen: false,
+
+  toggleReasoningDump: () => set((state) => ({ showReasoningDump: !state.showReasoningDump })),
+  toggleInlineTranscript: () => set((state) => ({ inlineTranscriptOpen: !state.inlineTranscriptOpen })),
+  setInlineTranscriptOpen: (open: boolean) => set({ inlineTranscriptOpen: open }),
+
+  pendingChangeset: [],
+  pendingDelete: null,
+  pendingCommand: null,
+  pendingQuestion: null,
+
+  changesetResolver: null,
+  deleteResolver: null,
+  commandResolver: null,
+  questionResolver: null,
+
+  init: async () => {
+    if (!window.electronAPI) return;
+    const status = await window.electronAPI.getWorkspaceStatus();
+    if (status.hasActiveWorkspace && status.rootPath) {
+      set({
+        workspaceRoot: status.rootPath,
+        workspaceName: status.folderName || 'Project',
+      });
+      await get().refreshFiles();
+    }
+  },
+
+  openWorkspaceDialog: async () => {
+    if (!window.electronAPI) return;
+    const res = await window.electronAPI.openWorkspaceDialog();
+    if (res.success && res.rootPath) {
+      set({
+        workspaceRoot: res.rootPath,
+        workspaceName: res.folderName || 'Project',
+        activeFile: null,
+        openFiles: [],
+        activeTabId: 'timeline',
+      });
+      await get().refreshFiles();
+    }
+  },
+
+  refreshFiles: async () => {
+    if (!window.electronAPI || !get().workspaceRoot) return;
+    const res = await window.electronAPI.listWorkspaceFiles({ maxDepth: 5 });
+    if (res.success && res.files) {
+      set({ workspaceFiles: res.files });
+    }
+  },
+
+  openFile: async (relativePath: string) => {
+    if (!window.electronAPI) return;
+    const existing = get().openFiles.find((f) => f.relativePath === relativePath);
+    if (existing) {
+      set({ activeTabId: relativePath, activeFile: existing });
+      return;
+    }
+    const res = await window.electronAPI.readWorkspaceFile(relativePath);
+    if (res.success && res.content !== undefined) {
+      const fileData = {
+        relativePath,
+        content: res.content,
+        hash: res.hash || '',
+      };
+      set((state) => ({
+        openFiles: [...state.openFiles, fileData],
+        activeTabId: relativePath,
+        activeFile: fileData,
+      }));
+    }
+  },
+
+  closeFileTab: (relativePath: string) => {
+    const { openFiles, activeTabId } = get();
+    const remaining = openFiles.filter((f) => f.relativePath !== relativePath);
+    if (activeTabId === relativePath) {
+      if (remaining.length > 0) {
+        const nextActive = remaining[remaining.length - 1];
+        set({
+          openFiles: remaining,
+          activeTabId: nextActive.relativePath,
+          activeFile: nextActive,
+        });
+      } else {
+        set({
+          openFiles: [],
+          activeTabId: 'timeline',
+          activeFile: null,
+        });
+      }
+    } else {
+      set({ openFiles: remaining });
+    }
+  },
+
+  closeAllFileTabs: () => {
+    set({
+      openFiles: [],
+      activeTabId: 'timeline',
+      activeFile: null,
+    });
+  },
+
+  setActiveTabId: (id: string) => {
+    if (id === 'timeline') {
+      set({ activeTabId: 'timeline', activeFile: null });
+    } else {
+      const target = get().openFiles.find((f) => f.relativePath === id);
+      set({ activeTabId: id, activeFile: target || null });
+    }
+  },
+
+  closeFile: () => set({ activeFile: null, activeTabId: 'timeline' }),
+
+  startGoal: async (goal: string) => {
+    const trimmed = goal.trim();
+    if (!trimmed || !get().workspaceRoot) return;
+
+    const selectedModel = useModelStore.getState().selectedModel || 'qwen2.5-coder:7b';
+
+    // Synchronize agent session with unified chat store
+    const chatStore = useChatStore.getState();
+    const activeChatId = chatStore.activeChatId;
+    const activeChat = chatStore.chats.find((c) => c.id === activeChatId);
+    if (!activeChat || activeChat.mode !== 'agent') {
+      chatStore.createNewChat(selectedModel, 'agent', trimmed.slice(0, 32));
+    } else {
+      chatStore.updateChatTitle(activeChatId!, trimmed.slice(0, 32));
+    }
+
+    set({
+      currentGoal: trimmed,
+      agentStatus: 'thinking',
+      steps: [
+        {
+          id: `step_init_${Date.now()}`,
+          timestamp: Date.now(),
+          type: 'system_notice',
+          content: `Görev Başlatıldı: "${trimmed}" (Model: ${selectedModel})`,
+          status: 'success',
+        },
+      ],
+      executionLogs: [`[${new Date().toLocaleTimeString()}] Görev başlatıldı: ${trimmed}`],
+    });
+
+    const securityProfile = useSettingsStore.getState().settings.securityProfile || 'strict';
+    const timeoutMinutes = useSettingsStore.getState().settings.circuitBreakerMinutes || 30;
+
+    // Run Engine with Callbacks
+    await agentEngine.runGoal(
+      trimmed,
+      selectedModel,
+      {
+        onStep: (step: AgentStep) => {
+          set((state) => ({
+            steps: [...state.steps, step],
+            activeStreamText: '',
+            isStreamingResponse: false,
+          }));
+        },
+        onStatusChange: (status: AgentStatus) => {
+          set({ agentStatus: status });
+          if (status === 'finished' || status === 'error' || status === 'idle') {
+            set({ isStreamingResponse: false });
+          }
+        },
+        onLog: (msg: string) => {
+          set((state) => ({
+            executionLogs: [...state.executionLogs, `[${new Date().toLocaleTimeString()}] ${msg}`],
+          }));
+        },
+        onStreamChunk: (_chunk: string, fullResponseSoFar: string) => {
+          set({ activeStreamText: fullResponseSoFar, isStreamingResponse: true });
+        },
+        onRequestChangesetApproval: (items: ChangesetItem[]) => {
+          return new Promise<boolean>((resolve) => {
+            get().setPendingChangeset(items, resolve);
+          });
+        },
+        onRequestDeleteApproval: (item: ChangesetItem) => {
+          return new Promise<boolean>((resolve) => {
+            get().setPendingDelete(item, resolve);
+          });
+        },
+        onRequestCommandApproval: (item: CommandApprovalItem) => {
+          return new Promise<boolean>((resolve) => {
+            get().setPendingCommand(item, resolve);
+          });
+        },
+        onRequestClarification: (item: ClarificationItem) => {
+          return new Promise<string>((resolve) => {
+            get().setPendingQuestion(item, resolve);
+          });
+        },
+        onTransactionApplied: (tx: AppliedTransaction) => {
+          set((state) => ({ appliedTransactions: [tx, ...state.appliedTransactions] }));
+          get().refreshFiles();
+        },
+      },
+      securityProfile,
+      timeoutMinutes
+    );
+  },
+
+  stopGoal: () => {
+    agentEngine.stop();
+    set({ agentStatus: 'idle', isStreamingResponse: false });
+  },
+
+  clearSession: () => {
+    set({
+      currentGoal: '',
+      agentStatus: 'idle',
+      steps: [],
+      executionLogs: [],
+      activeStreamText: '',
+      isStreamingResponse: false,
+      inlineTranscriptOpen: false,
+      pendingChangeset: [],
+      pendingDelete: null,
+      pendingCommand: null,
+      pendingQuestion: null,
+      openFiles: [],
+      activeTabId: 'timeline',
+      activeFile: null,
+    });
+  },
+
+  // Changeset Handlers
+  setPendingChangeset: (items, resolver) => {
+    set({
+      pendingChangeset: items.map((i) => ({ ...i, selected: true })),
+      changesetResolver: resolver,
+      agentStatus: 'waiting_changeset_approval',
+    });
+  },
+
+  toggleChangesetItem: (id: string) => {
+    set((state) => ({
+      pendingChangeset: state.pendingChangeset.map((item) =>
+        item.id === id ? { ...item, selected: !item.selected } : item
+      ),
+    }));
+  },
+
+  selectAllChangeset: (selected: boolean) => {
+    set((state) => ({
+      pendingChangeset: state.pendingChangeset.map((item) => ({ ...item, selected })),
+    }));
+  },
+
+  approveSelectedChangeset: async () => {
+    const resolver = get().changesetResolver;
+    if (resolver) {
+      resolver(true);
+    }
+    set({ pendingChangeset: [], changesetResolver: null });
+  },
+
+  rejectChangeset: () => {
+    const resolver = get().changesetResolver;
+    if (resolver) {
+      resolver(false);
+    }
+    set({ pendingChangeset: [], changesetResolver: null, agentStatus: 'thinking' });
+  },
+
+  // Delete Handlers
+  setPendingDelete: (item, resolver) => {
+    set({
+      pendingDelete: item,
+      deleteResolver: resolver,
+      agentStatus: 'waiting_delete_approval',
+    });
+  },
+
+  approveDelete: async () => {
+    const resolver = get().deleteResolver;
+    if (resolver) resolver(true);
+    set({ pendingDelete: null, deleteResolver: null });
+  },
+
+  rejectDelete: () => {
+    const resolver = get().deleteResolver;
+    if (resolver) resolver(false);
+    set({ pendingDelete: null, deleteResolver: null, agentStatus: 'thinking' });
+  },
+
+  // Command Handlers
+  setPendingCommand: (item, resolver) => {
+    set({
+      pendingCommand: item,
+      commandResolver: resolver,
+      agentStatus: 'waiting_command_approval',
+    });
+  },
+
+  approveCommand: async () => {
+    const resolver = get().commandResolver;
+    if (resolver) resolver(true);
+    set({ pendingCommand: null, commandResolver: null });
+  },
+
+  rejectCommand: () => {
+    const resolver = get().commandResolver;
+    if (resolver) resolver(false);
+    set({ pendingCommand: null, commandResolver: null, agentStatus: 'thinking' });
+  },
+
+  // Clarification Handlers
+  setPendingQuestion: (item, resolver) => {
+    set({
+      pendingQuestion: item,
+      questionResolver: resolver,
+      agentStatus: 'waiting_clarification',
+    });
+  },
+
+  submitAnswer: (answer: string) => {
+    const resolver = get().questionResolver;
+    if (resolver) resolver(answer);
+    set({ pendingQuestion: null, questionResolver: null, agentStatus: 'thinking' });
+  },
+
+  // Rollback Handlers
+  rollbackTransaction: async (txId: string, force = false) => {
+    if (!window.electronAPI) return { success: false, error: 'API kullanılamıyor' };
+    const res = await window.electronAPI.rollbackTransaction(txId, force);
+    if (res.success) {
+      set((state) => ({
+        appliedTransactions: state.appliedTransactions.filter((t) => t.transactionId !== txId),
+      }));
+      await get().refreshFiles();
+    }
+    return res;
+  },
+
+  rollbackAll: async () => {
+    const list = [...get().appliedTransactions];
+    for (const tx of list) {
+      await get().rollbackTransaction(tx.transactionId, true);
+    }
+  },
+}));

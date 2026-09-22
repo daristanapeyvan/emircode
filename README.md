@@ -1,0 +1,176 @@
+# ⚡ Emir Code
+
+<div align="center">
+
+<img src="build/icon.png" width="128" height="128" alt="Emir Code Logo" />
+
+### **Autonomous, Private, and Secure Local AI Software Engineer**
+
+[![Platform](https://img.shields.io/badge/Platform-Windows%20x64-blue.svg)](https://github.com)
+[![Engine](https://img.shields.io/badge/Local%20LLM-Ollama-purple.svg)](https://ollama.ai)
+[![Security](https://img.shields.io/badge/Sandbox-Realpath%20Jail-emerald.svg)](./SECURITY.md)
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![Zero Telemetry](https://img.shields.io/badge/Telemetry-0%25%20Offline-green.svg)](#privacy-guarantee)
+
+*Develop, debug, and refactor code locally with zero cloud dependencies and ironclad cryptographic sandbox protection.*
+
+</div>
+
+---
+
+## 🌟 Overview
+
+**Emir Code** is an AI-native desktop coding agent that pairs directly with your locally hosted Ollama models (such as `qwen2.5-coder`, `deepseek-coder-v2`, `llama3.1`). 
+
+Unlike cloud-dependent assistants that send your private proprietary source code over the internet or insecure autonomous agents with unchecked terminal execution, **Emir Code** enforces strict human-in-the-loop governance and operating-system-level sandbox containment.
+
+---
+
+## ✨ Key Features
+
+### 🔒 1. Cryptographic Realpath Jail & Mutation Tokens
+- **Zero Direct Write Authority**: The agent engine has zero capability to write or delete files directly on disk.
+- **Main Process Realpath Enforcement**: Resolves all symbolic links, junctions, and relative paths in the Electron Main process to guarantee mutations stay strictly jailed inside the project folder.
+- **One-Time 256-Bit Tokens**: Every file edit, creation, or deletion requires a cryptographically random, single-use token tied to the verified file SHA-256 base hash.
+- **Atomic File Swaps**: File writes use temporary files and atomic directory renames (`fs.renameSync`) to eliminate corruption and race conditions.
+
+### 🧠 2. Session Memory Ledger & Context Sliding Window
+- **Eliminates Local Model Amnesia**: Local models often have constrained context windows (2K to 8K tokens). Large file observations consume tokens quickly, leading to forgotten decisions.
+- **Dynamic Ledger**: Emir Code automatically maintains an updated session memory ledger recording known files, applied changes, and user decisions.
+- **No Repeated Questions**: The agent remembers your architectural decisions across the entire session and never asks the same question twice.
+- **Context Compression**: Older heavy file dumps are compressed into concise ledger pointers, preserving context capacity for deep reasoning.
+
+### ⏱️ 3. Active-Execution Circuit Breaker
+- **10-Minute Timeout Protection**: Protects against runaway inference loops without penalizing the user.
+- **Smart Pause**: Whenever the agent asks you a question or awaits your changeset review, the circuit breaker timer automatically pauses. You can take as much time as you need to inspect code without fear of session cancellation.
+
+### 💬 4. Natural Inline Clarification Stream
+- **No Intrusive Pop-up Modals**: Say goodbye to annoying fullscreen modals that hijack your workspace.
+- **Interactive Option Chips**: Questions and multiple-choice architectural chips render smoothly inside the natural timeline stream.
+- **Custom Input**: Type custom feedback directly in line or click an option pill to proceed immediately.
+
+### 🛡️ 5. Configurable Security Profiles
+Customize the autonomous threshold to match your personal workflow while keeping the underlying Realpath jail active:
+- **Strict (Default)**: Every file modification, new file creation, deletion, and command requires explicit manual confirmation.
+- **Balanced**: Auto-approves safe non-conflicting file edits inside the project jail; requires confirmation for deletions and terminal commands.
+- **Autonomous**: Auto-applies edits and executes safe test commands (`npm test`, `pytest`, `cargo test`, `git status`) autonomously; prompts for high-risk deletions and questions.
+
+### 📊 6. Syntax Highlighting & Line-by-Line Diff Reviewer
+- **Zero-Dependency Token Highlighter**: Fast lexical tokenization for JavaScript, TypeScript, Python, Rust, HTML, CSS, JSON, and Shell.
+- **Myers/LCS Diff Engine**: True line-by-line unified diff viewer showing exact additions (`+`), deletions (`-`), line numbers, and unchanged contextual folding.
+
+### 🔍 7. Optional Live Reasoning & Trace Dump
+- **Deep Observability**: Toggle the "Reasoning & Dump" panel anytime to follow the model's chain-of-thought, tool invocation parameters, and live system logs in real-time.
+
+---
+
+## 🏛️ Architecture Overview
+
+```mermaid
+flowchart TD
+    subgraph UI["Renderer (React + Zustand)"]
+        UI_User["Developer Goal / Interaction"]
+        UI_Timeline["Timeline & Inline Clarification"]
+        UI_Diff["Rich LCS Diff Viewer"]
+        UI_Dump["Reasoning & Live Dump"]
+        UI_Ledger["Session Memory Ledger"]
+    end
+
+    subgraph AgentEngine["Agent Engine"]
+        AE_Loop["Autonomous Tool Loop"]
+        AE_Timer["Active-Time Tracker (Paused on Prompts)"]
+        AE_Compress["Sliding-Window Context Compression"]
+    end
+
+    subgraph Ollama["Local LLM Server (Ollama)"]
+        OLLAMA_Model["qwen2.5-coder / deepseek-coder"]
+    end
+
+    subgraph MainProcess["Electron Main Process (Privileged)"]
+        MP_Jail["Realpath Path Containment"]
+        MP_Token["256-Bit One-Time Mutation Token Vault"]
+        MP_Hash["Authentic SHA-256 Base Hash Verifier"]
+        MP_Atomic["Atomic Temp-File Rename Engine"]
+        MP_Rollback["Snapshot & Rollback Registry"]
+    end
+
+    subgraph Disk["Local Project Filesystem"]
+        FS_Files["Project Codebase"]
+    end
+
+    UI_User --> AgentEngine
+    AgentEngine <-->|Chat Stream| Ollama
+    AE_Loop --> UI_Timeline
+    AE_Loop --> UI_Diff
+    AE_Loop --> UI_Dump
+    AE_Loop -->|Request Mutation Token| MP_Token
+    MP_Token --> MP_Jail
+    MP_Token --> MP_Hash
+    MP_Hash -->|Apply Approved Mutation| MP_Atomic
+    MP_Atomic --> FS_Files
+```
+
+---
+
+## 🚀 Getting Started
+
+### Prerequisites
+1. **Windows 10 / 11 (64-bit)**
+2. **[Ollama](https://ollama.ai)** installed and running locally:
+   ```bash
+   ollama pull qwen2.5-coder:7b
+   ```
+3. **Node.js (v18+)** and **npm** (if building from source)
+
+### Installation Options
+
+#### Option A: Windows NSIS Installer (Recommended)
+Download and run the official multilingual installer:
+- `Emir Code Setup 1.0.0.exe`
+- Choose custom installation directory, Start Menu, and Desktop shortcuts.
+- Fully detects your operating system language (Turkish or English) automatically.
+
+#### Option B: Portable Unpacked
+Run the standalone portable executable directly:
+```
+release/win-unpacked/EmirCode.exe
+```
+
+#### Option C: Build from Source
+```bash
+# Clone the repository
+git clone https://github.com/emir/emir-code.git
+cd emir-code
+
+# Install dependencies
+npm install
+
+# Run Vite + Electron in development mode
+npm run dev
+
+# Build Windows NSIS Installer & Unpacked Distribution
+npm run build
+```
+
+---
+
+## 🔒 Privacy Guarantee
+
+- **100% Offline**: Emir Code connects only to your local Ollama endpoint (`http://localhost:11434`).
+- **No Cloud Relay**: Zero analytics, zero telemetric pingbacks, and zero data logging.
+- **Your Code Stays Yours**: Your intellectual property never leaves your local hardware.
+
+---
+
+## 📜 Documentation
+
+- **[ARCHITECTURE.md](./ARCHITECTURE.md)**: Deep technical architecture, security boundaries, and token mechanics.
+- **[SECURITY.md](./SECURITY.md)**: Threat model, Realpath jail design, command allowlist policy, and disclosure process.
+- **[CONTRIBUTING.md](./CONTRIBUTING.md)**: Development guidelines, coding conventions, and pull request workflow.
+- **[LICENSE](./LICENSE)**: MIT License.
+
+---
+
+## 👥 Authors & Acknowledgments
+
+Created and maintained by **Agah Emir** and the Emir Code community. Built with Electron, React, TypeScript, Tailwind CSS, and Ollama.

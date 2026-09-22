@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Emir Code</title>
+    <!-- Prevent drag of images and default text selection on chrome -->
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 0;
+        user-select: none;
+        overflow: hidden;
+      }
+      .selectable-text {
+        user-select: text;
+      }
+    </style>
+  </head>
+  <body class="bg-canvas-dark text-zinc-200 antialiased h-screen w-screen overflow-hidden font-sans selection:bg-blue-600/30 selection:text-blue-200">
+    <div id="root" class="h-full w-full flex flex-col"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

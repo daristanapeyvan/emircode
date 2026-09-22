@@ -1,0 +1,51 @@
+export type Language = 'system' | 'en' | 'tr';
+export type Theme = 'dark' | 'light';
+export type FontSize = 'sm' | 'base' | 'lg';
+export type SecurityProfile = 'strict' | 'balanced' | 'autonomous';
+
+export interface AppSettings {
+  // General
+  language: Language;
+  confirmDestructive: boolean;
+  securityProfile: SecurityProfile;
+  circuitBreakerMinutes: number;
+
+  // Appearance
+  theme: Theme;
+  fontSize: FontSize;
+  reducedMotion: boolean;
+
+  // Chat
+  sendOnEnter: boolean;
+  showMetadata: boolean;
+  autoGenerateTitles: boolean;
+  streamResponse: boolean;
+
+  // Ollama
+  ollamaEndpoint: string;
+  ollamaTimeoutMs: number;
+  keepAlive: string;
+
+  // Generation Defaults
+  defaultPresetId: string;
+  defaultModel: string;
+}
+
+export const DEFAULT_SETTINGS: AppSettings = {
+  language: 'system',
+  confirmDestructive: true,
+  securityProfile: 'strict',
+  circuitBreakerMinutes: 30,
+  theme: 'dark',
+  fontSize: 'base',
+  reducedMotion: false,
+  sendOnEnter: true,
+  showMetadata: true,
+  autoGenerateTitles: true,
+  streamResponse: true,
+  ollamaEndpoint: 'http://localhost:11434',
+  ollamaTimeoutMs: 60000,
+  keepAlive: '5m',
+  defaultPresetId: 'balanced',
+  defaultModel: 'qwen3:8b',
+};
