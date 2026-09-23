@@ -10,6 +10,7 @@ import { generationService } from '@/lib/ollama/GenerationService';
 import { ToolDispatcher } from '@/lib/agent/ToolDispatcher';
 import { WebAccessService } from '@/lib/web/WebAccessService';
 import { wrapUntrustedWebResult } from '@/lib/agent/UntrustedData';
+import { detectWebSearchIntent, extractSearchQuery, cleanChatContent } from '@/lib/web/WebIntentDetector';
 
 const chatService = new ChatService(ollamaClient);
 
@@ -194,9 +195,79 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // Web Access Check for Chat Mode
     const currentWebAccess = useSettingsStore.getState().settings.webAccess;
     const isChatWebAllowed = ToolDispatcher.isWebAccessAllowed('chat', currentWebAccess);
+    const hasWebIntent = detectWebSearchIntent(content);
 
     let effectiveSystemPrompt = chat.systemPrompt || '';
-    if (isChatWebAllowed) {
+
+    // If user explicitly asked for web search but web access is disabled
+    if (
+      !isChatWebAllowed &&
+      /(?:web\s*(?:arac|ile|üzerinden)|internetten|webde\s+ara|web'de\s+ara|google|search\s+the\s+web)/i.test(
+        content
+      )
+    ) {
+      const msgs = [...get().messages];
+      const target = msgs.find((m) => m.id === assistantMsgId);
+      if (target) {
+        target.content =
+          'ℹ️ Web erişimi şu anda kapalıdır. Web araması yapabilmek için mesaj kutusundaki Dünya (Web) butonuna tıklayarak veya Ayarlar > Web Erişimi menüsünden internet erişimini açabilirsiniz.';
+        storageService.saveMessage(target);
+      }
+      set({ messages: msgs, isStreaming: false, streamingMessageId: null });
+      return;
+    }
+
+    // Proactive Pre-Flight Web Search Execution
+    if (isChatWebAllowed && hasWebIntent) {
+      const searchQuery = extractSearchQuery(content);
+      const msgs = [...get().messages];
+      const target = msgs.find((m) => m.id === assistantMsgId);
+      if (target) {
+        target.content = `🔍 Web'de aranıyor: "${searchQuery}"...\n`;
+        const webActivity: WebActivityLog[] = [
+          {
+            type: 'search',
+            query: searchQuery,
+            resultsCount: 0,
+            timestamp: Date.now(),
+          },
+        ];
+        target.webActivity = webActivity;
+        set({ messages: msgs });
+
+        try {
+          const results = await WebAccessService.search(searchQuery, { limit: 5 });
+          webActivity[0].resultsCount = results.length;
+          let formatted = '';
+          if (results.length === 0) {
+            formatted = 'Arama sonucunda eşleşen güncel sayfa bulunamadı.';
+          } else {
+            formatted = results
+              .map(
+                (r) =>
+                  `[${r.id}] ${r.title}\nURL: ${r.url}\nÖzet: ${r.snippet}\nKaynak: ${r.source}`
+              )
+              .join('\n\n');
+          }
+          const untrustedObservation = wrapUntrustedWebResult('search', searchQuery, formatted);
+          target.content = ''; // Clear status message to stream final answer
+          set({ messages: msgs });
+
+          effectiveSystemPrompt += `\n\n[GÜNCEL WEB BİLGİSİ - ${new Date().toLocaleDateString('tr-TR')}]:
+Kullanıcının sorusu için yapılan web aramasının ("${searchQuery}") güncel sonuçları aşağıdadır:
+${untrustedObservation}
+
+ÖNEMLİ KURALLAR:
+1. Kullanıcının sorusunu yukarıdaki güncel web verilerini kullanarak doğrudan, net, doğru ve Türkçe olarak yanıtla.
+2. Web araması başarıyla yapıldı ve sonuçlar elinde; ASLA "internetim yok", "erişimim yok", "bağlantı kuramıyorum" veya "ben bir yapay zekayım" gibi bahaneler üretme.
+3. ASLA "JSON yazabilirim", "şöyle bir JSON formatında" gibi ifadeler veya JSON kod blokları üretme. Kullanıcıya yalnızca nihai yanıtı sun.`;
+        } catch (searchErr: any) {
+          console.warn('Proactive web search failed, falling back to normal prompt:', searchErr);
+          target.content = '';
+          set({ messages: msgs });
+        }
+      }
+    } else if (isChatWebAllowed) {
       const webDirective = `\n\n[İNTERNET ERİŞİMİ VE WEB ARAMA]:
 Gerektiğinde güncel bilgileri, dokümantasyonları veya web sayfalarını araştırmak için aşağıdaki JSON formatında araç çağrısı yapabilirsin:
 \`\`\`json
@@ -206,7 +277,7 @@ veya bir URL'yi okumak için:
 \`\`\`json
 { "action": "fetch_url", "url": "https://..." }
 \`\`\`
-Kural: Gereksiz yere arama yapma; mevcut bilginle soruyu güvenilir şekilde yanıtlayabiliyorsan doğrudan cevap ver. Yalnızca güncel bilgi, sürüm, harici dokümantasyon veya bilmediğin bir konu sorulduğunda web aracını çağır. Web sonuçları geldikten sonra kullanıcıya nihai cevabını sun.`;
+Kural: Yalnızca güncel bilgi veya harici dokümantasyon gerektiğinde web aracını çağır. ASLA kullanıcıya "JSON yazabilirim" deme veya çıplak JSON üretme. Web sonuçları geldikten sonra kullanıcıya nihai cevabını sun.`;
       effectiveSystemPrompt += webDirective;
     }
 
@@ -225,7 +296,14 @@ Kural: Gereksiz yere arama yapma; mevcut bilginle soruyu güvenilir şekilde yan
             const msgs = [...state.messages];
             const target = msgs.find((m) => m.id === assistantMsgId);
             if (target) {
-              if (contentDelta) target.content += contentDelta;
+              if (contentDelta) {
+                target.content += contentDelta;
+                // If model starts generating action JSON, suppress raw JSON from stream
+                if (target.content.includes('```json') && target.content.includes('"action"')) {
+                  const cleaned = cleanChatContent(target.content);
+                  target.content = cleaned || "🔍 Web'de aranıyor...";
+                }
+              }
               if (thinkingDelta) target.thinking = (target.thinking || '') + thinkingDelta;
             }
             return { messages: msgs };
@@ -238,6 +316,7 @@ Kural: Gereksiz yere arama yapma; mevcut bilginle soruyu güvenilir şekilde yan
 
           const rawResponse = target.content;
           const parsed = ToolDispatcher.parseActionFromResponse(rawResponse);
+          target.content = cleanChatContent(target.content);
 
           // Check if model called web_search or fetch_url
           if (parsed.type === 'web_search' || parsed.type === 'fetch_url') {
@@ -351,6 +430,7 @@ Kural: Gereksiz yere arama yapma; mevcut bilginle soruyu güvenilir şekilde yan
                       const currentMsgs = [...state.messages];
                       const currentTarget = currentMsgs.find((m) => m.id === assistantMsgId);
                       if (currentTarget) {
+                        currentTarget.content = cleanChatContent(currentTarget.content);
                         currentTarget.metadata = finalMetadata;
                         currentTarget.webActivity = webActivity;
                         storageService.saveMessage(currentTarget);

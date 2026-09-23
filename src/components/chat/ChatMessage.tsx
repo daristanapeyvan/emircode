@@ -7,6 +7,7 @@ import { useSettingsStore } from '@/stores/settingsStore';
 import { useChatStore } from '@/stores/chatStore';
 import { getTranslations } from '@/lib/localization/i18n';
 import { formatBytes } from '@/lib/utils/formatters';
+import { cleanChatContent } from '@/lib/web/WebIntentDetector';
 import { cn } from '@/lib/utils/cn';
 
 interface ChatMessageProps {
@@ -197,7 +198,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, isStreaming }
             </div>
           ) : (
             <div className="selectable-text">
-              <MarkdownContent content={message.content} />
+              <MarkdownContent content={cleanChatContent(message.content)} />
               {isStreaming && (
                 <span className="inline-block w-1.5 h-4 ml-1 align-middle bg-blue-500 animate-pulse" />
               )}

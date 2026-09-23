@@ -216,7 +216,7 @@ GÖREV: Kullanıcının talep ettiği kodları ve projeyi diske eksiksiz üretme
 
 ÖNEMLİ KURALLAR:
 1. ${isAutonomous ? 'OTONOM MOD: Kullanıcıya asla soru sorma ("ask_question" yasak). İnisiyatif alarak dosyaları eksiksiz oluştur.' : 'Kod değişikliklerini diske uygulamak için "propose_create" veya "propose_edit" kullan.'}
-2. SADECE aşağıdaki JSON şemalarından birini \`\`\`json ... \`\`\` bloğu içinde üret.
+2. SADECE aşağıdaki JSON şemalarından birini \`\`\`json ... \`\`\` bloğu içinde üret. Asla 'JSON yazabilirim' gibi konuşma cümleleri kurma; doğrudan eylem bloğunu üret.
 3. Oturum Hafıza Defteri\\'ndeki "GÖREV KONTROL LİSTESİ"ndeki sıradaki alt göreve odaklan. Tüm görevler bittiğinde "finish" çağır.
 
 ARAÇLAR VE JSON ŞEMALARI:
@@ -363,9 +363,9 @@ ${askRule}
    TÜM alt görevler ve gereksinimler eksiksiz tamamlanmadan 'finish' eylemini KESİNLİKLE ÇAĞIRMA ve süreci erken sonlandırma.
 ${webRule}
 
-ÇIKTI FORMATI:
-Her adımda düşünceni <thought> ... </thought> etiketleri içine yaz.
-Ardından SADECE aşağıdaki JSON şemalarından birini \`\`\`json ... \`\`\` bloğu içinde üret:
+ÇIKTI FORMATI VE KESİN KURALLAR:
+1. Her adımda düşünceni <thought> ... </thought> etiketleri içine yaz. Düşüncelerinde asla "JSON yazabilirim", "şöyle bir JSON oluşturuyorum" gibi konuşma cümleleri KULLANMA. Kullanıcıya araç veya JSON yapısından asla bahsetme.
+2. Düşünce etiketinin ardından SADECE ve DOĞRUDAN aşağıdaki JSON şemalarından birini tek bir \`\`\`json ... \`\`\` bloğu içinde üret:
 
 1. Dizin Listeleme:
 \`\`\`json

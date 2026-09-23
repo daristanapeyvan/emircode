@@ -36,6 +36,86 @@ import { getTranslations } from '@/lib/localization/i18n';
 import { cn } from '@/lib/utils/cn';
 import { SecurityProfile } from '@/types/settings';
 import { tokenizeCode, getTokenClassName } from '@/lib/utils/SyntaxHighlighter';
+import { cleanChatContent, cleanThoughtContent } from '@/lib/web/WebIntentDetector';
+
+function parseAgentStream(rawText: string) {
+  if (!rawText) return { thought: '', actionLabel: '', actionTarget: '', isGeneratingAction: false };
+
+  // 1. Extract thought
+  let thought = '';
+  const thoughtMatch = rawText.match(/<thought>([\s\S]*?)(?:<\/thought>|$)/i);
+  if (thoughtMatch) {
+    thought = thoughtMatch[1].trim();
+  } else {
+    const jsonIdx = rawText.search(/```(?:json)?|\{\s*"action"/i);
+    if (jsonIdx > 0) {
+      thought = rawText.slice(0, jsonIdx).trim();
+    } else if (jsonIdx === -1) {
+      thought = rawText.trim();
+    }
+  }
+
+  thought = cleanThoughtContent(thought);
+
+  // 2. Extract action info
+  const actionMatch = rawText.match(/"action"\s*:\s*"([^"]+)"/i);
+  const pathMatch = rawText.match(/"path"\s*:\s*"([^"]+)"/i);
+  const queryMatch = rawText.match(/"query"\s*:\s*"([^"]+)"/i);
+  const urlMatch = rawText.match(/"url"\s*:\s*"([^"]+)"/i);
+
+  const actionName = actionMatch ? actionMatch[1] : '';
+  const actionTarget = pathMatch ? pathMatch[1] : (queryMatch ? queryMatch[1] : (urlMatch ? urlMatch[1] : ''));
+
+  let actionLabel = '';
+  if (actionName) {
+    switch (actionName) {
+      case 'propose_edit':
+        actionLabel = 'Kod Düzenleme';
+        break;
+      case 'propose_create':
+        actionLabel = 'Yeni Dosya Oluşturma';
+        break;
+      case 'propose_delete':
+        actionLabel = 'Dosya Silme';
+        break;
+      case 'read_file':
+        actionLabel = 'Dosya İnceleme';
+        break;
+      case 'read_directory':
+        actionLabel = 'Dizin Taraması';
+        break;
+      case 'search_code':
+        actionLabel = 'Kod Arama';
+        break;
+      case 'web_search':
+        actionLabel = 'Web Araması';
+        break;
+      case 'fetch_url':
+        actionLabel = 'Web Sayfası İnceleme';
+        break;
+      case 'propose_command':
+        actionLabel = 'Komut Çalıştırma';
+        break;
+      case 'finish':
+        actionLabel = 'Görevi Tamamlama';
+        break;
+      case 'ask_question':
+        actionLabel = 'Kullanıcıya Soru';
+        break;
+      default:
+        actionLabel = actionName;
+    }
+  }
+
+  const isGeneratingAction = !!actionName || /```(?:json)?|\{\s*"action"/i.test(rawText);
+
+  return {
+    thought,
+    actionLabel,
+    actionTarget,
+    isGeneratingAction,
+  };
+}
 
 export const AgentWorkspace: React.FC = () => {
   const {
@@ -544,7 +624,7 @@ export const AgentWorkspace: React.FC = () => {
                             </span>
                           </div>
                           <p className="text-zinc-300 leading-relaxed select-text whitespace-pre-wrap font-sans text-xs">
-                            {step.content}
+                            {cleanThoughtContent(step.content)}
                           </p>
                         </div>
                       );
@@ -621,8 +701,8 @@ export const AgentWorkspace: React.FC = () => {
                             <CheckCircle2 size={15} />
                             <span>{step.title || t.agent.taskCompleted}</span>
                           </div>
-                          <div className="text-zinc-200 select-text leading-relaxed whitespace-pre-wrap">
-                            {step.content}
+                          <div className="text-zinc-200 select-text leading-relaxed whitespace-pre-wrap font-sans text-xs">
+                            {cleanChatContent(step.content)}
                           </div>
                         </div>
                       );
@@ -748,22 +828,57 @@ export const AgentWorkspace: React.FC = () => {
                     {inlineTranscriptOpen && (
                       <div className="border-t border-zinc-800/50 bg-zinc-950/40 p-2.5 space-y-2">
                         {/* Live streaming text or latest thought */}
-                        {activeStreamText ? (
-                          <div className="p-2.5 rounded bg-zinc-950/80 border border-zinc-800/60 text-zinc-300 text-[11px] whitespace-pre-wrap leading-relaxed max-h-56 overflow-y-auto select-text font-mono">
-                            {activeStreamText}
-                            {isStreamingResponse && (
-                              <span className="inline-block w-1.5 h-3.5 bg-zinc-400 ml-0.5 animate-pulse align-middle" />
-                            )}
-                          </div>
-                        ) : latestThought?.content ? (
-                          <div className="p-2.5 rounded bg-zinc-950/80 border border-zinc-800/60 text-zinc-300 text-[11px] whitespace-pre-wrap leading-relaxed max-h-56 overflow-y-auto select-text font-mono">
-                            {latestThought.content}
-                          </div>
-                        ) : (
-                          <div className="p-2 text-zinc-500 text-xs italic font-sans">
-                            {isBusy ? t.agent.waitingResponse : t.agent.noTrace}
-                          </div>
-                        )}
+                        {(() => {
+                          if (activeStreamText) {
+                            const parsed = parseAgentStream(activeStreamText);
+                            return (
+                              <div className="p-2.5 rounded bg-zinc-950/80 border border-zinc-800/60 text-xs leading-relaxed max-h-56 overflow-y-auto select-text space-y-2">
+                                {parsed.thought && (
+                                  <div className="text-zinc-300 font-sans whitespace-pre-wrap text-[11px]">
+                                    {parsed.thought}
+                                  </div>
+                                )}
+                                {parsed.isGeneratingAction && (
+                                  <div className="flex items-center gap-2 px-2.5 py-1.5 rounded bg-zinc-900 border border-zinc-750 text-xs text-zinc-300 shadow-sm animate-pulse">
+                                    <Terminal size={12} className="text-cyan-400 shrink-0" />
+                                    <span className="font-medium text-cyan-300">
+                                      ⚡ {parsed.actionLabel ? `${parsed.actionLabel} Hazırlanıyor` : 'Eylem Hazırlanıyor...'}
+                                    </span>
+                                    {parsed.actionTarget && (
+                                      <>
+                                        <span className="text-zinc-600">→</span>
+                                        <span className="font-mono text-zinc-300 text-[11px] truncate max-w-xs">
+                                          {parsed.actionTarget}
+                                        </span>
+                                      </>
+                                    )}
+                                    {isStreamingResponse && (
+                                      <Loader2 size={11} className="animate-spin text-zinc-400 ml-auto shrink-0" />
+                                    )}
+                                  </div>
+                                )}
+                                {!parsed.thought && !parsed.isGeneratingAction && (
+                                  <div className="text-zinc-400 font-sans italic text-xs">
+                                    {isBusy ? t.agent.waitingResponse : t.agent.noTrace}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          } else if (latestThought?.content) {
+                            const cleanContent = cleanThoughtContent(latestThought.content);
+                            return (
+                              <div className="p-2.5 rounded bg-zinc-950/80 border border-zinc-800/60 text-zinc-300 text-[11px] font-sans whitespace-pre-wrap leading-relaxed max-h-56 overflow-y-auto select-text">
+                                {cleanContent || t.agent.noTrace}
+                              </div>
+                            );
+                          } else {
+                            return (
+                              <div className="p-2 text-zinc-500 text-xs italic font-sans">
+                                {isBusy ? t.agent.waitingResponse : t.agent.noTrace}
+                              </div>
+                            );
+                          }
+                        })()}
 
                         {/* Recent logs */}
                         {executionLogs.length > 0 && (
@@ -950,27 +1065,48 @@ export const AgentWorkspace: React.FC = () => {
                             {new Date(th.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                           </span>
                         </div>
-                        <p className="text-zinc-300 text-[11px] leading-relaxed whitespace-pre-wrap font-mono">
-                          {th.content}
+                        <p className="text-zinc-300 text-[11px] leading-relaxed whitespace-pre-wrap font-sans">
+                          {cleanThoughtContent(th.content)}
                         </p>
                       </div>
                     ))
                   )}
 
-                  {isStreamingResponse && activeStreamText && (
-                    <div className="p-2.5 rounded-md bg-zinc-900/70 border border-zinc-700/80 space-y-1">
-                      <div className="flex items-center justify-between text-[10px] text-zinc-300 font-sans">
-                        <span className="font-medium flex items-center gap-1.5">
-                          <Loader2 size={10} className="animate-spin text-zinc-400" />
-                          {t.agent.activeReasoning}
-                        </span>
-                        <span className="text-zinc-500 font-mono text-[9px]">{t.agent.streamBadge}</span>
+                  {isStreamingResponse && activeStreamText && (() => {
+                    const parsed = parseAgentStream(activeStreamText);
+                    return (
+                      <div className="p-2.5 rounded-md bg-zinc-900/70 border border-zinc-700/80 space-y-2">
+                        <div className="flex items-center justify-between text-[10px] text-zinc-300 font-sans">
+                          <span className="font-medium flex items-center gap-1.5">
+                            <Loader2 size={10} className="animate-spin text-zinc-400" />
+                            {t.agent.activeReasoning}
+                          </span>
+                          <span className="text-zinc-500 font-mono text-[9px]">{t.agent.streamBadge}</span>
+                        </div>
+                        {parsed.thought && (
+                          <p className="text-zinc-200 text-xs leading-relaxed whitespace-pre-wrap font-sans">
+                            {parsed.thought}
+                          </p>
+                        )}
+                        {parsed.isGeneratingAction && (
+                          <div className="flex items-center gap-2 px-2.5 py-1.5 rounded bg-zinc-950 border border-zinc-800 text-xs text-zinc-300 shadow-sm animate-pulse">
+                            <Terminal size={12} className="text-cyan-400 shrink-0" />
+                            <span className="font-medium text-cyan-300">
+                              ⚡ {parsed.actionLabel ? `${parsed.actionLabel} Hazırlanıyor` : 'Eylem Hazırlanıyor...'}
+                            </span>
+                            {parsed.actionTarget && (
+                              <>
+                                <span className="text-zinc-600">→</span>
+                                <span className="font-mono text-zinc-300 text-[11px] truncate max-w-xs">
+                                  {parsed.actionTarget}
+                                </span>
+                              </>
+                            )}
+                          </div>
+                        )}
                       </div>
-                      <p className="text-zinc-200 text-[11px] leading-relaxed whitespace-pre-wrap font-mono">
-                        {activeStreamText}
-                      </p>
-                    </div>
-                  )}
+                    );
+                  })()}
                 </div>
               )}
 

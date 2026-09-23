@@ -37,7 +37,14 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     }
 
     const data = await storageService.init();
-    const settings = data.settings || DEFAULT_SETTINGS;
+    const settings: AppSettings = {
+      ...DEFAULT_SETTINGS,
+      ...(data.settings || {}),
+      webAccess: {
+        ...DEFAULT_SETTINGS.webAccess,
+        ...(data.settings?.webAccess || {}),
+      },
+    };
 
     // Apply theme class to document
     if (settings.theme === 'dark') {

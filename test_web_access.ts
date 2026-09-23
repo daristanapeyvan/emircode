@@ -264,6 +264,70 @@ async function run() {
   const promptFromCaps = buildSystemPrompt(true, 'strict', capsWebOff);
   assert(!promptFromCaps.includes('web_search'), 'System prompt constructed from capabilities omits web_search when off');
 
+  console.log('\n--- 12. Testing Multi-Lingual WebIntentDetector & JSON Sanitizer ---');
+  const { detectWebSearchIntent, extractSearchQuery, cleanChatContent, cleanThoughtContent } = await import('./src/lib/web/WebIntentDetector');
+
+  // Multi-lingual Intent Detection Tests
+  assert(
+    detectWebSearchIntent('web aracını kullanarak bugünün 23.09.2026 uşak hava durumunu bul'),
+    'Intent: Turkish weather with date and explicit tool request detected'
+  );
+  assert(
+    detectWebSearchIntent('bugün hava nasıl?'),
+    'Intent: Turkish casual weather inquiry detected'
+  );
+  assert(
+    detectWebSearchIntent('what is the weather in London today?'),
+    'Intent: English weather inquiry detected'
+  );
+  assert(
+    detectWebSearchIntent('1 dolar kaç tl?'),
+    'Intent: Turkish currency rate detected'
+  );
+  assert(
+    detectWebSearchIntent('current bitcoin price and gold price'),
+    'Intent: English crypto and commodity price detected'
+  );
+  assert(
+    detectWebSearchIntent('son dakika haberleri neler?'),
+    'Intent: Turkish breaking news detected'
+  );
+  assert(
+    detectWebSearchIntent('latest breaking news on AI developments'),
+    'Intent: English breaking news detected'
+  );
+  assert(
+    detectWebSearchIntent('2026 dünya kupası nerede oynanacak?'),
+    'Intent: Future temporal query (2026) detected'
+  );
+  assert(
+    !detectWebSearchIntent('python ile fibonacci hesaplayan fonksiyon yaz'),
+    'Intent: Pure coding task correctly identified as non-web'
+  );
+  assert(
+    !detectWebSearchIntent('merhaba nasılsın iyi misin?'),
+    'Intent: Casual conversational greeting correctly identified as non-web'
+  );
+
+  // Search Query Extraction Tests
+  const extractedWeather = extractSearchQuery('web aracını kullanarak bugünün 23.09.2026 uşak hava durumunu bul');
+  assert(
+    extractedWeather.includes('23.09.2026') && extractedWeather.includes('uşak') && !extractedWeather.includes('web aracını'),
+    `Query extractor cleaned conversational wrappers cleanly: "${extractedWeather}"`
+  );
+
+  // Raw JSON Sanitization Tests (Concealment)
+  const rawModelResponse = 'Üzgünüm, şu an bilgi veremiyorum. JSON yazabilirim:\n```json\n{\n  "action": "web_search",\n  "query": "uşak hava durumu"\n}\n```\nDetaylar aranıyor.';
+  const cleanedText = cleanChatContent(rawModelResponse);
+  assert(
+    !cleanedText.includes('```json') && !cleanedText.includes('"action": "web_search"') && !cleanedText.includes('JSON yazabilirim'),
+    'Chat sanitizer completely stripped naked action JSON and "JSON yazabilirim" preface'
+  );
+
+  const rawThought = '<thought>Dosyayı okuyup işlem yapmalıyım.\n```json\n{"action": "read_file", "path": "test.txt"}\n```</thought>';
+  const cleanedThought = cleanThoughtContent(rawThought);
+  assert(!cleanedThought.includes('```json') && !cleanedThought.includes('read_file'), 'Thought sanitizer cleaned action JSON from thought block');
+
   console.log(`\n===========================================`);
   console.log(`🎉 ALL ${passedTests}/${totalTests} WEB ACCESS TESTS PASSED PERFECTLY!`);
   console.log(`===========================================`);

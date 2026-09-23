@@ -53,9 +53,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   autoGenerateTitles: true,
   streamResponse: true,
   webAccess: {
-    enabled: false,
-    chatEnabled: false,
-    codingEnabled: false,
+    enabled: true,
+    chatEnabled: true,
+    codingEnabled: true,
   },
   ollamaEndpoint: 'http://localhost:11434',
   ollamaTimeoutMs: 60000,

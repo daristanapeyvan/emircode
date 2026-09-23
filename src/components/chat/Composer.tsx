@@ -1,11 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Paperclip, ArrowUp, Square, Zap } from 'lucide-react';
+import { Paperclip, ArrowUp, Square, Zap, Globe } from 'lucide-react';
 import { AttachmentTray } from './AttachmentTray';
 import { useChatStore } from '@/stores/chatStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useModelStore } from '@/stores/modelStore';
 import { getTranslations } from '@/lib/localization/i18n';
 import { Attachment } from '@/types/chat';
+import { DEFAULT_SETTINGS } from '@/types/settings';
 import { cn } from '@/lib/utils/cn';
 
 export const Composer: React.FC = () => {
@@ -16,7 +17,7 @@ export const Composer: React.FC = () => {
 
   const { isStreaming, sendMessage, stopStreaming, interruptAndSend, addAttachment } = useChatStore();
   const { selectedModelDetails, selectedModel } = useModelStore();
-  const { settings } = useSettingsStore();
+  const { settings, setWebAccess } = useSettingsStore();
   const t = getTranslations(settings.language);
 
   // Auto-resize textarea height
@@ -213,6 +214,32 @@ export const Composer: React.FC = () => {
             multiple
             onChange={(e) => e.target.files && processFiles(e.target.files)}
           />
+
+          {/* Web Access Instant Toggle Button */}
+          <button
+            type="button"
+            onClick={() => {
+              const current = settings.webAccess || DEFAULT_SETTINGS.webAccess;
+              const isCurrentlyActive = current.enabled && current.chatEnabled;
+              setWebAccess({ enabled: !isCurrentlyActive, chatEnabled: !isCurrentlyActive });
+            }}
+            title={
+              settings.webAccess?.enabled && settings.webAccess?.chatEnabled
+                ? 'Web Erişimi: Açık (İnternet araması ve güncel veriler aktif - Kapatmak için tıklayın)'
+                : 'Web Erişimi: Kapalı (Açmak için tıklayın)'
+            }
+            className={cn(
+              'p-1.5 rounded-lg transition-all cursor-pointer shrink-0 mb-0.5 flex items-center gap-1 text-xs',
+              settings.webAccess?.enabled && settings.webAccess?.chatEnabled
+                ? 'text-cyan-400 bg-cyan-950/60 border border-cyan-800/60 hover:bg-cyan-900/60 shadow-sm'
+                : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/80 border border-transparent'
+            )}
+          >
+            <Globe size={16} strokeWidth={1.5} />
+            <span className="hidden sm:inline font-mono text-[10px] font-medium">
+              {settings.webAccess?.enabled && settings.webAccess?.chatEnabled ? 'Web' : ''}
+            </span>
+          </button>
 
           {/* Multiline textarea */}
           <textarea

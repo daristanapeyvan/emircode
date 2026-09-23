@@ -172,8 +172,8 @@ Pre-built binaries for both Windows and Linux are published automatically on eve
 
 | Package | Format | Description |
 | :--- | :--- | :--- |
-| **Windows Setup (Recommended)** | `Emir Code Setup 1.5.0.exe` | Multilingual NSIS GUI installer with custom folder selection, Desktop shortcut, and Start Menu registration. |
-| **Windows Portable** | `Emir Code 1.5.0.exe` | Completely self-contained single executable. Zero installation required. |
+| **Windows Setup (Recommended)** | `Emir Code Setup 1.5.1.exe` | Multilingual NSIS GUI installer with custom folder selection, Desktop shortcut, and Start Menu registration. |
+| **Windows Portable** | `Emir Code 1.5.1.exe` | Completely self-contained single executable. Zero installation required. |
 
 ---
 
@@ -184,9 +184,9 @@ Emir Code provides a first-class, native desktop experience across all major Lin
 ##### 1. Debian / Ubuntu / Linux Mint / Pop!_OS (.deb GUI Package)
 Download the `.deb` package and install it using your system's native Software Center:
 ```bash
-# GUI Installation: Double-click 'emir-code_1.5.0_amd64.deb' in your file manager to open Ubuntu Software / GDebi
+# GUI Installation: Double-click 'emir-code_1.5.1_amd64.deb' in your file manager to open Ubuntu Software / GDebi
 # Or via terminal:
-sudo apt install ./emir-code_1.5.0_amd64.deb
+sudo apt install ./emir-code_1.5.1_amd64.deb
 ```
 *Automatically registers the application menu entry, high-DPI desktop icons, and the `/usr/bin/emir-code` command.*
 
@@ -194,19 +194,19 @@ sudo apt install ./emir-code_1.5.0_amd64.deb
 Download the `.rpm` package and double-click to install via GNOME Software / Discover:
 ```bash
 # Or via dnf:
-sudo dnf install ./emir-code-1.5.0.x86_64.rpm
+sudo dnf install ./emir-code-1.5.1.x86_64.rpm
 ```
 
 ##### 3. Universal Portable AppImage
 Download and run directly on any Linux distribution without root privileges:
 ```bash
-chmod +x Emir-Code-1.5.0.AppImage
-./Emir-Code-1.5.0.AppImage
+chmod +x Emir-Code-1.5.1.AppImage
+./Emir-Code-1.5.1.AppImage
 ```
 
 ##### 4. Standalone Linux GUI Setup Wizard (`emir-code-setup-linux.sh`)
 For users who prefer a Windows-like graphical setup wizard:
-1. Download `emir-code-1.5.0.tar.gz` and extract it, or download `emir-code-setup-linux.sh`.
+1. Download `emir-code-1.5.1.tar.gz` and extract it, or download `emir-code-setup-linux.sh`.
 2. Run the graphical installer:
    ```bash
    chmod +x emir-code-setup-linux.sh

@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.1] - 2026-09-23
+
+### Added
+- **Multi-Lingual Proactive Web Search Auto-Detection (`WebIntentDetector.ts`)**:
+  - Dual-layer hybrid architecture: Client-side pre-flight search auto-triggers on real-time queries (weather, currency rates, news, dates/temporal) with zero token delay and zero model hesitation.
+  - Multi-lingual coverage for Turkish, English, and international tech/finance terms (temporal `2024-2029`, weather, news, finance/crypto, and explicit search requests).
+  - Search query extractor (`extractSearchQuery`) cleans conversational filler and delivers crisp search terms to DuckDuckGo/SearchProvider.
+  - Grounded context injection with strict anti-excuse and anti-JSON directives, eliminating model hallucinations ("internetim yok", "bağlantı hatası").
+- **Complete Raw JSON Concealment (Sohbet ve Kod Ajanında Çıplak JSON'ın Gizlenmesi)**:
+  - Streaming token suppression (`onToken`) masks action JSON chunks live, showing clean progress indicators (`🔍 Web'de aranıyor...`).
+  - Markdown content sanitizer (`cleanChatContent`) strips action JSON blocks and conversational prefaces like "JSON yazabilirim:".
+  - Code agent workspace live stream parser (`parseAgentStream`) replaces raw JSON brackets with animated Action Preparation Cards (`⚡ Kod Düzenleme Hazırlanıyor → src/...`).
+  - Thought steps and final answer cards are filtered with `cleanThoughtContent` and `cleanChatContent` to prevent syntax leaks.
+- **Instant 1-Click Web Access Toggle in Chat Composer**:
+  - Added a sleek `Globe` icon button in `Composer.tsx` right next to the attachment icon, showing active status (`🌐 Web Açık`) and allowing 1-click toggling.
+  - Updated default settings (`DEFAULT_SETTINGS.webAccess`) to `enabled: true, chatEnabled: true, codingEnabled: true` for out-of-the-box search readiness.
+
 ## [1.5.0] - 2026-09-23
 
 ### Added
