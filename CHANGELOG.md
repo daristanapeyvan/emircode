@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.5] - 2026-09-24
+
+### Fixed
+- **CRLF & Multi-Tier Chunk Replacement Engine (Windows Diff Çakışması ve Döngü Koruması Düzeltmesi)**:
+  - Fixed Windows CRLF (`\r\n`) vs LLM LF (`\n`) newline mismatch in `propose_edit` where character-for-character chunk comparisons failed 100% of the time on Windows files.
+  - Implemented 6-tier resilient chunk replacement engine (`applyChunkEdit`):
+    1. Exact verbatim match.
+    2. CRLF/LF line-ending normalization.
+    3. Trimmed match (ignoring extra leading/trailing blank lines).
+    4. Line-by-line whitespace-tolerant matching (resolving indentation differences between tabs and spaces).
+    5. Full document replacement (if `new_chunk` contains complete `<!DOCTYPE html>` or `<html>...</html>`).
+    6. Smart HTML tag injection (injecting `<style>` before `</head>` and `<script>` before `</body>`).
+  - Fixed `actionHistory` bug where failed diff conflicts didn't record their status, leaving `read_file` as the last action and triggering false "Döngü Engellendi: zaten az önce okundu" blocks.
+  - Exempted recent diff conflicts from `read_file` loop protection so the model can inspect the current file without being blocked.
+  - Inlined current file content directly in diff conflict error responses (`<<<FILE_CONTENT>>>`) so models don't waste extra steps on redundant `read_file` calls.
+
 ## [1.5.4] - 2026-09-24
 
 ### Added

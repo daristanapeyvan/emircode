@@ -721,6 +721,117 @@ export async function evaluateAndAdvanceSubtask(
   return advanceMsg;
 }
 
+export function applyChunkEdit(
+  currentContent: string,
+  originalChunk: string,
+  newChunk: string
+): { success: boolean; newContent: string; method: string } {
+  if (!currentContent) {
+    return { success: true, newContent: newChunk, method: 'empty_current' };
+  }
+
+  // Tier 1: Verbatim exact match
+  if (originalChunk && currentContent.includes(originalChunk)) {
+    return {
+      success: true,
+      newContent: currentContent.replace(originalChunk, newChunk),
+      method: 'exact_verbatim',
+    };
+  }
+
+  // Tier 2: CRLF / LF line ending normalization (Fixes Windows CRLF vs Linux/LLM LF mismatch)
+  const hasCRLF = currentContent.includes('\r\n');
+  const normCurrent = currentContent.replace(/\r\n/g, '\n');
+  const normOriginal = (originalChunk || '').replace(/\r\n/g, '\n');
+  const normNew = (newChunk || '').replace(/\r\n/g, '\n');
+
+  if (normOriginal && normCurrent.includes(normOriginal)) {
+    const replaced = normCurrent.replace(normOriginal, normNew);
+    return {
+      success: true,
+      newContent: hasCRLF ? replaced.replace(/\n/g, '\r\n') : replaced,
+      method: 'crlf_normalized',
+    };
+  }
+
+  // Tier 3: Trimmed match (ignoring extra leading/trailing whitespace/empty lines)
+  const trimmedOrig = normOriginal.trim();
+  if (trimmedOrig && normCurrent.includes(trimmedOrig)) {
+    const replaced = normCurrent.replace(trimmedOrig, normNew.trim());
+    return {
+      success: true,
+      newContent: hasCRLF ? replaced.replace(/\n/g, '\r\n') : replaced,
+      method: 'trimmed_match',
+    };
+  }
+
+  // Tier 4: Line-by-line whitespace-trimmed matching
+  // Resolves indentation discrepancies (spaces vs tabs, 2 vs 4 spaces, trailing whitespace)
+  const currentLines = normCurrent.split('\n');
+  const origLines = normOriginal.split('\n').filter((l) => l.trim().length > 0);
+
+  if (origLines.length > 0 && origLines.length <= currentLines.length) {
+    for (let i = 0; i <= currentLines.length - origLines.length; i++) {
+      let matches = true;
+      for (let j = 0; j < origLines.length; j++) {
+        if (currentLines[i + j].trim() !== origLines[j].trim()) {
+          matches = false;
+          break;
+        }
+      }
+      if (matches) {
+        const before = currentLines.slice(0, i).join('\n');
+        const after = currentLines.slice(i + origLines.length).join('\n');
+        const replaced = (before ? before + '\n' : '') + normNew + (after ? '\n' + after : '');
+        return {
+          success: true,
+          newContent: hasCRLF ? replaced.replace(/\n/g, '\r\n') : replaced,
+          method: 'line_by_line_trimmed',
+        };
+      }
+    }
+  }
+
+  // Tier 5: Full document replacement
+  if (/<!doctype\s+html/i.test(normNew) || /<html[\s>]/i.test(normNew)) {
+    return {
+      success: true,
+      newContent: hasCRLF ? normNew.replace(/\n/g, '\r\n') : normNew,
+      method: 'full_document_replacement',
+    };
+  }
+
+  // Tier 6: Smart insertion for CSS/JS blocks into HTML
+  if (/<style[\s>]/i.test(normNew) || /<link\s+rel=["']stylesheet/i.test(normNew)) {
+    if (normCurrent.includes('</head>')) {
+      const replaced = normCurrent.replace('</head>', `  ${normNew}\n</head>`);
+      return {
+        success: true,
+        newContent: hasCRLF ? replaced.replace(/\n/g, '\r\n') : replaced,
+        method: 'smart_head_injection',
+      };
+    }
+  }
+
+  if (/<script[\s>]/i.test(normNew)) {
+    if (normCurrent.includes('</body>')) {
+      const replaced = normCurrent.replace('</body>', `  ${normNew}\n</body>`);
+      return {
+        success: true,
+        newContent: hasCRLF ? replaced.replace(/\n/g, '\r\n') : replaced,
+        method: 'smart_body_injection',
+      };
+    }
+  }
+
+  // Conflict fallback
+  return {
+    success: false,
+    newContent: currentContent + (hasCRLF ? '\r\n' : '\n') + newChunk,
+    method: 'append_conflict',
+  };
+}
+
 export class AgentEngine {
   private abortController: AbortController | null = null;
   private stepAbortController: AbortController | null = null;
@@ -1288,13 +1399,18 @@ export class AgentEngine {
         if (parsed.type === 'read_file') {
           const reqPath = parsed.payload.path;
           const lastAction = actionHistory[actionHistory.length - 1];
+          const hasRecentConflict = actionHistory.slice(-4).some(
+            (a) => a.action === 'propose_edit_conflict' || a.action === 'propose_edit_rejected'
+          );
           if (
+            !hasRecentConflict &&
             lastAction &&
             lastAction.action === 'read_file' &&
             lastAction.key === reqPath &&
             ledger.knownFiles[reqPath]
           ) {
             consecutiveErrors++;
+            actionHistory.push({ action: 'read_file_loop_blocked', key: reqPath, timestamp: Date.now() });
             const observation = `[DÖNGÜ KORUMASI]: "${reqPath}" dosyasını zaten az önce okudunuz ve içeriği hafızanızda mevcuttur. Aynı dosyayı tekrar okumak yerine kod değişikliği önerin ('propose_edit') veya bekleyen sıradaki alt göreve geçin.`;
             callbacks.onStep({
               id: `step_loop_read_${Date.now()}`,
@@ -2066,16 +2182,9 @@ export class AgentEngine {
             continue;
           }
 
-          let hasConflict = false;
-          let proposedFullContent = currentContent;
-          if (currentContent && original_chunk && currentContent.includes(original_chunk)) {
-            proposedFullContent = currentContent.replace(original_chunk, new_chunk);
-          } else if (!currentContent) {
-            proposedFullContent = new_chunk;
-          } else {
-            hasConflict = true;
-            proposedFullContent = currentContent + '\n' + new_chunk;
-          }
+          const editResult = applyChunkEdit(currentContent, original_chunk, new_chunk);
+          let hasConflict = !editResult.success;
+          let proposedFullContent = editResult.newContent;
 
           const changesetItem: ChangesetItem = {
             id: `cs_edit_${Date.now()}`,
@@ -2085,12 +2194,13 @@ export class AgentEngine {
             proposedContentHash: '',
             originalContent: currentContent,
             newContent: proposedFullContent,
-            reason,
+            reason: reason || 'Kod güncellendi',
             selected: true,
             status: 'pending',
           };
 
           if (securityProfile === 'autonomous' && hasConflict) {
+            actionHistory.push({ action: 'propose_edit_conflict', key: filePath, timestamp: Date.now() });
             callbacks.onStep({
               id: `step_edit_conflict_${Date.now()}`,
               timestamp: Date.now(),
@@ -2103,7 +2213,7 @@ export class AgentEngine {
             conversation.push({ role: 'assistant', content: fullResponse });
             conversation.push({
               role: 'user',
-              content: `[HATA - DİFF ÇAKIŞMASI]: 'original_chunk' hedef dosya (${filePath}) içeriğinde tam eşleşmedi. Lütfen önce 'read_file' çağırarak dosyanın güncel içeriğini inceleyin ve tam eşleşen blok ile 'propose_edit' çağrısını yenileyin.`,
+              content: `[HATA - DİFF ÇAKIŞMASI]: 'original_chunk' hedef dosya (${filePath}) içeriğinde tam eşleşmedi. Dosyanın güncel içeriği aşağıdadır:\n<<<FILE_CONTENT>>>\n${currentContent}\n<<<END_FILE_CONTENT>>>\nLütfen yukarıdaki güncel içeriğe bakarak 'propose_edit' çağrısındaki 'original_chunk' parametresini tam eşleşecek şekilde verin veya tüm dosyayı 'propose_create' ile baştan oluşturun.`,
             });
             continue;
           }
