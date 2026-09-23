@@ -48,7 +48,23 @@ export const useModelStore = create<ModelState>((set, get) => ({
 
   checkConnection: async (endpoint) => {
     set({ connectionStatus: 'connecting', connectionError: null });
-    const res = await ollamaClient.testConnection(endpoint);
+    const targetEndpoint = endpoint || ollamaClient.getEndpoint();
+    let res = await ollamaClient.testConnection(targetEndpoint);
+
+    // Auto-recovery: If local Ollama endpoint cannot be reached, try auto-starting local service
+    const isLocal = !targetEndpoint || targetEndpoint.includes('localhost') || targetEndpoint.includes('127.0.0.1');
+    if (!res.ok && isLocal && window.electronAPI?.startOllamaService) {
+      try {
+        const started = await window.electronAPI.startOllamaService();
+        if (started) {
+          await new Promise((r) => setTimeout(r, 1000));
+          res = await ollamaClient.testConnection(targetEndpoint);
+        }
+      } catch {
+        // ignore
+      }
+    }
+
     if (res.ok) {
       set({ connectionStatus: 'connected', connectionError: null });
       get().fetchModels();

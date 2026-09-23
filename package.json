@@ -1,6 +1,6 @@
 {
   "name": "emir-code",
-  "version": "1.5.3",
+  "version": "1.5.4",
   "description": "Emir Code - AI Native Coding Agent Desktop Client",
   "main": "dist-electron/main.js",
   "author": {

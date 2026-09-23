@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.4] - 2026-09-24
+
+### Added
+- **Automatic Local Ollama Health & Service Auto-Recovery (Otomatik Ollama Servis Başlatma ve İyileştirme)**:
+  - On application startup or manual `checkConnection`, if `localhost:11434` is unreachable, Emir Code automatically triggers the local Ollama background service (`startOllamaService`) and retries with backoff instead of dropping to a disconnected state.
+  - Added an active loading indicator and auto-start invocation to the "Yeniden Dene" banner button in `ChatContainer`.
+
 ## [1.5.3] - 2026-09-24
 
 ### Added

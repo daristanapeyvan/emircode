@@ -1,5 +1,5 @@
-import React, { useRef, useEffect } from 'react';
-import { AlertCircle, RefreshCw } from 'lucide-react';
+import React, { useRef, useEffect, useState } from 'react';
+import { AlertCircle, RefreshCw, Loader2 } from 'lucide-react';
 import { ChatMessage } from './ChatMessage';
 import { Composer } from './Composer';
 import { EmptyState } from './EmptyState';
@@ -16,8 +16,21 @@ export const ChatContainer: React.FC = () => {
   const { settings } = useSettingsStore();
   const t = getTranslations(settings.language);
 
+  const [isRetrying, setIsRetrying] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  const handleRetry = async () => {
+    setIsRetrying(true);
+    try {
+      if (window.electronAPI?.startOllamaService) {
+        await window.electronAPI.startOllamaService();
+      }
+      await checkConnection();
+    } finally {
+      setIsRetrying(false);
+    }
+  };
 
   // Auto-scroll on new message / streaming token
   useEffect(() => {
@@ -40,11 +53,16 @@ export const ChatContainer: React.FC = () => {
           </div>
           <button
             type="button"
-            onClick={() => checkConnection()}
-            className="flex items-center gap-1 px-2 py-0.5 rounded bg-rose-900/80 hover:bg-rose-800 text-white font-medium transition-colors cursor-pointer"
+            disabled={isRetrying}
+            onClick={handleRetry}
+            className="flex items-center gap-1.5 px-2.5 py-0.5 rounded bg-rose-900/80 hover:bg-rose-800 disabled:opacity-50 text-white font-medium transition-colors cursor-pointer"
           >
-            <RefreshCw size={11} strokeWidth={1.5} />
-            <span>{t.common.retry}</span>
+            {isRetrying ? (
+              <Loader2 size={11} className="animate-spin" strokeWidth={1.5} />
+            ) : (
+              <RefreshCw size={11} strokeWidth={1.5} />
+            )}
+            <span>{isRetrying ? (t.common?.loading || 'Bağlanıyor...') : t.common.retry}</span>
           </button>
         </div>
       )}
