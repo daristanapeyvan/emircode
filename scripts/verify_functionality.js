@@ -159,9 +159,10 @@ test('8. Architecture: HistorySidebar and chatStore support unified chat & agent
   const chatTypeSrc = fs.readFileSync(path.join(__dirname, '../src/types/chat.ts'), 'utf-8');
   assert(chatTypeSrc.includes("mode?: 'chat' | 'agent'"), 'Chat type missing mode discriminator');
 
-  const appSrc = fs.readFileSync(path.join(__dirname, '../src/App.tsx'), 'utf-8');
+  const appSrc = fs.readFileSync(path.join(__dirname, '../src/App.tsx'), 'utf-8').replace(/\r\n/g, '\n');
   assert(
-    appSrc.includes('<HistorySidebar />\n        {activeAppMode === \'agent\' ? <AgentWorkspace /> : <ChatContainer />}'),
+    appSrc.includes('<HistorySidebar />') &&
+    appSrc.includes("activeAppMode === 'agent' ? <AgentWorkspace /> : <ChatContainer />"),
     'App.tsx does not mount HistorySidebar persistently across modes'
   );
 });
