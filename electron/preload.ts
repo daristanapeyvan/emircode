@@ -78,6 +78,8 @@ export interface ElectronAPI {
   readWorkspaceFile: (relativePath: string) => Promise<{ success: boolean; content?: string; hash?: string; error?: string }>;
   searchWorkspaceCode: (query: string, options?: { isRegex?: boolean }) => Promise<{ success: boolean; matches?: { relativePath: string; lineNumber: number; lineContent: string }[]; error?: string }>;
   readGit: (action: 'status' | 'diff' | 'log') => Promise<{ success: boolean; output: string; error?: string }>;
+  createWorkspaceDirectory: (relativePath: string) => Promise<{ success: boolean; error?: string }>;
+  deleteWorkspaceItem: (relativePath: string) => Promise<{ success: boolean; error?: string }>;
   
   // Zero Direct Write: Request token & apply with Main Process validation
   requestMutationToken: (params: {
@@ -150,6 +152,8 @@ const electronAPI: ElectronAPI = {
   readWorkspaceFile: (relativePath) => ipcRenderer.invoke('workspace:readFile', relativePath),
   searchWorkspaceCode: (query, options) => ipcRenderer.invoke('workspace:search', { query, options }),
   readGit: (action) => ipcRenderer.invoke('workspace:readGit', { action }),
+  createWorkspaceDirectory: (relativePath) => ipcRenderer.invoke('workspace:createDirectory', relativePath),
+  deleteWorkspaceItem: (relativePath) => ipcRenderer.invoke('workspace:deleteItem', relativePath),
   requestMutationToken: (params) => ipcRenderer.invoke('workspace:requestMutationToken', params),
   applyApprovedMutation: (params) => ipcRenderer.invoke('workspace:applyApprovedMutation', params),
   runApprovedCommand: (params) => ipcRenderer.invoke('workspace:runApprovedCommand', params),

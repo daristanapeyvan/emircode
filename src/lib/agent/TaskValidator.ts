@@ -101,6 +101,8 @@ export class TaskValidator {
             missingEvidence.push(crit.description);
             break;
           }
+          // Check for external link tags
+          const hasExternalCssLink = /<link\s+[^>]*rel=["']stylesheet["']/i.test(content);
           // Validate real <style> block with actual CSS rules (not just empty tag)
           const styleMatch = content.match(/<style[^>]*>([\s\S]*?)<\/style>/i);
           const hasInlineStyleAttr = /style\s*=\s*["'][^"']{5,}["']/i.test(content);
@@ -114,15 +116,18 @@ export class TaskValidator {
             }
           }
 
-          if (hasValidCss || hasInlineStyleAttr) {
+          if (hasValidCss || (hasInlineStyleAttr && !hasExternalCssLink)) {
             criterionResults.push({ criterion: crit, passed: true });
           } else {
+            const errorMsg = hasExternalCssLink
+              ? `'${crit.target}' içinde harici '<link rel="stylesheet">' tespit edildi; stiller dosya içine (<style>...</style>) gömülü olmalıdır.`
+              : `'${crit.target}' dosyasında geçerli bir <style> bloğu veya stil tanımları bulunamadı.`;
             criterionResults.push({
               criterion: crit,
               passed: false,
-              error: `'${crit.target}' dosyasında geçerli bir <style> bloğu veya stil tanımları bulunamadı.`,
+              error: errorMsg,
             });
-            missingEvidence.push(crit.description);
+            missingEvidence.push(errorMsg);
           }
           break;
         }
@@ -133,25 +138,33 @@ export class TaskValidator {
             missingEvidence.push(crit.description);
             break;
           }
-          // Validate real <script> block with actual JS code
-          const scriptMatch = content.match(/<script[^>]*>([\s\S]*?)<\/script>/i);
+          // Check for external script src tags
+          const hasExternalScriptSrc = /<script\s+[^>]*src=/i.test(content);
+          // Validate real <script> block with actual JS code (excluding external src)
+          const scriptMatches = content.match(/<script(?![^>]*src=)[^>]*>([\s\S]*?)<\/script>/gi);
           let hasValidJs = false;
-          if (scriptMatch && scriptMatch[1]) {
-            const jsBody = scriptMatch[1].trim();
-            if (jsBody.length >= 10) {
-              hasValidJs = true;
+          if (scriptMatches) {
+            for (const sm of scriptMatches) {
+              const body = sm.replace(/<script[^>]*>|<\/script>/gi, '').trim();
+              if (body.length >= 10) {
+                hasValidJs = true;
+                break;
+              }
             }
           }
 
           if (hasValidJs) {
             criterionResults.push({ criterion: crit, passed: true });
           } else {
+            const errorMsg = hasExternalScriptSrc
+              ? `'${crit.target}' içinde harici '<script src="..."> tespit edildi; JavaScript kodları dosya içine (<script>...</script>) gömülü olmalıdır.`
+              : `'${crit.target}' dosyasında geçerli bir <script> bloğu veya JavaScript kodu bulunamadı.`;
             criterionResults.push({
               criterion: crit,
               passed: false,
-              error: `'${crit.target}' dosyasında geçerli bir <script> bloğu veya JavaScript kodu bulunamadı.`,
+              error: errorMsg,
             });
-            missingEvidence.push(crit.description);
+            missingEvidence.push(errorMsg);
           }
           break;
         }

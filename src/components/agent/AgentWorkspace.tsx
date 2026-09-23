@@ -19,8 +19,12 @@ import {
   Clock,
   Brain,
   Loader2,
+  Lightbulb,
   PanelRight,
   Trash2,
+  FolderPlus,
+  Check,
+  Circle,
   HelpCircle,
   Send,
   Activity,
@@ -144,6 +148,7 @@ export const AgentWorkspace: React.FC = () => {
     setInlineTranscriptOpen,
     init,
     openWorkspaceDialog,
+    refreshFiles,
     openFile,
     closeFileTab,
     closeAllFileTabs,
@@ -197,6 +202,56 @@ export const AgentWorkspace: React.FC = () => {
       textareaRef.current.style.height = `${Math.min(scrollHeight, 180)}px`;
     }
   }, [goalInput]);
+
+  const timelineEndRef = useRef<HTMLDivElement>(null);
+  const [creatingFolderIn, setCreatingFolderIn] = useState<string | null>(null);
+  const [newFolderName, setNewFolderName] = useState('');
+
+  // Auto-scroll timeline smoothly on updates
+  useEffect(() => {
+    if (activeTabId === 'timeline') {
+      timelineEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }
+  }, [steps.length, activeStreamText, pendingQuestion, activeTabId]);
+
+  const handleStartCreateFolder = (parentPath: string) => {
+    setCreatingFolderIn(parentPath);
+    setNewFolderName('');
+  };
+
+  const handleConfirmCreateFolder = async () => {
+    const name = newFolderName.trim();
+    if (!name || creatingFolderIn === null) {
+      setCreatingFolderIn(null);
+      return;
+    }
+    const fullRelPath = creatingFolderIn ? `${creatingFolderIn}/${name}` : name;
+    if (window.electronAPI?.createWorkspaceDirectory) {
+      const res = await window.electronAPI.createWorkspaceDirectory(fullRelPath);
+      if (res.success) {
+        await refreshFiles();
+      }
+    }
+    setCreatingFolderIn(null);
+    setNewFolderName('');
+  };
+
+  const handleDeleteItem = async (relativePath: string, isDirectory: boolean) => {
+    const name = relativePath.split('/').pop() || relativePath;
+    const confirmMsg = isDirectory
+      ? `"${name}" klasörünü ve içeriğini kalıcı olarak silmek istediğinizden emin misiniz?`
+      : `"${name}" dosyasını silmek istediğinizden emin misiniz?`;
+
+    if (window.confirm(confirmMsg)) {
+      if (window.electronAPI?.deleteWorkspaceItem) {
+        const res = await window.electronAPI.deleteWorkspaceItem(relativePath);
+        if (res.success) {
+          closeFileTab(relativePath);
+          await refreshFiles();
+        }
+      }
+    }
+  };
 
   const handleInterrupt = () => {
     if (!goalInput.trim()) return;
@@ -332,14 +387,14 @@ export const AgentWorkspace: React.FC = () => {
             </button>
           )}
 
-          {/* Reasoning & Dump Panel Toggle (Linear/Cursor style PanelRight) */}
+          {/* Reasoning & Dump Panel Toggle (Idea / Lightbulb icon) */}
           <button
             onClick={toggleReasoningDump}
             className={cn(
               'p-1.5 rounded-md text-xs transition-colors cursor-pointer',
               showReasoningDump
-                ? 'text-zinc-100 bg-zinc-800 border border-zinc-700/60 shadow-sm'
-                : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/40'
+                ? 'text-amber-300 bg-amber-950/40 border border-amber-600/50 shadow-sm'
+                : 'text-zinc-500 hover:text-amber-300 hover:bg-zinc-800/40'
             )}
             title={
               showReasoningDump
@@ -347,7 +402,7 @@ export const AgentWorkspace: React.FC = () => {
                 : t.agent.showReasoning
             }
           >
-            <PanelRight size={13} />
+            <Lightbulb size={13} strokeWidth={1.5} />
           </button>
 
           {/* Clear Session Button */}
@@ -369,9 +424,56 @@ export const AgentWorkspace: React.FC = () => {
         {isExplorerOpen && (
           <div className="w-56 border-r border-zinc-800/60 bg-zinc-950/20 flex flex-col shrink-0 animate-in slide-in-from-left-2 duration-150">
             <div className="p-2.5 border-b border-zinc-800/40 flex items-center justify-between text-xs font-medium text-zinc-400">
-              <span>{t.agent.projectExplorer}</span>
-              <span className="text-[11px] text-zinc-500">{workspaceFiles.length} {t.agent.items}</span>
+              <span className="font-semibold text-zinc-300 tracking-tight">{t.agent.projectExplorer}</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] font-mono text-zinc-500">{workspaceFiles.length} {t.agent.items}</span>
+                {workspaceRoot && (
+                  <button
+                    type="button"
+                    onClick={() => handleStartCreateFolder('')}
+                    title="Yeni Klasör Oluştur"
+                    className="p-1 rounded text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/60 transition-colors cursor-pointer"
+                  >
+                    <FolderPlus size={13} />
+                  </button>
+                )}
+              </div>
             </div>
+
+            {/* Inline folder creation input if active */}
+            {creatingFolderIn !== null && (
+              <div className="px-2 py-1.5 bg-zinc-900/80 border-b border-zinc-800/60 flex items-center gap-1.5 animate-in fade-in-50 duration-150">
+                <FolderPlus size={13} className="text-amber-400 shrink-0" />
+                <input
+                  autoFocus
+                  type="text"
+                  placeholder="Klasör adı..."
+                  value={newFolderName}
+                  onChange={(e) => setNewFolderName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleConfirmCreateFolder();
+                    if (e.key === 'Escape') setCreatingFolderIn(null);
+                  }}
+                  className="flex-1 bg-zinc-950 border border-zinc-700/80 rounded px-1.5 py-0.5 text-xs text-zinc-200 focus:outline-none focus:border-blue-500 font-mono"
+                />
+                <button
+                  type="button"
+                  onClick={handleConfirmCreateFolder}
+                  className="p-1 rounded text-zinc-400 hover:text-emerald-400 hover:bg-zinc-800/80 cursor-pointer"
+                  title="Onayla (Enter)"
+                >
+                  <Check size={12} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCreatingFolderIn(null)}
+                  className="p-1 rounded text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/80 cursor-pointer"
+                  title="İptal (Esc)"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            )}
 
             <div className="flex-1 overflow-y-auto">
               {workspaceRoot ? (
@@ -381,6 +483,8 @@ export const AgentWorkspace: React.FC = () => {
                     openFile(path);
                   }}
                   selectedFilePath={activeTabId !== 'timeline' ? activeTabId : undefined}
+                  onDeleteFile={(path, isDir) => handleDeleteItem(path, isDir)}
+                  onCreateFolder={(parentPath) => handleStartCreateFolder(parentPath)}
                 />
               ) : (
                 <div className="p-6 text-center text-xs text-zinc-500 space-y-3">
@@ -459,7 +563,7 @@ export const AgentWorkspace: React.FC = () => {
           )}
 
           {/* Tab View: File Preview or Agent Timeline */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          <div className="flex-1 overflow-y-auto p-4 pb-20 space-y-4 scroll-smooth">
             {activeTabId !== 'timeline' && openFiles.find((f) => f.relativePath === activeTabId) ? (
               (() => {
                 const currentOpenFile = openFiles.find((f) => f.relativePath === activeTabId)!;
@@ -492,7 +596,7 @@ export const AgentWorkspace: React.FC = () => {
               })()
             ) : (
               /* Agent Timeline */
-              <div className="max-w-3xl mx-auto space-y-3 pb-4 h-full flex flex-col">
+              <div className="max-w-3xl mx-auto space-y-3 pb-4 min-h-full flex flex-col justify-start">
                 {steps.length === 0 ? (
                   <div className="flex flex-col items-center justify-center p-8 text-center select-none max-w-md mx-auto my-auto py-16 animate-in fade-in duration-300">
                     <div className="mb-4">
@@ -517,29 +621,22 @@ export const AgentWorkspace: React.FC = () => {
                   </div>
                 ) : (
                   <>
-                    {/* PINNED SUBTASK CHECKLIST WIDGET */}
-                    {subtasks.length > 0 && (
-                      <div className="p-3.5 rounded-xl bg-zinc-950/70 border border-zinc-800/80 shadow-md space-y-3 shrink-0 mb-1">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <div className="w-5 h-5 rounded-md bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
-                              <CheckCircle2 size={13} />
-                            </div>
-                            <span className="text-xs font-semibold text-zinc-100 tracking-tight">
-                              {t.agent.subtasksTitle}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-[11px] font-mono font-medium text-cyan-400 bg-cyan-950/40 px-2 py-0.5 rounded-full border border-cyan-800/40">
-                              {subtasks.filter((t) => t.status === 'completed').length} / {subtasks.length} {t.agent.subtasksProgress}
-                            </span>
-                          </div>
+                    {/* SLEEK SUBTASK CHECKLIST WIDGET (Minimalist & only when > 1 subtask) */}
+                    {subtasks.length > 1 && (
+                      <div className="p-2.5 rounded-lg bg-zinc-900/40 border border-zinc-800/60 space-y-2 shrink-0 mb-1 select-none">
+                        <div className="flex items-center justify-between text-xs text-zinc-400">
+                          <span className="font-medium text-zinc-300 tracking-tight">
+                            {t.agent.subtasksTitle}
+                          </span>
+                          <span className="text-[11px] font-mono text-zinc-500">
+                            {subtasks.filter((t) => t.status === 'completed').length}/{subtasks.length}
+                          </span>
                         </div>
 
                         {/* Progress Bar */}
-                        <div className="w-full bg-zinc-900 rounded-full h-1.5 overflow-hidden">
+                        <div className="w-full bg-zinc-800/80 rounded-full h-1 overflow-hidden">
                           <div
-                            className="bg-cyan-500 h-1.5 rounded-full transition-all duration-300"
+                            className="bg-zinc-400 h-1 rounded-full transition-all duration-300"
                             style={{
                               width: `${Math.round(
                                 (subtasks.filter((t) => t.status === 'completed').length / subtasks.length) * 100
@@ -549,27 +646,32 @@ export const AgentWorkspace: React.FC = () => {
                         </div>
 
                         {/* Subtasks List */}
-                        <div className="space-y-1.5 pt-1">
+                        <div className="space-y-1 pt-0.5">
                           {subtasks.map((task, idx) => {
                             const isCompleted = task.status === 'completed';
                             const isInProgress = task.status === 'in_progress';
+                            const isActiveAndRunning = isInProgress && isBusy;
                             return (
                               <div
                                 key={task.id || idx}
                                 className={cn(
-                                  'flex items-start gap-2.5 px-2.5 py-1.5 rounded-lg text-xs transition-colors',
-                                  isInProgress
-                                    ? 'bg-cyan-950/25 border border-cyan-800/40 text-zinc-100'
+                                  'flex items-start gap-2 px-2 py-1 rounded text-xs transition-colors',
+                                  isActiveAndRunning
+                                    ? 'bg-zinc-800/50 text-zinc-100 font-medium'
                                     : isCompleted
-                                    ? 'bg-zinc-900/30 text-zinc-400'
-                                    : 'text-zinc-500'
+                                    ? 'text-zinc-500'
+                                    : 'text-zinc-400'
                                 )}
                               >
                                 <div className="mt-0.5 shrink-0">
                                   {isCompleted ? (
-                                    <CheckCircle2 size={14} className="text-emerald-400" />
+                                    <CheckCircle2 size={13} className="text-emerald-400/80" />
+                                  ) : isActiveAndRunning ? (
+                                    <Loader2 size={13} className="animate-spin text-zinc-300" />
                                   ) : isInProgress ? (
-                                    <Loader2 size={14} className="animate-spin text-cyan-400" />
+                                    <div className="w-3.5 h-3.5 rounded-full border border-amber-500/50 flex items-center justify-center text-[9px] font-mono text-amber-400">
+                                      ⏸
+                                    </div>
                                   ) : (
                                     <div className="w-3.5 h-3.5 rounded-full border border-zinc-700 flex items-center justify-center text-[9px] font-mono text-zinc-500">
                                       {idx + 1}
@@ -578,18 +680,12 @@ export const AgentWorkspace: React.FC = () => {
                                 </div>
                                 <span
                                   className={cn(
-                                    'flex-1 font-sans text-xs leading-relaxed',
-                                    isCompleted && 'line-through text-zinc-500',
-                                    isInProgress && 'font-medium text-zinc-200'
+                                    'flex-1 text-xs leading-relaxed',
+                                    isCompleted && 'line-through text-zinc-500'
                                   )}
                                 >
                                   {task.description}
                                 </span>
-                                {isInProgress && (
-                                  <span className="text-[10px] uppercase tracking-wider font-semibold text-cyan-400 shrink-0 bg-cyan-950/50 px-1.5 py-0.5 rounded border border-cyan-800/40">
-                                    {t.agent.activeSubtask}
-                                  </span>
-                                )}
                               </div>
                             );
                           })}
@@ -624,12 +720,12 @@ export const AgentWorkspace: React.FC = () => {
                       return (
                         <div
                           key={step.id}
-                          className="flex items-center gap-2 px-3 py-2 rounded-lg bg-zinc-950/60 border border-zinc-800/70 text-xs text-zinc-400"
+                          className="flex items-center gap-2 px-3 py-2 rounded-lg bg-zinc-950/60 border border-zinc-800/70 text-xs text-zinc-400 min-w-0"
                         >
                           <Terminal size={13} className="text-zinc-400 shrink-0" />
-                          <span className="font-mono text-zinc-300 font-medium">{step.toolName}</span>
-                          <span className="text-zinc-600">→</span>
-                          <span className="truncate font-mono text-[11px] text-zinc-400">{step.content}</span>
+                          <span className="font-mono text-zinc-300 font-medium shrink-0">{step.toolName}</span>
+                          <span className="text-zinc-600 shrink-0">→</span>
+                          <span className="truncate font-mono text-[11px] text-zinc-400 min-w-0 flex-1">{step.content}</span>
                         </div>
                       );
                     }
@@ -639,7 +735,7 @@ export const AgentWorkspace: React.FC = () => {
                         <div
                           key={step.id}
                           className={cn(
-                            'flex items-start gap-2 px-3 py-2 rounded-lg text-xs border leading-relaxed',
+                            'flex items-start gap-2 px-3 py-2 rounded-lg text-xs border leading-relaxed min-w-0',
                             step.status === 'success'
                               ? 'bg-zinc-900/30 border-zinc-800/70 text-zinc-300'
                               : step.status === 'rejected'
@@ -884,6 +980,9 @@ export const AgentWorkspace: React.FC = () => {
                     )}
                   </div>
                 )}
+
+                {/* Auto-scroll anchor */}
+                <div ref={timelineEndRef} className="h-6 shrink-0" />
               </div>
             )}
           </div>

@@ -12,7 +12,12 @@ import {
 } from '@/types/agent';
 import { WorkspaceFileInfo } from '../../../electron/preload';
 import { OllamaChatMessage } from '@/types/ollama';
-import { SecurityProfile } from '@/types/settings';
+import {
+  SecurityProfile,
+  WebSynthesisStrategy,
+  ModificationStrategy,
+  AgentOptimizationConfig,
+} from '@/types/settings';
 import { ToolDispatcher } from './ToolDispatcher';
 import {
   wrapUntrustedFileContent,
@@ -191,11 +196,15 @@ export function isSmallLanguageModel(modelName: string): boolean {
 export function buildCompactSystemPrompt(
   gitAvailable: boolean,
   securityProfile: SecurityProfile = 'strict',
-  webAccessOrCapabilities: boolean | AgentCapabilities = false
+  webAccessOrCapabilities: boolean | AgentCapabilities = false,
+  webSynthesisStrategy: WebSynthesisStrategy = 'auto',
+  modificationStrategy: ModificationStrategy = 'smart_injection'
 ): string {
   const isAutonomous = securityProfile === 'autonomous';
   const webSearch = typeof webAccessOrCapabilities === 'object' ? webAccessOrCapabilities.webSearch : webAccessOrCapabilities;
   const webFetch = typeof webAccessOrCapabilities === 'object' ? webAccessOrCapabilities.webFetch : webAccessOrCapabilities;
+  const isModular = webSynthesisStrategy === 'modular';
+  const isOverwriteMod = modificationStrategy === 'full_overwrite';
 
   const webSchemas = (webSearch || webFetch)
     ? `
@@ -211,19 +220,37 @@ export function buildCompactSystemPrompt(
 `
     : '';
 
-  return `Sen Emir Code Otonom Kodlama Ajanısın.
-GÖREV: Kullanıcının talep ettiği kodları, web sitesini ve projeyi diske eksiksiz üretmek.
+  const fileRule = isModular
+    ? `2. MODÜLER VE EKSİKSİZ DOSYA KURALI:
+   - Projenizi ihtiyaca göre mantıksal modüllere veya ayrı dosyalara (HTML, CSS, JS, Python modülleri vb.) bölebilirsiniz.
+   - KRİTİK: Kod içinde referans veya import verdiğiniz HER harici dosyayı DA mutlaka 'propose_create' ile eksiksiz olarak diske yazmalısınız. Var olmayan veya içeriği boş dosyalara referans vermek KESİNLİKLE YASAKTIR.`
+    : `2. SIFIR EKSİK / HARİCİ DOSYA YANILSAMASI YASAĞI:
+   - Kodları üretirken var olmayan dosyalara hayali bağlantılar vermeyin.
+   - Web / HTML projelerinde: Harici dosya bağlantısı yazmayın; tüm stilleri '<head>' içinde '<style> ... </style>' ve tüm JavaScript kodlarını '<body>' sonunda '<script> ... </script>' etiketleri arasına yazın.
+   - Python, Go, Node.js, C++ vb. projelerde: Programın çalışması için gereken temel kodları ve bağımlılıkları eksiksiz sağlayın.`;
 
-ÖNEMLİ KURALLAR:
+  const editRule = isOverwriteMod
+    ? `7. GÜNCELLEME STRATEJİSİ: Mevcut dosyalarda değişiklik yaparken kod kaybını veya bağlam kopukluğunu önlemek için 'propose_create' ile dosyanın güncel ve eksiksiz halini doğrudan diske yazın. 'propose_edit' sadece çok küçük parça değişikliklerinde kullanılmalıdır.`
+    : `7. GÜNCELLEME STRATEJİSİ: Mevcut dosyalarda değişiklik yaparken dosyanın tamamını baştan yazmak yerine 'propose_edit' ile sadece değişecek parçayı hedefleyin.`;
+
+  return `Sen Emir Code Otonom Yazılım ve Kodlama Ajanısın.
+GÖREV: Kullanıcının talep ettiği kodları, yazılımı, betikleri veya projeyi diske eksiksiz üretmek.
+
+ÖNEMLİ VE TAVİZSİZ KURALLAR:
 1. ${isAutonomous ? 'OTONOM MOD: Kullanıcıya asla soru sorma ("ask_question" yasak). İnisiyatif alarak dosyaları eksiksiz oluştur.' : 'Kod değişikliklerini diske uygulamak için "propose_create" veya "propose_edit" kullan.'}
-2. DİZİN BOŞSA VEYA YENİ PROJE İSTENİYORSA: Dizin listeleme veya dosya okuma döngüsüne girmeyin; derhal 1. araç olan "propose_create" ile 'index.html' dosyasını ve kodları oluşturun.
-3. SADECE aşağıdaki JSON şemalarından birini \`\`\`json ... \`\`\` bloğu içinde üret. Konuşma cümleleri kurma, doğrudan eylem bloğunu üret.
-4. Dosyalar başarıyla oluşturulduktan ve görev tamamlandıktan sonra "finish" çağır.
+${fileRule}
+3. ARAYÜZ VE WEB STANDARDI:
+   - Eğer bir web sayfası veya HTML belgesi üretiliyorsa: '<head>' içine mutlaka '<meta name="viewport" content="width=device-width, initial-scale=1.0">' etiketini ekleyin ve esnek/responsive düzen kullanın. Diğer dillerde (Python, C++, Go vb.) dilin standartlarına uygun temiz kod üretin.
+4. SOHBET METNİ VE REDDETMEK YASAKTIR:
+   - Asla "çok karmaşık", "yapamam", "üzgünüm" gibi ret veya sohbet cümleleri kurma. SADECE aşağıdaki JSON şemasını üret!
+5. DİZİN BOŞSA VEYA YENİ PROJE İSTENİYORSA: Dizin listeleme veya dosya okuma döngüsüne girmeyin; derhal 1. araç olan "propose_create" ile talep edilen hedef kaynak dosyayı (örn. 'index.html', 'main.py', 'app.ts' vb.) ve kodları oluşturun.
+6. Dosyalar başarıyla oluşturulduktan ve görev tamamlandıktan sonra "finish" çağır.
+${editRule}
 
 ARAÇLAR VE JSON ŞEMALARI:
 1. Yeni Dosya Oluştur (Öncelikli Eylem):
 \`\`\`json
-{ "action": "propose_create", "path": "index.html", "content": "<!DOCTYPE html>\\n<html lang=\\"tr\\">\\n<head>\\n<meta charset=\\"UTF-8\\">\\n<title>Web Sitesi</title>\\n<style>\\nbody { font-family: sans-serif; margin: 0; padding: 2rem; background: #0f172a; color: #f8fafc; }\\n</style>\\n</head>\\n<body>\\n<h1>Hoş Geldiniz</h1>\\n<p>Modern web sayfası</p>\\n</body>\\n</html>", "reason": "Ana web sayfası oluşturuldu" }
+{ "action": "propose_create", "path": "index.html", "content": "<!DOCTYPE html>\\n<html lang=\\"tr\\">\\n<head>\\n  <meta charset=\\"UTF-8\\">\\n  <meta name=\\"viewport\\" content=\\"width=device-width, initial-scale=1.0\\">\\n  <title>Modern Web Uygulaması</title>\\n  <style>\\n    * { box-sizing: border-box; margin: 0; padding: 0; }\\n    body { font-family: system-ui, -apple-system, sans-serif; background: #0f172a; color: #f8fafc; padding: 2rem; }\\n    .card { background: #1e293b; padding: 1.5rem; border-radius: 8px; border: 1px solid #334155; max-width: 600px; margin: 0 auto; }\\n    button { background: #3b82f6; color: white; border: none; padding: 0.6rem 1.2rem; border-radius: 6px; cursor: pointer; font-weight: 500; }\\n    button:hover { background: #2563eb; }\\n    @media (max-width: 640px) { body { padding: 1rem; } .card { padding: 1rem; } }\\n  </style>\\n</head>\\n<body>\\n  <div class=\\"card\\">\\n    <h1>Hoş Geldiniz</h1>\\n    <p>Modern ve responsive arayüz.</p>\\n    <button id=\\"actionBtn\\">Etkileşim</button>\\n    <div id=\\"output\\" style=\\"margin-top: 1rem;\\"></div>\\n  </div>\\n  <script>\\n    document.getElementById('actionBtn').addEventListener('click', () => {\\n      document.getElementById('output').textContent = 'İşlem başarıyla çalıştırıldı!';\\n    });\\n  </script>\\n</body>\\n</html>", "reason": "Tüm stilleri, responsive meta etiketini ve çalışan scriptleri barındıran tek index.html oluşturuldu" }
 \`\`\`
 
 2. Dizin Listele (Kök dizin için path boş bırakılır):
@@ -251,7 +278,9 @@ ${webSchemas}
 export function buildSystemPrompt(
   gitAvailable: boolean,
   securityProfile: SecurityProfile = 'strict',
-  webAccessOrCapabilities: boolean | AgentCapabilities = false
+  webAccessOrCapabilities: boolean | AgentCapabilities = false,
+  webSynthesisStrategy: WebSynthesisStrategy = 'auto',
+  modificationStrategy: ModificationStrategy = 'smart_injection'
 ): string {
   const isAutonomous = securityProfile === 'autonomous';
   const webSearch = typeof webAccessOrCapabilities === 'object' ? webAccessOrCapabilities.webSearch : webAccessOrCapabilities;
@@ -285,6 +314,16 @@ export function buildSystemPrompt(
    Otonom Modda kullanıcıya soru sormak ('ask_question') KESİNLİKLE YASAKTIR. Mimari seçimler, dosya yapısı, şablonlar, kütüphane tercihleri veya tasarım kararları için ASLA kullanıcıya soru sorma ya da seçenek sunma. En modern ve en güvenli mühendislik standardını kendin belirleyerek doğrudan uygula. 'ask_question' aracını kesinlikle çağırma.`
     : `6. KULLANICIYA DANIŞMA:
    Mimari bir seçimde veya kararsızlıkta 'ask_question' ile kullanıcıya soru sor. Sorduğun sorular ve kullanıcının verdiği cevaplar Hafıza Defteri'ne işlenecektir.`;
+
+  const synthesisRule = webSynthesisStrategy === 'single_file'
+    ? `\n9. SIFIR HARİCİ DOSYA (TEK DOSYA MODU):\n   Web projelerinde harici dosya bağlantısı yazmayın. Stiller <style> içinde, betikler <script> içinde tek index.html dosyasında toplanmalıdır.`
+    : webSynthesisStrategy === 'modular'
+    ? `\n9. MODÜLER WEB PROJE KURALI:\n   Web projelerini index.html, style.css, script.js şeklinde ayırabilirsiniz; ancak HTML içinde referans verilen her harici dosyayı 'propose_create' ile mutlaka diske oluşturun.`
+    : '';
+
+  const modRule = modificationStrategy === 'full_overwrite'
+    ? `\n10. GÜNCELLEME STRATEJİSİ (TAM YAZIM):\n   Mevcut dosyalarda düzenleme yaparken kod kaybını önlemek için 'propose_create' ile dosyanın güncel ve eksiksiz halini doğrudan diske yazabilirsiniz.`
+    : '';
 
   const webRule = (webSearch || webFetch)
     ? `
@@ -352,7 +391,7 @@ ${askRule}
    Kullanıcı birden fazla talimat verdiğinde (örneğin "şunu yap, sonra bunu yap, belgeleri güncelle ve commit et"), ASLA sadece ilkine odaklanıp erken durma.
    Oturum Hafıza Defteri'ndeki "GÖREV KONTROL LİSTESİ"ni sırayla takip et. Bir alt görevi bitirdiğinde derhal sıradaki göreve geç.
    TÜM alt görevler ve gereksinimler eksiksiz tamamlanmadan 'finish' eylemini KESİNLİKLE ÇAĞIRMA ve süreci erken sonlandırma.
-${webRule}
+${webRule}${synthesisRule}${modRule}
 
 ÇIKTI FORMATI VE KESİN KURALLAR:
 1. Her adımda düşünceni <thought> ... </thought> etiketleri içine yaz. Düşüncelerinde asla "JSON yazabilirim", "şöyle bir JSON oluşturuyorum" gibi konuşma cümleleri KULLANMA. Kullanıcıya araç veya JSON yapısından asla bahsetme.
@@ -669,14 +708,14 @@ export async function evaluateAndAdvanceSubtask(
       advanceMsg += `\n\n✅ [TÜM ALT GÖREVLER VE SÖZLEŞMELER DOĞRULANDI]: Dosyalar eksiksiz üretildi. Şimdi başka hiçbir dosya oluşturmadan veya düzenlemeden derhal süreci bitirmek için şu eylemi üretin:\n\`\`\`json\n{ "action": "finish", "summary": "Web sitesi başarıyla tamamlandı." }\n\`\`\``;
     }
     callbacks.onSubtasksUpdated?.(ledger.subtasks);
-  } else if (missingReport.length > 0) {
-    if (stateMachine.canTransitionTo('RETRYING')) {
-      stateMachine.transition('RETRYING', 'Eksik kriterler mevcut');
+    let specificFixHint = '';
+    if (missingReport.some((m) => m.includes('script') || m.includes('harici'))) {
+      specificFixHint += '\n💡 İPUCU: Harici dosya bağlantılarını kaldırıp, tüm JavaScript kodlarını <script>...</script> etiketiyle doğrudan dosya içine gömün.';
     }
-    if (stateMachine.canTransitionTo('EXECUTING')) {
-      stateMachine.transition('EXECUTING', 'Eksik kriterleri tamamlama döngüsüne dönüldü');
+    if (missingReport.some((m) => m.includes('stil') || m.includes('style'))) {
+      specificFixHint += '\n💡 İPUCU: Tüm CSS stillerini <head> içine <style>...</style> etiketiyle doğrudan dosya içine gömün.';
     }
-    advanceMsg += `\n\n⚠️ [DOĞRULAMA UYARISI]: "${filePath}" kaydedildi ancak sözleşme kriterleri tam sağlanamadı:\n${missingReport.map((m) => `  - ${m}`).join('\n')}\nLütfen eksik kısımları 'propose_edit' ile tamamlayın!`;
+    advanceMsg += `\n\n⚠️ [DOĞRULAMA UYARISI]: "${filePath}" kaydedildi ancak sözleşme kriterleri tam sağlanamadı:\n${missingReport.map((m) => `  - ${m}`).join('\n')}${specificFixHint}\nLütfen eksik kısımları 'propose_edit' ile tamamlayın!`;
   }
 
   return advanceMsg;
@@ -832,11 +871,19 @@ export class AgentEngine {
     }
 
     const isSLM = isSmallLanguageModel(model);
+    const agentOpt = useSettingsStore.getState().settings.agentOptimization;
     const webAccessConfig = useSettingsStore.getState().settings.webAccess;
     const capabilities = ToolDispatcher.getCapabilities('coding', webAccessConfig, gitAvailable);
-    const systemPrompt = (isSLM
-      ? buildCompactSystemPrompt(gitAvailable, securityProfile, capabilities)
-      : buildSystemPrompt(gitAvailable, securityProfile, capabilities)) + workspaceSnapshot;
+
+    const synthesisStrategy = agentOpt?.webSynthesisStrategy || 'auto';
+    const modStrategy = agentOpt?.modificationStrategy || 'smart_injection';
+
+    // If synthesisStrategy is explicitly 'single_file', or 'auto' on SLMs => compact inline prompt
+    const useCompactPrompt = synthesisStrategy === 'single_file' || (synthesisStrategy === 'auto' && isSLM);
+
+    const systemPrompt = (useCompactPrompt
+      ? buildCompactSystemPrompt(gitAvailable, securityProfile, capabilities, synthesisStrategy, modStrategy)
+      : buildSystemPrompt(gitAvailable, securityProfile, capabilities, synthesisStrategy, modStrategy)) + workspaceSnapshot;
 
     stateMachine.transition('EXECUTING', 'Ajan yürütme adımlarına başlandı');
 
@@ -968,12 +1015,13 @@ export class AgentEngine {
         };
 
         try {
+          const targetTokens = agentOpt?.maxTokens || (isSLM ? 2400 : 4096);
           await ollamaClient.chatStream(
             {
               model,
               system: dynamicSystemPrompt,
               messages: compressedMessages,
-              options: { temperature: 0.1, num_predict: 1200 },
+              options: { temperature: 0.1, num_predict: targetTokens },
               keep_alive: '30m',
             },
             (chunk) => {
@@ -2556,6 +2604,12 @@ export class AgentEngine {
 
         if (err.name === 'AbortError' || this.abortController?.signal.aborted || !this.isRunning) {
           callbacks.onLog('Kullanıcı tarafından durduruldu.');
+          if (ledger.subtasks) {
+            for (const t of ledger.subtasks) {
+              if (t.status === 'in_progress') t.status = 'pending';
+            }
+            callbacks.onSubtasksUpdated?.(ledger.subtasks);
+          }
           callbacks.onStatusChange('idle');
           break;
         } else {
@@ -2566,6 +2620,12 @@ export class AgentEngine {
             content: `Ajan hatası: ${err.message}`,
             status: 'failed',
           });
+          if (ledger.subtasks) {
+            for (const t of ledger.subtasks) {
+              if (t.status === 'in_progress') t.status = 'pending';
+            }
+            callbacks.onSubtasksUpdated?.(ledger.subtasks);
+          }
           callbacks.onStatusChange('error');
           break;
         }
@@ -2573,6 +2633,12 @@ export class AgentEngine {
     }
 
     if (stepCount >= MAX_STEPS) {
+      if (ledger.subtasks) {
+        for (const t of ledger.subtasks) {
+          if (t.status === 'in_progress') t.status = 'pending';
+        }
+        callbacks.onSubtasksUpdated?.(ledger.subtasks);
+      }
       callbacks.onStep({
         id: `step_max_${Date.now()}`,
         timestamp: Date.now(),

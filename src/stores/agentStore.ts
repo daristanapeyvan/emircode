@@ -368,7 +368,16 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             get().persistCurrentSession();
           }
           if (status === 'finished' || status === 'error' || status === 'idle') {
-            set({ isStreamingResponse: false, taskStartTime: null });
+            set((state) => ({
+              isStreamingResponse: false,
+              taskStartTime: null,
+              subtasks: status === 'finished'
+                ? state.subtasks.map((t) => ({ ...t, status: 'completed' as const }))
+                : state.subtasks.map((t) =>
+                    t.status === 'in_progress' ? { ...t, status: 'pending' as const } : t
+                  ),
+            }));
+            get().persistCurrentSession();
           }
         },
         onLog: (msg: string) => {
@@ -432,7 +441,15 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   stopGoal: () => {
     agentEngine.stop();
-    set({ agentStatus: 'idle', isStreamingResponse: false });
+    set((state) => ({
+      agentStatus: 'idle',
+      isStreamingResponse: false,
+      taskStartTime: null,
+      subtasks: state.subtasks.map((t) =>
+        t.status === 'in_progress' ? { ...t, status: 'pending' as const } : t
+      ),
+    }));
+    get().persistCurrentSession();
   },
 
   interruptGoal: (directive: string) => {

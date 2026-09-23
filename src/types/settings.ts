@@ -3,6 +3,17 @@ export type Theme = 'dark' | 'light';
 export type FontSize = 'sm' | 'base' | 'lg';
 export type SecurityProfile = 'strict' | 'balanced' | 'autonomous';
 
+export type HardwareOptimizationProfile = 'auto' | 'low' | 'balanced' | 'high' | 'custom';
+export type WebSynthesisStrategy = 'auto' | 'single_file' | 'modular';
+export type ModificationStrategy = 'smart_injection' | 'full_overwrite';
+
+export interface AgentOptimizationConfig {
+  hardwareProfile: HardwareOptimizationProfile;
+  maxTokens: number;
+  webSynthesisStrategy: WebSynthesisStrategy;
+  modificationStrategy: ModificationStrategy;
+}
+
 export interface WebAccessConfig {
   enabled: boolean;
   chatEnabled: boolean;
@@ -38,6 +49,9 @@ export interface AppSettings {
   // Generation Defaults
   defaultPresetId: string;
   defaultModel: string;
+
+  // Agent Hardware Optimization & Synthesis Strategy (Open-source, configurable)
+  agentOptimization: AgentOptimizationConfig;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -62,4 +76,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   keepAlive: '5m',
   defaultPresetId: 'balanced',
   defaultModel: 'qwen3:8b',
+  agentOptimization: {
+    hardwareProfile: 'auto',
+    maxTokens: 2400,
+    webSynthesisStrategy: 'auto',
+    modificationStrategy: 'smart_injection',
+  },
 };

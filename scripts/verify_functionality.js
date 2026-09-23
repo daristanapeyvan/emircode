@@ -358,6 +358,26 @@ test('23. Linux Packaging: package.json has full Linux targets and release.yml d
   assert(releaseWorkflow.includes('release-dist/*.rpm'), 'release.yml missing rpm in published release files');
 });
 
+// 24. Open-Source Hardware Optimization & Synthesis Strategy
+test('24. Agent Hardware Optimization: Configurable tokens and synthesis strategies', () => {
+  const settingsTs = fs.readFileSync(path.join(__dirname, '../src/types/settings.ts'), 'utf-8');
+  assert(settingsTs.includes('HardwareOptimizationProfile'), 'settings.ts missing HardwareOptimizationProfile');
+  assert(settingsTs.includes('WebSynthesisStrategy'), 'settings.ts missing WebSynthesisStrategy');
+  assert(settingsTs.includes('ModificationStrategy'), 'settings.ts missing ModificationStrategy');
+  assert(settingsTs.includes('agentOptimization: AgentOptimizationConfig'), 'settings.ts missing agentOptimization in AppSettings');
+
+  const settingsStoreTs = fs.readFileSync(path.join(__dirname, '../src/stores/settingsStore.ts'), 'utf-8');
+  assert(settingsStoreTs.includes('setAgentOptimization:'), 'settingsStore.ts missing setAgentOptimization implementation');
+
+  const agentEngineTs = fs.readFileSync(path.join(__dirname, '../src/lib/agent/AgentEngine.ts'), 'utf-8');
+  assert(agentEngineTs.includes('agentOpt?.maxTokens'), 'AgentEngine.ts missing dynamic maxTokens reading');
+  assert(agentEngineTs.includes('webSynthesisStrategy'), 'AgentEngine.ts missing webSynthesisStrategy handling');
+
+  const genSettingsTs = fs.readFileSync(path.join(__dirname, '../src/components/settings/GenerationSettings.tsx'), 'utf-8');
+  assert(genSettingsTs.includes('t.settings.agentOptimization'), 'GenerationSettings.tsx missing agentOptimization UI');
+  assert(genSettingsTs.includes('detectedHardware'), 'GenerationSettings.tsx missing hardware detection card');
+});
+
 console.log(`\n==============================================`);
 console.log(`📊 RESULTS: ${passedTests}/${totalTests} TESTS PASSED`);
 console.log(`==============================================\n`);

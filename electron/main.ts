@@ -889,6 +889,53 @@ ipcMain.handle('workspace:readFile', async (_, relativePath: string) => {
   }
 });
 
+// User-Initiated Safe Directory Creator
+ipcMain.handle('workspace:createDirectory', async (_, relativePath: string) => {
+  if (!canonicalWorkspaceRoot) {
+    return { success: false, error: 'Aktif bir çalışma alanı bulunmuyor.' };
+  }
+  const check = await isCanonicalPathSafe(relativePath);
+  if (!check.safe) return { success: false, error: check.error };
+
+  const acl = evaluateAccessPolicy(check.relativePath, 'patch');
+  if (!acl.allowed) return { success: false, error: acl.reason };
+
+  try {
+    await fs.promises.mkdir(check.fullPath, { recursive: true });
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Klasör oluşturulamadı.' };
+  }
+});
+
+// User-Initiated Safe File / Directory Deletion
+ipcMain.handle('workspace:deleteItem', async (_, relativePath: string) => {
+  if (!canonicalWorkspaceRoot) {
+    return { success: false, error: 'Aktif bir çalışma alanı bulunmuyor.' };
+  }
+  const check = await isCanonicalPathSafe(relativePath);
+  if (!check.safe) return { success: false, error: check.error };
+
+  const acl = evaluateAccessPolicy(check.relativePath, 'patch');
+  if (!acl.allowed) return { success: false, error: acl.reason };
+
+  if (check.canonicalPath === canonicalWorkspaceRoot) {
+    return { success: false, error: 'Kök çalışma alanı dizini silinemez.' };
+  }
+
+  try {
+    const stats = await fs.promises.stat(check.canonicalPath);
+    if (stats.isDirectory()) {
+      await fs.promises.rm(check.canonicalPath, { recursive: true, force: true });
+    } else {
+      await fs.promises.unlink(check.canonicalPath);
+    }
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Silme işlemi başarısız.' };
+  }
+});
+
 // Main Process Token Issuer: 256-Bit Cryptographic Single-Use Authorization Token
 ipcMain.handle(
   'workspace:requestMutationToken',

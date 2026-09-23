@@ -84,6 +84,7 @@ web_modules/
 dist/
 dist-electron/
 release/
+benchmark/
 
 # Electron-builder output
 win-unpacked/

@@ -1,5 +1,14 @@
 import { create } from 'zustand';
-import { AppSettings, DEFAULT_SETTINGS, Language, Theme, FontSize, WebAccessConfig } from '@/types/settings';
+import {
+  AppSettings,
+  DEFAULT_SETTINGS,
+  Language,
+  Theme,
+  FontSize,
+  WebAccessConfig,
+  AgentOptimizationConfig,
+  HardwareOptimizationProfile,
+} from '@/types/settings';
 import { HardwareInfo } from '@/types/hardware';
 import { storageService } from '@/lib/storage/StorageService';
 import { ollamaClient } from '@/lib/ollama/OllamaClient';
@@ -12,6 +21,7 @@ interface SettingsState {
   init: () => Promise<void>;
   updateSettings: (partial: Partial<AppSettings>) => void;
   setWebAccess: (config: Partial<WebAccessConfig>) => void;
+  setAgentOptimization: (config: Partial<AgentOptimizationConfig>) => void;
   setLanguage: (language: Language) => void;
   setTheme: (theme: Theme) => void;
   setFontSize: (size: FontSize) => void;
@@ -43,6 +53,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       webAccess: {
         ...DEFAULT_SETTINGS.webAccess,
         ...(data.settings?.webAccess || {}),
+      },
+      agentOptimization: {
+        ...DEFAULT_SETTINGS.agentOptimization,
+        ...(data.settings?.agentOptimization || {}),
       },
     };
 
@@ -94,6 +108,81 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         (window as any).electronAPI.webAbortAll().catch(() => {});
       }
     }
+  },
+
+  setAgentOptimization: (partialConfig) => {
+    const currentOpt = get().settings.agentOptimization || DEFAULT_SETTINGS.agentOptimization;
+    let newOpt: AgentOptimizationConfig = { ...currentOpt, ...partialConfig };
+
+    // If a specific preset profile is selected, set recommended profile parameters
+    if (partialConfig.hardwareProfile) {
+      if (partialConfig.hardwareProfile === 'low') {
+        newOpt = {
+          ...newOpt,
+          hardwareProfile: 'low',
+          maxTokens: partialConfig.maxTokens ?? 1400,
+          webSynthesisStrategy: partialConfig.webSynthesisStrategy ?? 'single_file',
+          modificationStrategy: partialConfig.modificationStrategy ?? 'full_overwrite',
+        };
+      } else if (partialConfig.hardwareProfile === 'balanced') {
+        newOpt = {
+          ...newOpt,
+          hardwareProfile: 'balanced',
+          maxTokens: partialConfig.maxTokens ?? 2400,
+          webSynthesisStrategy: partialConfig.webSynthesisStrategy ?? 'auto',
+          modificationStrategy: partialConfig.modificationStrategy ?? 'smart_injection',
+        };
+      } else if (partialConfig.hardwareProfile === 'high') {
+        newOpt = {
+          ...newOpt,
+          hardwareProfile: 'high',
+          maxTokens: partialConfig.maxTokens ?? 3500,
+          webSynthesisStrategy: partialConfig.webSynthesisStrategy ?? 'modular',
+          modificationStrategy: partialConfig.modificationStrategy ?? 'smart_injection',
+        };
+      } else if (partialConfig.hardwareProfile === 'auto') {
+        const hw = get().hardware;
+        const ramGb = hw?.ram?.totalGb ?? 16;
+        const cores = hw?.cpu?.logicalProcessors ?? 4;
+        const hasGpu = !!(hw?.gpu?.model);
+
+        if (ramGb < 12 || cores <= 4) {
+          newOpt = {
+            ...newOpt,
+            hardwareProfile: 'auto',
+            maxTokens: 1400,
+            webSynthesisStrategy: 'single_file',
+            modificationStrategy: 'full_overwrite',
+          };
+        } else if (ramGb >= 24 && hasGpu) {
+          newOpt = {
+            ...newOpt,
+            hardwareProfile: 'auto',
+            maxTokens: 3500,
+            webSynthesisStrategy: 'auto',
+            modificationStrategy: 'smart_injection',
+          };
+        } else {
+          newOpt = {
+            ...newOpt,
+            hardwareProfile: 'auto',
+            maxTokens: 2400,
+            webSynthesisStrategy: 'auto',
+            modificationStrategy: 'smart_injection',
+          };
+        }
+      }
+    } else if (
+      partialConfig.maxTokens !== undefined ||
+      partialConfig.webSynthesisStrategy !== undefined ||
+      partialConfig.modificationStrategy !== undefined
+    ) {
+      if (currentOpt.hardwareProfile !== 'custom') {
+        newOpt.hardwareProfile = 'custom';
+      }
+    }
+
+    get().updateSettings({ agentOptimization: newOpt });
   },
 
   setLanguage: (language) => {

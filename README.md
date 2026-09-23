@@ -89,6 +89,17 @@ Customize the autonomous threshold to match your personal workflow while keeping
 - **Coder Model Strict Fallback Hierarchy**: Explicit file path resolution with contract mapping, eliminating blind hallucinated file path guessing.
 - **SLM (Small Language Model) Optimization**: Compact system prompts tailored for efficient 1B-3B parameter models (`qwen2.5-coder:1.5b`, `deepseek-coder:1.3b`, `codegemma:2b`, etc.).
 
+### 💻 12. Hardware & Model-Agnostic Optimization Architecture
+- **Host Resource Auto-Tuning**: Automatically detects CPU core count, system RAM (GB), and discrete GPU/VRAM to recommend optimal token limits and inference parameters.
+- **Configurable Profiles**: Select from `Auto`, `Low` (1400 tokens), `Balanced` (2400 tokens), `High` (3500 tokens), or `Custom` slider (512 - 4096 tokens).
+- **Universal Coding Language Support**: Prompts dynamically adapt to any programming language (Python, TypeScript, Go, Rust, C++, etc.) with clean, non-prescriptive standards.
+- **Smart Code Modification Strategy**: Choose between surgical smart piece injection or full-file atomic overwrite based on model size and file complexity.
+
+### 📁 13. Non-Intrusive Project Explorer Management
+- **Zero Permanent Clutter**: Clean file tree with hover-revealed delete action (`Trash2`) and directory creation buttons (`FolderPlus`).
+- **Inline Creation**: Type new directory names inline with instant `Enter` confirmation and `Esc` dismissal.
+- **Symlink Boundary Protection**: Electron Main process strictly prevents directory transversal and preserves project root integrity.
+
 ---
 
 ## 🏛️ Architecture Overview

@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.3] - 2026-09-24
+
+### Added
+- **Hardware & Model-Agnostic Agent Optimization Architecture (Donanım ve Modelden Bağımsız Kodlama Mimarisi)**:
+  - Added configurable hardware optimization profiles (`Auto`, `Low`, `Balanced`, `High`, `Custom`) with dynamic output token scaling (512 - 4096) based on host system hardware (CPU cores, RAM, GPU/VRAM).
+  - Configurable code modification strategy (`smart_injection` vs `full_overwrite`).
+  - Generalized agent system prompts to support all programming languages (Python, Go, Node.js, C++, Rust, etc.) while applying HTML standards only when building web interfaces.
+- **Non-Intrusive Project Explorer Management (Proje Gezgininde Dosya Silme ve Klasör Oluşturma)**:
+  - Zero permanent visual clutter: Hover-revealed delete icon (`Trash2`) on files and folders with confirmation dialog.
+  - Hover-revealed folder creation button (`FolderPlus`) on directories and dedicated root button in the Project Explorer header.
+  - Inline folder name input with keyboard shortcuts (`Enter` to confirm, `Esc` to cancel).
+  - Secure symlink-safe IPC handlers in Electron Main process (`workspace:createDirectory`, `workspace:deleteItem`).
+- **Reasoning Dump Toggle Lightbulb Icon (Ampul Simgesi)**:
+  - Replaced the right-panel toggle icon with `<Lightbulb size={13} strokeWidth={1.5} />` (amber idea highlight) for intuitive access to model internal reasoning traces and execution logs.
+
+### Fixed
+- **Subtask Spinner Infinite Loop & Ghost Spinning Fix (Durdurulunca veya Boştayken Dönen Spinner Düzeltmesi)**:
+  - Fixed issue where subtask loaders continued to spin indefinitely when a task was stopped, idle, or completed.
+  - Conditioned spinner rendering strictly on `task.status === 'in_progress' && isBusy`, showing a clear paused indicator (`⏸`) when execution is halted.
+  - Synchronized `stopGoal`, `onStatusChange` (idle, error, finished), and `AgentEngine` abort/error paths to cleanly reset in-progress subtasks to `pending`.
+- **Subtask UI Redesign & "AI Slop" Elimination (Minimalist Alt Görev Listesi)**:
+  - Completely hides subtask card when there is only a single task (`subtasks.length <= 1`), eliminating loud progress bars, repetitive "AKTİF ODAK" badges, and cyan visual clutter.
+  - Redesigned multi-subtask checklists to a sleek, minimalist Linear/Cursor style with muted zinc tones.
+- **Chat Timeline Cut-Off / Clipping Fix (Zaman Çizelgesi Taşma ve Kırpılma Çözümü)**:
+  - Replaced rigid `h-full` constraints with `min-h-full flex flex-col justify-start` inside scrollable view.
+  - Added bottom padding (`pb-20 scroll-smooth`) and auto-scroll anchor (`timelineEndRef`) ensuring timeline steps never get cut off or obscured behind the composer input bar.
+  - Added `min-w-0` to tool step cards preventing horizontal clipping during window resizing.
+
 ## [1.5.2] - 2026-09-23
 
 ### Added
