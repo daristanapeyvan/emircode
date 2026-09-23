@@ -32,7 +32,14 @@ export class TaskValidator {
     const missingEvidence: string[] = [];
 
     for (const crit of contract.criteria) {
-      const content = await fileProvider(crit.target);
+      let content = await fileProvider(crit.target);
+      if (content === null && (crit.target === 'index.html' || crit.target === 'src/index.html')) {
+        const altTarget = crit.target === 'index.html' ? 'src/index.html' : 'index.html';
+        const altContent = await fileProvider(altTarget);
+        if (altContent !== null) {
+          content = altContent;
+        }
+      }
 
       switch (crit.type) {
         case 'file_exists': {

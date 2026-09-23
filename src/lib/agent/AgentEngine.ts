@@ -35,7 +35,7 @@ export interface AgentEngineCallbacks {
   onRequestDeleteApproval: (item: ChangesetItem) => Promise<boolean>;
   onRequestCommandApproval: (item: CommandApprovalItem) => Promise<boolean>;
   onRequestClarification: (item: ClarificationItem) => Promise<string>;
-  onTransactionApplied: (tx: AppliedTransaction) => void;
+  onTransactionApplied?: (tx: AppliedTransaction) => void;
   onSubtasksUpdated?: (subtasks: TaskChecklistItem[]) => void;
 }
 
@@ -212,47 +212,38 @@ export function buildCompactSystemPrompt(
     : '';
 
   return `Sen Emir Code Otonom Kodlama Ajanısın.
-GÖREV: Kullanıcının talep ettiği kodları ve projeyi diske eksiksiz üretmek.
+GÖREV: Kullanıcının talep ettiği kodları, web sitesini ve projeyi diske eksiksiz üretmek.
 
 ÖNEMLİ KURALLAR:
 1. ${isAutonomous ? 'OTONOM MOD: Kullanıcıya asla soru sorma ("ask_question" yasak). İnisiyatif alarak dosyaları eksiksiz oluştur.' : 'Kod değişikliklerini diske uygulamak için "propose_create" veya "propose_edit" kullan.'}
-2. SADECE aşağıdaki JSON şemalarından birini \`\`\`json ... \`\`\` bloğu içinde üret. Asla 'JSON yazabilirim' gibi konuşma cümleleri kurma; doğrudan eylem bloğunu üret.
-3. Oturum Hafıza Defteri\\'ndeki "GÖREV KONTROL LİSTESİ"ndeki sıradaki alt göreve odaklan. Tüm görevler bittiğinde "finish" çağır.
+2. DİZİN BOŞSA VEYA YENİ PROJE İSTENİYORSA: Dizin listeleme veya dosya okuma döngüsüne girmeyin; derhal 1. araç olan "propose_create" ile 'index.html' dosyasını ve kodları oluşturun.
+3. SADECE aşağıdaki JSON şemalarından birini \`\`\`json ... \`\`\` bloğu içinde üret. Konuşma cümleleri kurma, doğrudan eylem bloğunu üret.
+4. Dosyalar başarıyla oluşturulduktan ve görev tamamlandıktan sonra "finish" çağır.
 
 ARAÇLAR VE JSON ŞEMALARI:
-1. Dizin Listele:
+1. Yeni Dosya Oluştur (Öncelikli Eylem):
 \`\`\`json
-{ "action": "read_directory", "path": "hedef_klasor" }
+{ "action": "propose_create", "path": "index.html", "content": "<!DOCTYPE html>\\n<html lang=\\"tr\\">\\n<head>\\n<meta charset=\\"UTF-8\\">\\n<title>Web Sitesi</title>\\n<style>\\nbody { font-family: sans-serif; margin: 0; padding: 2rem; background: #0f172a; color: #f8fafc; }\\n</style>\\n</head>\\n<body>\\n<h1>Hoş Geldiniz</h1>\\n<p>Modern web sayfası</p>\\n</body>\\n</html>", "reason": "Ana web sayfası oluşturuldu" }
 \`\`\`
 
-2. Dosya Oku:
+2. Dizin Listele (Kök dizin için path boş bırakılır):
 \`\`\`json
-{ "action": "read_file", "path": "hedef_dosya.js" }
+{ "action": "read_directory", "path": "" }
 \`\`\`
 
-3. Kod Ara:
+3. Dosya Oku (Mevcut bir dosyayı incelemek için):
 \`\`\`json
-{ "action": "search_code", "query": "aranacak_kelime" }
-\`\`\`
-${gitAvailable ? `4. Git Durumu:\n\`\`\`json\n{ "action": "read_git_status" }\n\`\`\`\n\`\`\`json\n{ "action": "read_git_diff" }\n\`\`\`\n` : ''}
-5. Yeni Dosya Oluştur:
-\`\`\`json
-{ "action": "propose_create", "path": "olusturulacak_dosya.js", "content": "// Dosya icerigi buraya eksiksiz yazilir", "reason": "dosya amaci" }
+{ "action": "read_file", "path": "index.html" }
 \`\`\`
 
-6. Kod Düzenle:
+4. Kod Düzenle (Mevcut dosyada değişiklik için):
 \`\`\`json
-{ "action": "propose_edit", "path": "duzenlenecek_dosya.js", "original_chunk": "// dosyada var olan eski kod blogu", "new_chunk": "// yerine gececek yeni kod blogu", "reason": "degisiklik amaci" }
-\`\`\`
-
-7. Komut Koştur:
-\`\`\`json
-{ "action": "propose_command", "binary": "npm", "args": ["test"], "reason": "test" }
+{ "action": "propose_edit", "path": "index.html", "original_chunk": "<h1>Eski</h1>", "new_chunk": "<h1>Yeni</h1>", "reason": "başlık güncellendi" }
 \`\`\`
 ${webSchemas}
-8. Tamamlama:
+5. Görevi Bitir:
 \`\`\`json
-{ "action": "finish", "summary": "Tüm adımlar tamamlandı." }
+{ "action": "finish", "summary": "Web sitesi başarıyla oluşturuldu." }
 \`\`\`
 `;
 }
@@ -675,7 +666,7 @@ export async function evaluateAndAdvanceSubtask(
       if (stateMachine.canTransitionTo('PLANNING')) {
         stateMachine.transition('PLANNING', 'Tüm görevler bitti, bitiş aşamasına geçiliyor');
       }
-      advanceMsg += `\n\n✅ [TÜM ALT GÖREVLER VE SÖZLEŞMELER DOĞRULANDI]: Artık başka dosya oluşturmadan veya düzenlemeden 'finish' eylemini çağırarak süreci sonlandırabilirsiniz.`;
+      advanceMsg += `\n\n✅ [TÜM ALT GÖREVLER VE SÖZLEŞMELER DOĞRULANDI]: Dosyalar eksiksiz üretildi. Şimdi başka hiçbir dosya oluşturmadan veya düzenlemeden derhal süreci bitirmek için şu eylemi üretin:\n\`\`\`json\n{ "action": "finish", "summary": "Web sitesi başarıyla tamamlandı." }\n\`\`\``;
     }
     callbacks.onSubtasksUpdated?.(ledger.subtasks);
   } else if (missingReport.length > 0) {
@@ -915,11 +906,15 @@ export class AgentEngine {
       // Circuit Breaker: Consecutive Failures Check
       if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
         if (securityProfile === 'autonomous') {
-          callbacks.onLog('Art arda 3 hata oluştu; Otonom Mod gereği alternatif strateji deneniyor...');
+          callbacks.onLog('Art arda 3 hata oluştu; Otonom Mod gereği doğrudan dosya üretimine yönlendiriliyor...');
           consecutiveErrors = 0;
+          const hasFiles = Object.keys(ledger.knownFiles).length > 0;
+          const advice = hasFiles
+            ? "Tüm görevler bittiyse derhal 'finish' çağırın; eksik varsa 'propose_edit' ile kodu tamamlayın."
+            : "Derhal 'propose_create' aracıyla 'index.html' dosyasını ve eksiksiz HTML5 kodunu diske oluşturun.";
           conversation.push({
             role: 'user',
-            content: `[OTONOM HATA KURTARMA]: Art arda işlem hatası alındı. Stratejinizi değiştirin: Dosya veya dizin yapısını 'read_directory' veya 'read_file' ile tekrar inceleyin ve hatayı düzeltecek alternatif bir yöntemle göreve devam edin.`,
+            content: `[OTONOM KURTARMA YÖNLENDİRMESİ]: Art arda işlem hatası veya döngü oluştu. ${advice} 'read_directory' döngüsüne girmeyin.`,
           });
           continue;
         }
@@ -986,8 +981,12 @@ export class AgentEngine {
                 fullResponse += chunk.message.content;
                 callbacks.onStreamChunk?.(chunk.message.content, fullResponse);
 
-                // Early Stream Cutoff: If a complete JSON tool call block has been closed, cut stream off
-                if (fullResponse.includes('```')) {
+                // Early Stream Cutoff: If a complete JSON tool call block or HTML document has been closed, cut stream off
+                if (
+                  fullResponse.includes('```') ||
+                  fullResponse.includes('}') ||
+                  fullResponse.includes('</html>')
+                ) {
                   const parsed = ToolDispatcher.parseActionFromResponse(fullResponse, parseContext);
                   if (parsed.type !== 'unknown') {
                     this.stepAbortController?.abort();
@@ -1080,7 +1079,10 @@ export class AgentEngine {
           if (incompleteSubtasks.length > 0 && consecutiveErrors < MAX_CONSECUTIVE_ERRORS) {
             consecutiveErrors++;
             const nextTask = incompleteSubtasks.find((t) => t.status === 'in_progress') || incompleteSubtasks[0];
-            const observation = `[ERKEN BİTİRME ENGELİ]: Yanıtınızda bir JSON araç çağrısı bulunamadı ve henüz tamamlanmamış görevler var!\n⏳ Aktif/Bekleyen Görev: "${nextTask.description}"\nLütfen görevi erken sonlandırmayın. Sıradaki adımı gerçekleştirmek için geçerli bir JSON araç çağrısı (ör. 'read_file', 'propose_edit', 'propose_command') üretin.`;
+            const targetHint = Object.keys(ledger.knownFiles).length === 0
+              ? "'propose_create' ile 'index.html' dosyasını oluşturun"
+              : "'propose_edit' veya 'propose_create'";
+            const observation = `[ERKEN BİTİRME ENGELİ]: Yanıtınızda bir JSON araç çağrısı bulunamadı ve henüz tamamlanmamış görevler var!\n⏳ Aktif/Bekleyen Görev: "${nextTask.description}"\nLütfen konuşma metni yerine derhal ${targetHint} ve görevi diske uygulayın.`;
             callbacks.onStep({
               id: `step_guard_txt_${Date.now()}`,
               timestamp: Date.now(),
@@ -1123,27 +1125,62 @@ export class AgentEngine {
         // ANTI-LOOP GUARDS & ENVIRONMENT INTERCEPTORS
         // ============================================
 
-        // 1. Guard against consecutive identical read_directory calls (Directory loop -> BLOCKED)
+        // 1. Guard against consecutive identical read_directory calls
         if (parsed.type === 'read_directory') {
           const reqPath = (parsed.payload?.path || '').replace(/\\/g, '/').replace(/^\.\//, '');
           const lastAction = actionHistory[actionHistory.length - 1];
-          if (
+          const isRepeat =
             lastAction &&
-            lastAction.action === 'read_directory' &&
-            lastAction.key === reqPath
-          ) {
-            if (stateMachine.canTransitionTo('BLOCKED')) {
-              stateMachine.transition('BLOCKED', `Ardışık tekrarlayan '${reqPath}' dizin listeleme döngüsü`);
+            (lastAction.action === 'read_directory' ||
+              lastAction.action === 'read_directory_failed' ||
+              lastAction.action === 'read_directory_steered') &&
+            lastAction.key === reqPath;
+
+          if (isRepeat) {
+            const dirCallCount = actionHistory.filter(
+              (a) =>
+                (a.action === 'read_directory' ||
+                  a.action === 'read_directory_failed' ||
+                  a.action === 'read_directory_steered') &&
+                a.key === reqPath
+            ).length;
+
+            if (dirCallCount < 3) {
+              // Steer the model directly to creation instead of aborting immediately
+              callbacks.onLog(
+                `[DÖNGÜ MÜDAHALESİ]: "${reqPath || 'kök'}" dizini tekrar çağrıldı. Model doğrudan dosya oluşturmaya yönlendiriliyor.`
+              );
+              const observation = `[DÖNGÜ ENGELLEME REHBERLİĞİ]: "${reqPath || 'kök'}" dizinini zaten incelediniz. Dizin listelemeyi tekrarlamak YASAKTIR. Şimdi derhal 'propose_create' aracıyla hedef dosyayı ('index.html') oluşturun.`;
+              callbacks.onStep({
+                id: `step_loop_dir_${Date.now()}`,
+                timestamp: Date.now(),
+                type: 'system_notice',
+                content: `Döngü Engellendi: "${reqPath || 'kök'}" dizini zaten listelendi. Doğrudan dosya oluşturmaya yönlendirildi.`,
+                status: 'rejected',
+              });
+              actionHistory.push({
+                action: 'read_directory_steered',
+                key: reqPath,
+                timestamp: Date.now(),
+              });
+              conversation.push({ role: 'assistant', content: fullResponse });
+              conversation.push({ role: 'user', content: observation });
+              continue;
+            } else {
+              // If repeated 3 or more times despite steering, trigger BLOCKED
+              if (stateMachine.canTransitionTo('BLOCKED')) {
+                stateMachine.transition('BLOCKED', `Ardışık tekrarlayan '${reqPath}' dizin listeleme döngüsü`);
+              }
+              callbacks.onStep({
+                id: `step_loop_dir_${Date.now()}`,
+                timestamp: Date.now(),
+                type: 'system_notice',
+                content: `[DÖNGÜ TESPİT EDİLDİ - BLOCKED]: "${reqPath || 'kök'}" dizini ardışık olarak tekrar tekrar okundu. Sistem güvenle devam edemediği için işlem BLOCKED durumuna alındı.`,
+                status: 'failed',
+              });
+              callbacks.onStatusChange('error');
+              break;
             }
-            callbacks.onStep({
-              id: `step_loop_dir_${Date.now()}`,
-              timestamp: Date.now(),
-              type: 'system_notice',
-              content: `[DÖNGÜ TESPİT EDİLDİ - BLOCKED]: "${reqPath || 'kök'}" dizini ardışık olarak tekrar tekrar okundu. Sistem güvenle devam edemediği için işlem BLOCKED durumuna alındı.`,
-              status: 'failed',
-            });
-            callbacks.onStatusChange('error');
-            break;
           }
         }
 
@@ -1209,6 +1246,7 @@ export class AgentEngine {
             lastAction.key === reqPath &&
             ledger.knownFiles[reqPath]
           ) {
+            consecutiveErrors++;
             const observation = `[DÖNGÜ KORUMASI]: "${reqPath}" dosyasını zaten az önce okudunuz ve içeriği hafızanızda mevcuttur. Aynı dosyayı tekrar okumak yerine kod değişikliği önerin ('propose_edit') veya bekleyen sıradaki alt göreve geçin.`;
             callbacks.onStep({
               id: `step_loop_read_${Date.now()}`,
@@ -1231,6 +1269,7 @@ export class AgentEngine {
             (a) => a.action === 'propose_edit_success' && a.key === editSig
           );
           if (alreadyApplied) {
+            consecutiveErrors++;
             const observation = `[DÖNGÜ KORUMASI]: Bu kod değişikliği "${filePath}" dosyasına zaten başarıyla uygulandı! Başa sarıp aynı değişikliği tekrar teklif etmeyin. Eğer bekleyen başka alt görevler varsa sıradaki göreve geçin; tüm görevler bittiyse 'finish' çağırın.`;
             callbacks.onStep({
               id: `step_loop_edit_${Date.now()}`,
@@ -1242,6 +1281,72 @@ export class AgentEngine {
             conversation.push({ role: 'assistant', content: fullResponse });
             conversation.push({ role: 'user', content: observation });
             continue;
+          }
+        }
+
+        // 3.1. Guard against repeating already applied propose_create (Re-creation loop)
+        if (parsed.type === 'propose_create') {
+          const filePath = (parsed.payload?.path || '').replace(/\\/g, '/').replace(/^\.\//, '');
+          const alreadyCreated = actionHistory.some(
+            (a) => a.action === 'propose_create_success' && a.key === filePath
+          );
+          if (alreadyCreated) {
+            // Check if all contracts pass; if so, cleanly finalize!
+            const fileProvider = async (relPath: string) => {
+              try {
+                const res = await window.electronAPI?.readWorkspaceFile(relPath);
+                return res?.success ? (res.content ?? null) : null;
+              } catch {
+                return null;
+              }
+            };
+            let allPassed = true;
+            for (const c of contracts) {
+              const r = await TaskValidator.validate(c, fileProvider);
+              if (!r.passed) {
+                allPassed = false;
+                break;
+              }
+            }
+
+            if (allPassed && contracts.length > 0) {
+              if (stateMachine.canTransitionTo('VALIDATING')) stateMachine.transition('VALIDATING', 'Son kanıt kontrolü');
+              if (stateMachine.canTransitionTo('COMPLETED')) stateMachine.transition('COMPLETED', 'Tüm görevler doğrulandı');
+              if (stateMachine.canTransitionTo('DONE')) stateMachine.transition('DONE', 'Süreç başarıyla bitti');
+
+              if (ledger.subtasks) {
+                for (const t of ledger.subtasks) {
+                  t.status = 'completed';
+                  if (!t.completedAt) t.completedAt = Date.now();
+                }
+                callbacks.onSubtasksUpdated?.(ledger.subtasks);
+              }
+
+              callbacks.onStep({
+                id: `step_fin_auto_${Date.now()}`,
+                timestamp: Date.now(),
+                type: 'final_answer',
+                title: 'Görev Başarıyla Tamamlandı',
+                content: `"${filePath}" dosyası başarıyla üretildi ve tüm doğrulama kriterleri karşılandı.`,
+                status: 'success',
+                rawOutput: fullResponse,
+              });
+              callbacks.onStatusChange('finished');
+              break;
+            } else {
+              consecutiveErrors++;
+              const observation = `[DÖNGÜ KORUMASI]: "${filePath}" dosyası zaten oluşturuldu! Dosyayı baştan oluşturmak yerine eksik kısımları 'propose_edit' ile tamamlayın veya 'finish' çağırın.`;
+              callbacks.onStep({
+                id: `step_loop_create_${Date.now()}`,
+                timestamp: Date.now(),
+                type: 'system_notice',
+                content: `Döngü Engellendi: "${filePath}" zaten oluşturuldu.`,
+                status: 'rejected',
+              });
+              conversation.push({ role: 'assistant', content: fullResponse });
+              conversation.push({ role: 'user', content: observation });
+              continue;
+            }
           }
         }
 
@@ -1564,16 +1669,16 @@ export class AgentEngine {
             });
           } else {
             consecutiveErrors++;
+            actionHistory.push({ action: 'read_file_failed', key: filePath, timestamp: Date.now() });
             if (!ledger.invalidPaths.includes(filePath)) {
               ledger.invalidPaths.push(filePath);
             }
             const suggestion = findClosestPath(filePath, ledger.projectTree);
-            let errMsg = `[HATA]: "${filePath}" dosyası diskte bulunamadı veya okunamadı: ${readRes?.error || 'Dosya mevcut değil'}`;
+            let errMsg = `[BİLGİ]: "${filePath}" dosyası diskte henüz mevcut değil.`;
             if (suggestion) {
-              errMsg += `\n💡 İPUCU: Aradığınız dosya muhtemelen "${suggestion}"! Lütfen var olan bu doğru dosya yolunu kullanın.`;
-            } else {
-              errMsg += `\n💡 İPUCU: Lütfen Oturum Hafıza Defteri'ndeki 'PROJE DOSYA AĞACI' listesinde yer alan gerçek dosya yollarından birini seçin.`;
+              errMsg += `\n💡 İPUCU: Mevcut bir dosyayı okumak istiyorsanız "${suggestion}" dosyasını seçin.`;
             }
+            errMsg += `\n💡 EĞER BU YENİ BİR DOSYA İSE: Okumaya çalışmak yerine derhal 'propose_create' aracıyla "${filePath}" dosyasının içeriğini diske oluşturun.`;
             observation = errMsg;
             callbacks.onStep({
               id: `step_read_fail_${Date.now()}`,
@@ -1591,7 +1696,10 @@ export class AgentEngine {
         }
 
         if (parsed.type === 'read_directory') {
-          const dirPath = parsed.payload.path;
+          let dirPath = (parsed.payload?.path || '').replace(/\\/g, '/').replace(/^\.\//, '');
+          if (dirPath === '.' || dirPath === 'hedef_klasor' || dirPath === 'hedef_dizin') {
+            dirPath = '';
+          }
           callbacks.onStep({
             id: `step_dir_${Date.now()}`,
             timestamp: Date.now(),
@@ -1618,7 +1726,13 @@ export class AgentEngine {
             const names = listRes.files
               .map((f) => `${f.isDirectory ? '📁 ' : '📄 '}${f.relativePath}`)
               .join('\n');
-            observation = `[Dizin İçeriği]:\n${names || '(Boş dizin)'}\n\n[İLERLEME BİLGİSİ]: İncelemek istediğiniz dosyayı 'read_file' ile okuyun.`;
+
+            const isFolderEmpty = listRes.files.length === 0;
+            if (isFolderEmpty) {
+              observation = `[Dizin İçeriği]: Çalışma alanı boştur (Henüz hiç dosya bulunmuyor).\n\n[İLERLEME TALİMATI]: Proje klasörü boştur. 'read_file' veya 'read_directory' çağırmayın. Derhal 'propose_create' aracıyla hedef dosyayı ('index.html') oluşturun.`;
+            } else {
+              observation = `[Dizin İçeriği]:\n${names}\n\n[İLERLEME BİLGİSİ]: İncelemek istediğiniz mevcut bir dosyayı 'read_file' ile okuyun veya yeni bir dosya eklemek için 'propose_create' çağırın.`;
+            }
             actionHistory.push({ action: 'read_directory', key: dirPath || '', timestamp: Date.now() });
             callbacks.onStep({
               id: `step_dir_res_${Date.now()}`,
@@ -1630,7 +1744,8 @@ export class AgentEngine {
             });
           } else {
             consecutiveErrors++;
-            observation = `[HATA]: Dizin listelenemedi: ${listRes?.error}`;
+            actionHistory.push({ action: 'read_directory_failed', key: dirPath || '', timestamp: Date.now() });
+            observation = `[HATA]: Dizin listelenemedi: ${listRes?.error || 'Dizin bulunamadı'}.\n💡 İPUCU: Çalışma alanı kök dizini için path: "" kullanın veya dosyaları oluşturmak için doğrudan 'propose_create' çağırın.`;
           }
 
           conversation.push({ role: 'assistant', content: fullResponse });
@@ -1798,7 +1913,7 @@ export class AgentEngine {
 
               if (applyRes?.success) {
                 consecutiveErrors = 0;
-                callbacks.onTransactionApplied({
+                callbacks.onTransactionApplied?.({
                   transactionId: tokenRes.token,
                   relativePath: filePath,
                   operation: 'create',
@@ -1886,6 +2001,22 @@ export class AgentEngine {
           const readRes = await window.electronAPI?.readWorkspaceFile(filePath);
           const currentContent = readRes?.content || '';
           const authenticBaseHash = readRes?.hash || '';
+
+          // If the file does NOT exist on disk, propose_edit is invalid; model must use propose_create!
+          if (!currentContent && !readRes?.success) {
+            consecutiveErrors++;
+            callbacks.onStep({
+              id: `step_edit_missing_${Date.now()}`,
+              timestamp: Date.now(),
+              type: 'system_notice',
+              content: `"${filePath}" henüz mevcut değil. Düzenleme yerine 'propose_create' kullanılmalı.`,
+              status: 'rejected',
+            });
+            const observation = `[HATA]: "${filePath}" dosyası henüz diskte mevcut değildir! Olmayan bir dosya üzerinde 'propose_edit' yapamazsınız. Lütfen bu yeni dosyayı derhal 'propose_create' aracıyla eksiksiz HTML/kod içeriğiyle oluşturun.`;
+            conversation.push({ role: 'assistant', content: fullResponse });
+            conversation.push({ role: 'user', content: observation });
+            continue;
+          }
 
           let hasConflict = false;
           let proposedFullContent = currentContent;
@@ -1984,7 +2115,7 @@ export class AgentEngine {
 
               if (applyRes?.success) {
                 consecutiveErrors = 0;
-                callbacks.onTransactionApplied({
+                callbacks.onTransactionApplied?.({
                   transactionId: tokenRes.token,
                   relativePath: filePath,
                   operation: 'edit',
@@ -2128,7 +2259,7 @@ export class AgentEngine {
 
               if (applyRes?.success) {
                 consecutiveErrors = 0;
-                callbacks.onTransactionApplied({
+                callbacks.onTransactionApplied?.({
                   transactionId: tokenRes.token,
                   relativePath: filePath,
                   operation: 'delete',

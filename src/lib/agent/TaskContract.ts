@@ -68,25 +68,25 @@ export class TaskCompiler {
     const criteria: ValidationCriterion[] = [];
 
     if (isWeb) {
-      const target = 'src/index.html';
-      expectedArtifacts.push(target);
+      const target = 'index.html';
+      expectedArtifacts.push('index.html', 'src/index.html');
 
       // Baseline criterion: File must exist and have non-trivial size
       criteria.push({
         type: 'file_exists',
         target,
-        description: `'${target}' dosyası diskte oluşturulmuş olmalıdır.`,
+        description: `'index.html' (veya 'src/index.html') dosyası diskte oluşturulmuş olmalıdır.`,
       });
       criteria.push({
         type: 'min_size',
         target,
-        description: `'${target}' dosyası en az 100 bayt içerik barındırmalıdır.`,
+        description: `'index.html' dosyası en az 100 bayt içerik barındırmalıdır.`,
         params: { minBytes: 100 },
       });
       criteria.push({
         type: 'html_structure',
         target,
-        description: `'${target}' geçerli bir HTML5 belge yapısına (DOCTYPE, html, body) sahip olmalıdır.`,
+        description: `'index.html' geçerli bir HTML5 belge yapısına (DOCTYPE, html, body) sahip olmalıdır.`,
       });
 
       // COMPILER GUARD: Verify constraints map to criteria
@@ -95,7 +95,7 @@ export class TaskCompiler {
         criteria.push({
           type: 'contains_style',
           target,
-          description: `'${target}' içinde gömülü stil (<style>...</style>) tanımlanmış olmalıdır.`,
+          description: `'index.html' içinde gömülü stil (<style>...</style>) tanımlanmış olmalıdır.`,
         });
       }
 
@@ -104,7 +104,7 @@ export class TaskCompiler {
         criteria.push({
           type: 'contains_script',
           target,
-          description: `'${target}' içinde gömülü script (<script>...</script>) tanımlanmış olmalıdır.`,
+          description: `'index.html' içinde gömülü script (<script>...</script>) tanımlanmış olmalıdır.`,
         });
       }
 

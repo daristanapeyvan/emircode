@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.2] - 2026-09-23
+
+### Added
+- **Gemma 2B & SLM End-to-End Website Generation Support (Küçük Dil Modelleri Optimizasyonu)**:
+  - Direct HTML document extraction (`<!DOCTYPE html>...</html>` or `<html>...</html>`) automatically falls back to `propose_create` targeting `index.html`, eliminating JSON parsing failures and chat stops for SLMs.
+  - Normalized prompt schema placeholders (`"hedef_klasor"`, `"hedef_dizin"`, `"."`, `"./"` to root; `"hedef_dosya.js"` to active contract target) to prevent models literally copying placeholder strings.
+  - Empty directory observation enhancement: guides models to immediately call `propose_create` instead of misdirecting them to `read_file`.
+  - Flexible contract target paths: TaskCompiler and TaskValidator now support both root (`index.html`) and nested (`src/index.html`) files.
+  - `propose_create` anti-loop guard with automatic criteria re-verification: auto-completes tasks once contract evidence passes, preventing unnecessary re-generation cycles.
+  - Non-existent file guard for `propose_edit`: redirects failed edits on new files to `propose_create`.
+  - Early stream cutoff: aborted inference on closing JSON brackets (`}`), code fences, or `</html>`, dramatically reducing inference time on CPU.
+- **Web Access Toggle in Agent Composer (Kod Ajanında Ağ Erişimi Butonu)**:
+  - Added the `<Globe>` network toggle button directly in the Agent Workspace composer bar next to the workspace picker, matching the Chat Composer UX.
+  - Controls `settings.webAccess.codingEnabled` with instant visual indicators and tool schema exclusion when disabled.
+
+### Fixed
+- **Duplicate Sandbox Badge in Agent Workspace (Mükerrer Sandbox İfadesinin Kaldırılması)**:
+  - Removed redundant autonomous profile badge from the Agent Workspace header to avoid UI duplication with the security profile selector.
+
 ## [1.5.1] - 2026-09-23
 
 ### Added

@@ -100,6 +100,26 @@ export class ToolDispatcher {
         }
       }
 
+      // 4. Raw HTML Document Fallback (without code fence)
+      const htmlDocMatch = text.match(/(<!DOCTYPE\s+html[\s\S]*<\/html>|<html[\s\S]*<\/html>)/i);
+      if (htmlDocMatch) {
+        const code = htmlDocMatch[0].trim();
+        let determinedPath =
+          context?.activeTaskTarget ||
+          (context?.expectedArtifacts && context.expectedArtifacts[0]) ||
+          'index.html';
+        const cleanPath = determinedPath.replace(/\\/g, '/').replace(/^\.\//, '');
+        return {
+          type: 'propose_create',
+          payload: {
+            path: cleanPath,
+            content: code,
+            reason: 'Doğrudan HTML belgesi aktarımı (index.html)',
+          },
+          rawJson: { action: 'propose_create', path: cleanPath, content: code },
+        };
+      }
+
       return {
         type: 'unknown',
         payload: null,
@@ -116,19 +136,41 @@ export class ToolDispatcher {
     const action = String(jsonContent.action || '').trim().toLowerCase();
 
     switch (action) {
-      case 'read_directory':
+      case 'read_directory': {
+        let reqPath = String(jsonContent.path || '').trim();
+        if (
+          reqPath === 'hedef_klasor' ||
+          reqPath === 'hedef_dizin' ||
+          reqPath === '.' ||
+          reqPath === './'
+        ) {
+          reqPath = '';
+        }
         return {
           type: 'read_directory',
-          payload: { path: String(jsonContent.path || '') },
+          payload: { path: reqPath },
           rawJson: jsonContent,
         };
+      }
 
-      case 'read_file':
+      case 'read_file': {
+        let reqPath = String(jsonContent.path || '').trim();
+        if (
+          reqPath === 'hedef_dosya.js' ||
+          reqPath === 'hedef_dosya.html' ||
+          reqPath === 'olusturulacak_dosya.js'
+        ) {
+          reqPath =
+            context?.activeTaskTarget ||
+            (context?.expectedArtifacts && context.expectedArtifacts[0]) ||
+            'index.html';
+        }
         return {
           type: 'read_file',
-          payload: { path: String(jsonContent.path || '') },
+          payload: { path: reqPath },
           rawJson: jsonContent,
         };
+      }
 
       case 'search_code':
         return {
@@ -151,28 +193,56 @@ export class ToolDispatcher {
           rawJson: jsonContent,
         };
 
-      case 'propose_create':
+      case 'propose_create': {
+        let reqPath = String(jsonContent.path || '').trim();
+        if (
+          reqPath === 'olusturulacak_dosya.js' ||
+          reqPath === 'olusturulacak_dosya.html' ||
+          reqPath === 'hedef_dosya.js' ||
+          reqPath === 'hedef_dosya.html' ||
+          !reqPath
+        ) {
+          reqPath =
+            context?.activeTaskTarget ||
+            (context?.expectedArtifacts && context.expectedArtifacts[0]) ||
+            'index.html';
+        }
         return {
           type: 'propose_create',
           payload: {
-            path: String(jsonContent.path || ''),
+            path: reqPath,
             content: String(jsonContent.content || ''),
             reason: String(jsonContent.reason || 'Yeni dosya oluşturma'),
           },
           rawJson: jsonContent,
         };
+      }
 
-      case 'propose_edit':
+      case 'propose_edit': {
+        let reqPath = String(jsonContent.path || '').trim();
+        if (
+          reqPath === 'duzenlenecek_dosya.js' ||
+          reqPath === 'duzenlenecek_dosya.html' ||
+          reqPath === 'hedef_dosya.js' ||
+          reqPath === 'hedef_dosya.html' ||
+          !reqPath
+        ) {
+          reqPath =
+            context?.activeTaskTarget ||
+            (context?.expectedArtifacts && context.expectedArtifacts[0]) ||
+            'index.html';
+        }
         return {
           type: 'propose_edit',
           payload: {
-            path: String(jsonContent.path || ''),
+            path: reqPath,
             original_chunk: String(jsonContent.original_chunk || ''),
             new_chunk: String(jsonContent.new_chunk || ''),
             reason: String(jsonContent.reason || 'Kod güncellemesi'),
           },
           rawJson: jsonContent,
         };
+      }
 
       case 'propose_delete':
         return {

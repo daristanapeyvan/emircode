@@ -11,7 +11,7 @@ import {
   Square,
   RotateCcw,
   ShieldCheck,
-  Shield,
+  Globe,
   Terminal,
   FileCode,
   CheckCircle2,
@@ -34,7 +34,7 @@ import { AppLogo } from '../common/AppLogo';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { getTranslations } from '@/lib/localization/i18n';
 import { cn } from '@/lib/utils/cn';
-import { SecurityProfile } from '@/types/settings';
+import { SecurityProfile, DEFAULT_SETTINGS } from '@/types/settings';
 import { tokenizeCode, getTokenClassName } from '@/lib/utils/SyntaxHighlighter';
 import { cleanChatContent, cleanThoughtContent } from '@/lib/web/WebIntentDetector';
 
@@ -156,7 +156,7 @@ export const AgentWorkspace: React.FC = () => {
     submitAnswer,
   } = useAgentStore();
 
-  const { settings, updateSettings } = useSettingsStore();
+  const { settings, updateSettings, setWebAccess } = useSettingsStore();
   const t = getTranslations(settings.language);
 
   const [goalInput, setGoalInput] = useState('');
@@ -308,16 +308,6 @@ export const AgentWorkspace: React.FC = () => {
             </select>
           </div>
 
-          {/* Autonomous Mode Pill */}
-          {settings.securityProfile === 'autonomous' && (
-            <div
-              className="hidden sm:flex items-center gap-1 px-2 py-1 rounded-md bg-amber-950/30 border border-amber-800/40 text-[10px] font-medium text-amber-400 tracking-tight shrink-0 select-none"
-              title={t.agent.autonomousModeBadge}
-            >
-              <Zap size={11} className="text-amber-400" />
-              <span>{t.agent.securityProfileAutonomous}</span>
-            </div>
-          )}
 
           {/* Live Elapsed Timer */}
           {isBusy && elapsedSeconds > 0 && (
@@ -924,6 +914,32 @@ export const AgentWorkspace: React.FC = () => {
                     strokeWidth={1.5}
                     className={workspaceRoot ? 'text-amber-400' : 'text-zinc-400'}
                   />
+                </button>
+
+                {/* Web Access Instant Toggle Button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const current = settings.webAccess || DEFAULT_SETTINGS.webAccess;
+                    const isCurrentlyActive = current.enabled && current.codingEnabled;
+                    setWebAccess({ enabled: !isCurrentlyActive, codingEnabled: !isCurrentlyActive });
+                  }}
+                  title={
+                    settings.webAccess?.enabled && settings.webAccess?.codingEnabled
+                      ? 'Web Erişimi: Açık (Ajan için internet araması aktif - Kapatmak için tıklayın)'
+                      : 'Web Erişimi: Kapalı (Açmak için tıklayın)'
+                  }
+                  className={cn(
+                    'p-1.5 rounded-lg transition-all cursor-pointer shrink-0 mb-0.5 flex items-center gap-1 text-xs',
+                    settings.webAccess?.enabled && settings.webAccess?.codingEnabled
+                      ? 'text-cyan-400 bg-cyan-950/60 border border-cyan-800/60 hover:bg-cyan-900/60 shadow-sm'
+                      : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/80 border border-transparent'
+                  )}
+                >
+                  <Globe size={16} strokeWidth={1.5} />
+                  <span className="hidden sm:inline font-mono text-[10px] font-medium">
+                    {settings.webAccess?.enabled && settings.webAccess?.codingEnabled ? 'Web' : ''}
+                  </span>
                 </button>
 
                 {/* Multiline auto-resizing textarea */}
