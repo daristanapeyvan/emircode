@@ -65,6 +65,10 @@ export interface ElectronAPI {
   loadStorage: () => Promise<string | null>;
   saveStorage: (dataJson: string) => Promise<boolean>;
   getSystemLocale?: () => Promise<string>;
+  getPlatform: () => Promise<'win32' | 'linux' | 'darwin'>;
+  isLinuxIntegrated?: () => Promise<boolean>;
+  integrateLinuxDesktop?: () => Promise<{ success: boolean; message?: string; error?: string }>;
+
 
   // Emir Code: Enterprise Workspace & Coding Agent Security Layer
   openWorkspaceDialog: () => Promise<{ success: boolean; rootPath?: string; folderName?: string; error?: string }>;
@@ -127,6 +131,10 @@ const electronAPI: ElectronAPI = {
   loadStorage: () => ipcRenderer.invoke('storage:load'),
   saveStorage: (dataJson) => ipcRenderer.invoke('storage:save', dataJson),
   getSystemLocale: () => ipcRenderer.invoke('app:getLocale'),
+  getPlatform: () => ipcRenderer.invoke('system:getPlatform'),
+  isLinuxIntegrated: () => ipcRenderer.invoke('system:isLinuxIntegrated'),
+  integrateLinuxDesktop: () => ipcRenderer.invoke('system:integrateLinuxDesktop'),
+
 
   // Emir Code Workspace Bridge
   openWorkspaceDialog: () => ipcRenderer.invoke('workspace:open'),

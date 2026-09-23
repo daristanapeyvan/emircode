@@ -10,6 +10,8 @@ let mainWindow: BrowserWindow | null = null;
 app.setName('Emir Code');
 if (process.platform === 'win32') {
   app.setAppUserModelId('com.emircode.desktop');
+} else if (process.platform === 'linux') {
+  (app as any).setDesktopFileName?.('emir-code.desktop');
 }
 
 // Determine storage path in AppData
@@ -156,16 +158,31 @@ async function checkOllamaStatus(): Promise<{ installed: boolean; running: boole
     running = false;
   }
 
-  // 2. Check executable paths on Windows
-  const localAppOllama = path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Ollama', 'ollama.exe');
-  const progFilesOllama = path.join(process.env.ProgramFiles || '', 'Ollama', 'ollama.exe');
+  // 2. Check executable paths on Windows & Linux
+  if (process.platform === 'win32') {
+    const localAppOllama = path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Ollama', 'ollama.exe');
+    const progFilesOllama = path.join(process.env.ProgramFiles || '', 'Ollama', 'ollama.exe');
 
-  if (fs.existsSync(localAppOllama)) {
-    installed = true;
-    resolvedPath = localAppOllama;
-  } else if (fs.existsSync(progFilesOllama)) {
-    installed = true;
-    resolvedPath = progFilesOllama;
+    if (fs.existsSync(localAppOllama)) {
+      installed = true;
+      resolvedPath = localAppOllama;
+    } else if (fs.existsSync(progFilesOllama)) {
+      installed = true;
+      resolvedPath = progFilesOllama;
+    }
+  } else if (process.platform === 'linux') {
+    const linuxCandidates = [
+      '/usr/local/bin/ollama',
+      '/usr/bin/ollama',
+      path.join(os.homedir(), '.local', 'bin', 'ollama'),
+    ];
+    for (const cand of linuxCandidates) {
+      if (fs.existsSync(cand)) {
+        installed = true;
+        resolvedPath = cand;
+        break;
+      }
+    }
   }
 
   // 3. If not found in known paths, check CLI via where/which
@@ -255,6 +272,17 @@ ipcMain.handle('system:startOllama', async () => {
   if (status.running) return true;
   if (!status.installed) return false;
 
+  // On Linux, try systemd service first if present
+  if (process.platform === 'linux') {
+    try {
+      await new Promise<void>((resolve) => {
+        exec('systemctl --user start ollama', { timeout: 2000 }, () => resolve());
+      });
+      const check = await checkOllamaStatus();
+      if (check.running) return true;
+    } catch {}
+  }
+
   const ollamaCmd = status.path || 'ollama';
   try {
     const child = spawn(ollamaCmd, ['serve'], {
@@ -300,7 +328,33 @@ ipcMain.handle('system:installPrerequisite', async (_event, params: { target: 'o
       };
     }
 
-    // Download official Ollama installer from official URL
+    if (process.platform === 'linux') {
+      try {
+        const url = 'https://ollama.com/install.sh';
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`İndirme başarısız: HTTP ${res.status}`);
+        const script = await res.text();
+        const installerPath = path.join(os.tmpdir(), 'ollama-install.sh');
+        await fs.promises.writeFile(installerPath, script, { mode: 0o755 });
+
+        // Launch installer script
+        const child = spawn('sh', [installerPath], { detached: true, stdio: 'ignore' });
+        child.unref();
+
+        return {
+          success: true,
+          alreadyInstalled: false,
+          message: 'Ollama Linux kurulum betiği indirildi ve başlatıldı (alternatif: "curl -fsSL https://ollama.com/install.sh | sh").',
+        };
+      } catch (err: any) {
+        return {
+          success: false,
+          error: `Ollama indirilemedi: ${err.message}. Lütfen terminalden "curl -fsSL https://ollama.com/install.sh | sh" komutunu çalıştırın.`,
+        };
+      }
+    }
+
+    // Windows Ollama installer
     try {
       const url = 'https://ollama.com/download/OllamaSetup.exe';
       const tempDir = os.tmpdir();
@@ -338,7 +392,15 @@ ipcMain.handle('system:installPrerequisite', async (_event, params: { target: 'o
       };
     }
 
-    // Download official Node.js installer from nodejs.org
+    if (process.platform === 'linux') {
+      return {
+        success: true,
+        alreadyInstalled: false,
+        message: 'Linux sisteminizde Node.js kurmak için lütfen terminalden dağıtımınızın paket yöneticisini kullanın (ör: "sudo apt install -y nodejs npm" veya nvm).',
+      };
+    }
+
+    // Windows Node.js MSI installer
     try {
       const url = 'https://nodejs.org/dist/v22.14.0/node-v22.14.0-x64.msi';
       const tempDir = os.tmpdir();
@@ -377,7 +439,9 @@ ipcMain.handle('storage:load', async () => {
     } else if (fs.existsSync(legacyStorageFilePath)) {
       return await fs.promises.readFile(legacyStorageFilePath, 'utf-8');
     } else {
-      const fallbackLegacy = path.join(process.env.APPDATA || '', 'local-llm-desktop', 'local_llm_data.json');
+      const fallbackLegacy = process.platform === 'win32'
+        ? path.join(process.env.APPDATA || '', 'local-llm-desktop', 'local_llm_data.json')
+        : path.join(os.homedir(), '.config', 'local-llm-desktop', 'local_llm_data.json');
       if (fs.existsSync(fallbackLegacy)) {
         return await fs.promises.readFile(fallbackLegacy, 'utf-8');
       }
@@ -469,19 +533,37 @@ ipcMain.handle('system:getHardware', async () => {
 
   let gpuModel = '';
   try {
-    gpuModel = await new Promise<string>((resolve) => {
-      exec(
-        'powershell -NoProfile -Command "(Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name)[0]"',
-        { timeout: 3000 },
-        (error, stdout) => {
-          if (!error && stdout) {
+    if (process.platform === 'win32') {
+      gpuModel = await new Promise<string>((resolve) => {
+        exec(
+          'powershell -NoProfile -Command "(Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name)[0]"',
+          { timeout: 3000 },
+          (error, stdout) => {
+            if (!error && stdout) {
+              resolve(stdout.trim());
+            } else {
+              resolve('');
+            }
+          }
+        );
+      });
+    } else if (process.platform === 'linux') {
+      gpuModel = await new Promise<string>((resolve) => {
+        exec("lspci | grep -iE 'vga|3d|display' | head -n 1 | sed 's/.*: //'", { timeout: 3000 }, (err, stdout) => {
+          if (!err && stdout && stdout.trim()) {
             resolve(stdout.trim());
           } else {
-            resolve('');
+            exec("nvidia-smi --query-gpu=gpu_name --format=csv,noheader | head -n 1", { timeout: 2000 }, (err2, stdout2) => {
+              if (!err2 && stdout2 && stdout2.trim()) {
+                resolve(stdout2.trim());
+              } else {
+                resolve('');
+              }
+            });
           }
-        }
-      );
-    });
+        });
+      });
+    }
   } catch {
     gpuModel = '';
   }
@@ -1104,9 +1186,18 @@ ipcMain.handle(
       SystemRoot: process.env.SystemRoot || '',
       COMSPEC: process.env.COMSPEC || '',
       PATHEXT: process.env.PATHEXT || '',
-      TEMP: process.env.TEMP || '',
-      TMP: process.env.TMP || '',
+      TEMP: process.env.TEMP || process.env.TMPDIR || '/tmp',
+      TMP: process.env.TMP || process.env.TMPDIR || '/tmp',
       NODE_ENV: 'test',
+      // POSIX / Linux essentials
+      HOME: process.env.HOME || os.homedir() || '',
+      USER: process.env.USER || '',
+      SHELL: process.env.SHELL || '/bin/sh',
+      LANG: process.env.LANG || 'C.UTF-8',
+      LC_ALL: process.env.LC_ALL || '',
+      XDG_DATA_HOME: process.env.XDG_DATA_HOME || '',
+      XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME || '',
+      XDG_CACHE_HOME: process.env.XDG_CACHE_HOME || '',
     };
 
     // 6. Spawn Process with Tree Kill & Timeout
@@ -1124,7 +1215,15 @@ ipcMain.handle(
       const timer = setTimeout(() => {
         isTimedOut = true;
         if (child.pid) {
-          exec(`taskkill /pid ${child.pid} /T /F`, () => {});
+          if (process.platform === 'win32') {
+            exec(`taskkill /pid ${child.pid} /T /F`, () => {});
+          } else {
+            try {
+              process.kill(-child.pid, 'SIGKILL');
+            } catch {
+              exec(`pkill -P ${child.pid} ; kill -9 ${child.pid}`, () => {});
+            }
+          }
         } else {
           child.kill();
         }
@@ -1223,6 +1322,91 @@ ipcMain.handle(
     }
   }
 );
+
+// ============================================
+// Linux Desktop Integration & Platform IPC
+// ============================================
+ipcMain.handle('system:getPlatform', () => {
+  return process.platform;
+});
+
+ipcMain.handle('system:isLinuxIntegrated', async () => {
+  if (process.platform !== 'linux') return false;
+  const menuDesktop = path.join(os.homedir(), '.local', 'share', 'applications', 'emir-code.desktop');
+  return fs.existsSync(menuDesktop);
+});
+
+ipcMain.handle('system:integrateLinuxDesktop', async () => {
+  if (process.platform !== 'linux') {
+    return { success: false, error: 'Bu işlem yalnızca Linux işletim sisteminde geçerlidir.' };
+  }
+
+  try {
+    const execPath = process.execPath;
+    const homeDir = os.homedir();
+    const appDir = path.dirname(execPath);
+
+    // Icon resolution
+    let iconPath = path.join(appDir, 'icon.png');
+    if (!fs.existsSync(iconPath)) {
+      iconPath = path.join(appDir, 'resources', 'icon.png');
+    }
+    if (!fs.existsSync(iconPath)) {
+      iconPath = 'emir-code';
+    }
+
+    const desktopContent = `[Desktop Entry]
+Name=Emir Code
+GenericName=AI Native Coding Agent
+Comment=AI Native Coding Agent Desktop Client
+Exec="${execPath}" %U
+Icon=${iconPath}
+Terminal=false
+Type=Application
+Categories=Development;IDE;TextEditor;
+StartupWMClass=emir-code
+MimeType=x-scheme-handler/emir-code;
+Keywords=AI;Agent;Code;Ollama;Editor;IDE;
+`;
+
+    // 1. Menu entry
+    const applicationsDir = path.join(homeDir, '.local', 'share', 'applications');
+    await fs.promises.mkdir(applicationsDir, { recursive: true });
+    const targetMenuFile = path.join(applicationsDir, 'emir-code.desktop');
+    await fs.promises.writeFile(targetMenuFile, desktopContent, { mode: 0o755 });
+
+    // 2. Desktop shortcut
+    const desktopDirs = [path.join(homeDir, 'Desktop'), path.join(homeDir, 'Masaüstü')];
+    for (const d of desktopDirs) {
+      if (fs.existsSync(d)) {
+        const desktopShortcut = path.join(d, 'Emir Code.desktop');
+        await fs.promises.writeFile(desktopShortcut, desktopContent, { mode: 0o755 });
+        exec(`gio set "${desktopShortcut}" "metadata::trusted" yes`, () => {});
+      }
+    }
+
+    // 3. Command line symlink
+    const localBinDir = path.join(homeDir, '.local', 'bin');
+    await fs.promises.mkdir(localBinDir, { recursive: true });
+    const symlinkTarget = path.join(localBinDir, 'emir-code');
+    try {
+      if (fs.existsSync(symlinkTarget)) {
+        await fs.promises.unlink(symlinkTarget);
+      }
+      await fs.promises.symlink(execPath, symlinkTarget);
+    } catch {}
+
+    // 4. Update desktop database
+    exec('update-desktop-database ~/.local/share/applications', () => {});
+
+    return {
+      success: true,
+      message: 'Emir Code masaüstü kısayolu, uygulama menüsü ve terminal komutu (~/.local/bin/emir-code) başarıyla oluşturuldu!',
+    };
+  } catch (err: any) {
+    return { success: false, error: `Masaüstü entegrasyonu başarısız: ${err.message}` };
+  }
+});
 
 app.whenReady().then(() => {
   createWindow();

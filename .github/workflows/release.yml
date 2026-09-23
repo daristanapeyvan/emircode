@@ -15,8 +15,8 @@ permissions:
   contents: write
 
 jobs:
-  build-and-release:
-    name: Build & Publish Release
+  build-windows:
+    name: Build Windows Release (NSIS & Portable)
     runs-on: windows-latest
 
     steps:
@@ -35,7 +35,10 @@ jobs:
       - name: Typecheck
         run: npx tsc --noEmit
 
-      - name: Build Vite & Electron Main
+      - name: Run Functional Test Suite
+        run: node ./scripts/verify_functionality.js
+
+      - name: Build Vite & Web Assets
         run: npm run build:vite
 
       - name: Build Windows Executables (Installer & Portable)
@@ -43,6 +46,87 @@ jobs:
 
       - name: Post-build Metadata & Icon Embed
         run: node ./scripts/postbuild.js
+
+      - name: Upload Windows Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: |
+            release/*.exe
+            release/*.blockmap
+
+  build-linux:
+    name: Build Linux Release (DEB, RPM, AppImage, Tarball & GUI Installer)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Install Linux Packaging Tools (fpm & rpm)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ruby ruby-dev build-essential rpm libarchive-tools
+          sudo gem install --no-document fpm
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Run Functional Test Suite
+        run: node ./scripts/verify_functionality.js
+
+      - name: Build Vite & Web Assets
+        run: npm run build:vite
+
+      - name: Build Linux Distributables (deb, rpm, AppImage, tar.gz)
+        run: npx electron-builder --linux deb rpm AppImage tar.gz --publish never
+
+      - name: Bundle Standalone Linux GUI Installer
+        run: |
+          cp build/linux-installer.sh release/emir-code-setup-linux.sh
+          chmod +x release/emir-code-setup-linux.sh
+
+      - name: Upload Linux Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-release
+          path: |
+            release/*.deb
+            release/*.rpm
+            release/*.AppImage
+            release/*.tar.gz
+            release/*.sh
+            release/*.blockmap
+
+  publish-release:
+    name: Publish All Release Packages
+    runs-on: ubuntu-latest
+    needs: [build-windows, build-linux]
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Download Windows Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-release
+          path: release-dist
+
+      - name: Download Linux Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-release
+          path: release-dist
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
@@ -53,7 +137,13 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            release/*.exe
-            release/*.blockmap
+            release-dist/*.exe
+            release-dist/*.deb
+            release-dist/*.rpm
+            release-dist/*.AppImage
+            release-dist/*.tar.gz
+            release-dist/*.sh
+            release-dist/*.blockmap
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+

@@ -6,7 +6,7 @@
 
 ### **Autonomous, Private, and Secure Local AI Software Engineer**
 
-[![Platform](https://img.shields.io/badge/Platform-Windows%20x64-blue.svg)](https://github.com)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20x64%20%7C%20Linux%20x64-blue.svg)](https://github.com/daristanapeyvan/emircode/releases)
 [![Engine](https://img.shields.io/badge/Local%20LLM-Ollama-purple.svg)](https://ollama.ai)
 [![Security](https://img.shields.io/badge/Sandbox-Realpath%20Jail-emerald.svg)](./SECURITY.md)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
@@ -126,35 +126,78 @@ flowchart TD
 ## 🚀 Getting Started
 
 ### Prerequisites
-1. **Windows 10 / 11 (64-bit)**
+1. **Operating System**:
+   - **Windows 10 / 11 (64-bit)**
+   - **Linux (64-bit)**: Ubuntu 20.04+, Debian 11+, Fedora 38+, Linux Mint 20+, Pop!_OS, openSUSE, Arch Linux
 2. **[Ollama](https://ollama.ai)** installed and running locally:
    ```bash
    ollama pull qwen2.5-coder:7b
    ```
 3. **Node.js (v18+)** and **npm** (if building from source)
 
+---
+
 ### Installation Options
 
-You can download pre-built Windows binaries directly from the [GitHub Releases](https://github.com/daristanapeyvan/emircode/releases) section:
+Pre-built binaries for both Windows and Linux are published automatically on every release under the [GitHub Releases](https://github.com/daristanapeyvan/emircode/releases) section.
 
-#### Option A: Windows NSIS Installer (Recommended)
-Download and run the official multilingual installer:
-- `Emir Code Setup 1.1.0.exe`
-- Choose custom installation directory, Start Menu, and Desktop shortcuts.
-- Fully detects your operating system language (Turkish or English) automatically.
+#### 🪟 Windows Installation
 
-#### Option B: Standalone Portable Executable (.exe)
-Download and run directly without installation:
-- `Emir Code 1.1.0.exe`
-- Completely self-contained single executable. Zero installation required.
+| Package | Format | Description |
+| :--- | :--- | :--- |
+| **Windows Setup (Recommended)** | `Emir Code Setup 1.4.0.exe` | Multilingual NSIS GUI installer with custom folder selection, Desktop shortcut, and Start Menu registration. |
+| **Windows Portable** | `Emir Code 1.4.0.exe` | Completely self-contained single executable. Zero installation required. |
 
-#### Option C: Portable Unpacked
-Run the unpacked standalone executable directly:
+---
+
+#### 🐧 Linux Installation & GUI Setup
+
+Emir Code provides a first-class, native desktop experience across all major Linux distributions:
+
+##### 1. Debian / Ubuntu / Linux Mint / Pop!_OS (.deb GUI Package)
+Download the `.deb` package and install it using your system's native Software Center:
+```bash
+# GUI Installation: Double-click 'emir-code_1.4.0_amd64.deb' in your file manager to open Ubuntu Software / GDebi
+# Or via terminal:
+sudo apt install ./emir-code_1.4.0_amd64.deb
 ```
-release/win-unpacked/EmirCode.exe
+*Automatically registers the application menu entry, high-DPI desktop icons, and the `/usr/bin/emir-code` command.*
+
+##### 2. Fedora / RHEL / openSUSE (.rpm GUI Package)
+Download the `.rpm` package and double-click to install via GNOME Software / Discover:
+```bash
+# Or via dnf:
+sudo dnf install ./emir-code-1.4.0.x86_64.rpm
 ```
 
-#### Option C: Build from Source
+##### 3. Universal Portable AppImage
+Download and run directly on any Linux distribution without root privileges:
+```bash
+chmod +x Emir-Code-1.4.0.AppImage
+./Emir-Code-1.4.0.AppImage
+```
+
+##### 4. Standalone Linux GUI Setup Wizard (`emir-code-setup-linux.sh`)
+For users who prefer a Windows-like graphical setup wizard:
+1. Download `emir-code-1.4.0.tar.gz` and extract it, or download `emir-code-setup-linux.sh`.
+2. Run the graphical installer:
+   ```bash
+   chmod +x emir-code-setup-linux.sh
+   ./emir-code-setup-linux.sh
+   ```
+3. A graphical setup wizard (Zenity/KDialog with terminal fallback) will guide you step-by-step:
+   - Target directory selection (`~/.local/share/emir-code` or `/opt/emir-code`)
+   - Desktop and Application Menu shortcuts
+   - Terminal CLI command link (`~/.local/bin/emir-code`)
+   - Automatic uninstaller generation (`uninstall.sh`)
+
+##### 5. In-App Desktop Integration
+If you launch Emir Code from an AppImage or unpacked folder, open **Settings → About Emir Code** and click **"Masaüstü Kısayollarını Oluştur / Güncelle"** to automatically integrate the app into your system menu and desktop anytime!
+
+---
+
+### 🛠️ Building from Source
+
 ```bash
 # Clone the repository
 git clone https://github.com/daristanapeyvan/emircode.git
@@ -166,8 +209,14 @@ npm install
 # Run Vite + Electron in development mode
 npm run dev
 
-# Build Windows NSIS Installer & Unpacked Distribution
+# Build Windows NSIS Installer & Portable Executable
 npm run build:installer
+
+# Build Linux Packages (deb, rpm, AppImage, tar.gz)
+npm run build:linux
+
+# Build for all supported platforms
+npm run build:all
 ```
 
 ---

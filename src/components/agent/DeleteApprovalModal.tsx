@@ -1,9 +1,13 @@
 import React from 'react';
 import { useAgentStore } from '@/stores/agentStore';
+import { useSettingsStore } from '@/stores/settingsStore';
+import { getTranslations } from '@/lib/localization/i18n';
 import { Trash2, AlertOctagon, X, Check } from 'lucide-react';
 
 export const DeleteApprovalModal: React.FC = () => {
   const { pendingDelete, approveDelete, rejectDelete } = useAgentStore();
+  const { settings } = useSettingsStore();
+  const t = getTranslations(settings.language);
 
   if (!pendingDelete) return null;
 
@@ -14,7 +18,7 @@ export const DeleteApprovalModal: React.FC = () => {
         <div className="px-5 py-3.5 border-b border-red-900/50 bg-red-950/40 flex items-center justify-between">
           <div className="flex items-center gap-2 text-red-400 font-semibold text-sm">
             <AlertOctagon size={18} />
-            <span>Kritik İşlem: Dosya Silme Onayı</span>
+            <span>{t.agent.deleteApprovalTitle}</span>
           </div>
           <button
             onClick={rejectDelete}
@@ -27,7 +31,7 @@ export const DeleteApprovalModal: React.FC = () => {
         {/* Body */}
         <div className="p-5 space-y-4 text-xs">
           <p className="text-zinc-300">
-            Ajan aşağıdaki dosyayı <strong className="text-red-400">kalıcı olarak silmek</strong> istiyor:
+            {t.agent.deleteWarning}
           </p>
 
           <div className="p-3 bg-zinc-950/80 border border-zinc-800 rounded font-mono text-zinc-100 flex items-center gap-2">
@@ -36,12 +40,12 @@ export const DeleteApprovalModal: React.FC = () => {
           </div>
 
           <div className="p-3 bg-zinc-800/40 border border-zinc-700/50 rounded">
-            <span className="text-zinc-400 font-medium block mb-1">Ajanın Gerekçesi:</span>
+            <span className="text-zinc-400 font-medium block mb-1">{t.agent.agentReasoning}</span>
             <span className="text-zinc-200">{pendingDelete.reason}</span>
           </div>
 
           <div className="text-[11px] text-zinc-500">
-            * Silme öncesinde güvenlik amacıyla otomatik bir anlık görüntü (snapshot) saklanır.
+            {t.agent.deleteSnapshotNotice}
           </div>
         </div>
 
@@ -51,14 +55,14 @@ export const DeleteApprovalModal: React.FC = () => {
             onClick={rejectDelete}
             className="px-4 py-1.5 text-xs font-medium text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
           >
-            İptal Et
+            {t.agent.reject}
           </button>
           <button
             onClick={approveDelete}
             className="px-4 py-1.5 text-xs font-medium text-white bg-red-600 hover:bg-red-500 rounded-lg shadow-sm flex items-center gap-1.5 transition-colors cursor-pointer"
           >
             <Check size={14} />
-            Kalıcı Olarak Sil
+            {t.agent.confirmDeletion}
           </button>
         </div>
       </div>

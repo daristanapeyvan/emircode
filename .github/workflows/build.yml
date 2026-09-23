@@ -8,8 +8,11 @@ on:
 
 jobs:
   validate:
-    name: Typecheck and Build
-    runs-on: windows-latest
+    name: Validate (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest]
 
     steps:
       - name: Checkout Code
@@ -27,5 +30,9 @@ jobs:
       - name: TypeScript Check
         run: npx tsc --noEmit
 
+      - name: Run Functional Test Suite
+        run: node ./scripts/verify_functionality.js
+
       - name: Build Web Application
         run: npm run build:vite
+

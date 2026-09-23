@@ -60,7 +60,7 @@ export const ModelDetailsModal: React.FC = () => {
           </div>
         ) : !details ? (
           <div className="py-12 text-center text-zinc-500">
-            No information available from backend.
+            {t.modelDetails.noInfo}
           </div>
         ) : (
           <div className="py-1">
@@ -99,7 +99,7 @@ export const ModelDetailsModal: React.FC = () => {
             {activeTab === 'capabilities' && (
               <div className="space-y-3">
                 <p className="text-zinc-400 leading-relaxed">
-                  Capabilities reported directly by Ollama metadata:
+                  {t.modelDetails.capabilitiesDesc}
                 </p>
                 <div className="flex flex-wrap gap-2">
                   {details.capabilities && details.capabilities.length > 0 ? (
@@ -113,7 +113,7 @@ export const ModelDetailsModal: React.FC = () => {
                       </div>
                     ))
                   ) : (
-                    <span className="text-zinc-500">No explicit capabilities tags provided.</span>
+                    <span className="text-zinc-500">{t.modelDetails.noCapabilities}</span>
                   )}
                 </div>
               </div>
@@ -127,7 +127,7 @@ export const ModelDetailsModal: React.FC = () => {
                     {details.parameters}
                   </div>
                 ) : (
-                  <div className="text-zinc-500">No explicit parameters declared.</div>
+                  <div className="text-zinc-500">{t.modelDetails.noParameters}</div>
                 )}
               </div>
             )}
@@ -137,13 +137,13 @@ export const ModelDetailsModal: React.FC = () => {
               <div className="space-y-2.5">
                 <div className="grid grid-cols-2 gap-2.5">
                   <div className="p-3 bg-zinc-950/60 rounded border border-zinc-800/40">
-                    <span className="text-zinc-500 block text-[11px] mb-0.5">Context Length</span>
+                    <span className="text-zinc-500 block text-[11px] mb-0.5">{t.modelDetails.contextLength}</span>
                     <span className="text-zinc-200 font-mono font-medium">
                       {details.model_info?.['qwen3.context_length'] || details.model_info?.['general.context_length'] || '4096'}
                     </span>
                   </div>
                   <div className="p-3 bg-zinc-950/60 rounded border border-zinc-800/40">
-                    <span className="text-zinc-500 block text-[11px] mb-0.5">Embedding Length</span>
+                    <span className="text-zinc-500 block text-[11px] mb-0.5">{t.modelDetails.embeddingLength}</span>
                     <span className="text-zinc-200 font-mono font-medium">
                       {details.model_info?.['qwen3.embedding_length'] || details.model_info?.['general.embedding_length'] || 'N/A'}
                     </span>

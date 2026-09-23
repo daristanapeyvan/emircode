@@ -24,7 +24,7 @@ Emir Code enforces a strict multi-process isolation model following Chromium and
 |                            Operating System                             |
 +-------------------------------------------------------------------------+
                                     ^
-                                    | (Restricted Win32 / fs calls)
+                                    | (Restricted Win32 / POSIX / Linux fs calls)
                                     v
 +-------------------------------------------------------------------------+
 |                     Electron Main Process (Node.js)                     |

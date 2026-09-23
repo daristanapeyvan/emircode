@@ -139,17 +139,17 @@ export const AgentWorkspace: React.FC = () => {
           <button
             onClick={openWorkspaceDialog}
             className="flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium text-zinc-300 hover:text-white hover:bg-zinc-800/60 transition-colors cursor-pointer group shrink-0"
-            title={workspaceRoot ? `${workspaceRoot} (Klasörü Değiştir)` : 'Proje Klasörü Seç'}
+            title={workspaceRoot ? `${workspaceRoot} (${t.agent.changeFolder})` : t.agent.selectFolder}
           >
             <FolderOpen size={14} className="text-zinc-400 group-hover:text-amber-400 transition-colors shrink-0" />
-            <span className="truncate max-w-[180px]">{workspaceName || (t.agent?.openFolder || 'Proje Klasörü Aç')}</span>
+            <span className="truncate max-w-[180px]">{workspaceName || t.agent.openFolder}</span>
           </button>
 
           <span className="text-zinc-700 text-xs select-none">/</span>
 
           <button
             onClick={() => setIsExplorerOpen(!isExplorerOpen)}
-            title={isExplorerOpen ? 'Proje Gezginini Gizle' : (t.agent?.projectExplorer || 'Proje Gezginini Göster')}
+            title={isExplorerOpen ? t.agent.hideExplorer : t.agent.projectExplorer}
             className={cn(
               'p-1.5 rounded-md text-xs transition-colors cursor-pointer',
               isExplorerOpen
@@ -175,7 +175,7 @@ export const AgentWorkspace: React.FC = () => {
           {/* Unified Security Profile & Sandbox Tooltip */}
           <div
             className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-zinc-900/60 border border-zinc-800/80 text-xs text-zinc-400 hover:border-zinc-700/80 transition-colors"
-            title="Güvenlik Profili • Sandbox (Realpath Jail) Koruması Aktif"
+            title={t.agent.securityProfileTooltip}
           >
             <ShieldCheck
               size={13}
@@ -195,13 +195,13 @@ export const AgentWorkspace: React.FC = () => {
               className="bg-transparent border-0 text-[11px] text-zinc-300 focus:outline-none cursor-pointer pr-0.5"
             >
               <option value="strict" className="bg-zinc-900 text-zinc-200">
-                {t.agent?.securityProfileStrict || 'Sıkı Koruma'}
+                {t.agent.securityProfileStrict}
               </option>
               <option value="balanced" className="bg-zinc-900 text-zinc-200">
-                {t.agent?.securityProfileBalanced || 'Dengeli'}
+                {t.agent.securityProfileBalanced}
               </option>
               <option value="autonomous" className="bg-zinc-900 text-zinc-200">
-                {t.agent?.securityProfileAutonomous || 'Otonom'}
+                {t.agent.securityProfileAutonomous}
               </option>
             </select>
           </div>
@@ -210,7 +210,7 @@ export const AgentWorkspace: React.FC = () => {
           {appliedTransactions.length > 0 && (
             <button
               onClick={() => rollbackAll()}
-              title="Ajanın bu oturumda yaptığı tüm değişiklikleri geri alır"
+              title={t.agent.rollbackAllTooltip}
               className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-zinc-900/60 border border-zinc-800 text-xs text-zinc-400 hover:text-amber-400 hover:border-amber-500/40 transition-colors cursor-pointer"
             >
               <RotateCcw size={12} />
@@ -229,8 +229,8 @@ export const AgentWorkspace: React.FC = () => {
             )}
             title={
               showReasoningDump
-                ? (t.agent?.hideReasoning || 'Düşünce Panelini Gizle')
-                : (t.agent?.showReasoning || 'Düşünce & Muhakeme Panelini Aç')
+                ? t.agent.hideReasoning
+                : t.agent.showReasoning
             }
           >
             <PanelRight size={13} />
@@ -240,7 +240,7 @@ export const AgentWorkspace: React.FC = () => {
           {steps.length > 0 && (
             <button
               onClick={clearSession}
-              title={t.agent?.clear || 'Oturumu Temizle'}
+              title={t.agent.clear}
               className="p-1.5 rounded-md text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/40 transition-colors cursor-pointer"
             >
               <Trash2 size={13} />
@@ -255,8 +255,8 @@ export const AgentWorkspace: React.FC = () => {
         {isExplorerOpen && (
           <div className="w-56 border-r border-zinc-800/60 bg-zinc-950/20 flex flex-col shrink-0 animate-in slide-in-from-left-2 duration-150">
             <div className="p-2.5 border-b border-zinc-800/40 flex items-center justify-between text-xs font-medium text-zinc-400">
-              <span>{t.agent?.projectExplorer || 'Proje Gezgini'}</span>
-              <span className="text-[11px] text-zinc-500">{workspaceFiles.length} Öğe</span>
+              <span>{t.agent.projectExplorer}</span>
+              <span className="text-[11px] text-zinc-500">{workspaceFiles.length} {t.agent.items}</span>
             </div>
 
             <div className="flex-1 overflow-y-auto">
@@ -270,12 +270,12 @@ export const AgentWorkspace: React.FC = () => {
                 />
               ) : (
                 <div className="p-6 text-center text-xs text-zinc-500 space-y-3">
-                  <p>Bir kod projesi üzerinde çalışmak için klasör açın.</p>
+                  <p>{t.agent.openFolderToWork}</p>
                   <button
                     onClick={openWorkspaceDialog}
                     className="px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-medium cursor-pointer transition-colors shadow-sm"
                   >
-                    Klasör Seç
+                    {t.agent.selectFolder}
                   </button>
                 </div>
               )}
@@ -412,7 +412,7 @@ export const AgentWorkspace: React.FC = () => {
                           <div className="flex items-center justify-between text-[11px] text-zinc-400">
                             <div className="flex items-center gap-1.5 font-medium">
                               <Brain size={12} className="text-zinc-400" />
-                              <span>Muhakeme</span>
+                              <span>{t.agent.reasoning}</span>
                             </div>
                             <span className="text-zinc-600 font-mono text-[10px]">
                               {new Date(step.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
@@ -473,7 +473,7 @@ export const AgentWorkspace: React.FC = () => {
                           <div className="flex items-center justify-between text-[11px] text-amber-400">
                             <div className="flex items-center gap-1.5 font-medium">
                               <Zap size={12} className="text-amber-400 fill-amber-400/40" />
-                              <span>{step.title || t.agent?.userIntervention || 'Kullanıcı Müdahalesi (Araya Girildi)'}</span>
+                              <span>{step.title || t.agent.userIntervention}</span>
                             </div>
                             <span className="text-amber-500/70 font-mono text-[10px]">
                               {new Date(step.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
@@ -494,7 +494,7 @@ export const AgentWorkspace: React.FC = () => {
                         >
                           <div className="flex items-center gap-2 text-xs font-semibold text-emerald-400">
                             <CheckCircle2 size={15} />
-                            <span>{step.title || 'Görev Tamamlandı'}</span>
+                            <span>{step.title || t.agent.taskCompleted}</span>
                           </div>
                           <div className="text-zinc-200 select-text leading-relaxed whitespace-pre-wrap">
                             {step.content}
@@ -516,7 +516,7 @@ export const AgentWorkspace: React.FC = () => {
                   <div className="p-3.5 rounded-lg bg-zinc-900/80 border border-zinc-700/80 text-xs text-zinc-100 space-y-2.5 shadow-sm animate-in fade-in-50 duration-200 my-2">
                     <div className="flex items-center gap-2 text-zinc-300 font-medium text-xs">
                       <HelpCircle size={14} className="text-zinc-400 shrink-0" />
-                      <span>{t.agent?.clarificationNeeded || 'Ajan Bir Kararda Size Danışıyor'}</span>
+                      <span>{t.agent.clarificationNeeded}</span>
                     </div>
 
                     <div className="p-2.5 bg-zinc-950/80 rounded-md border border-zinc-800/80 text-xs text-zinc-200 leading-relaxed font-sans">
@@ -526,7 +526,7 @@ export const AgentWorkspace: React.FC = () => {
                     {pendingQuestion.options && pendingQuestion.options.length > 0 && (
                       <div className="space-y-1">
                         <span className="text-[11px] text-zinc-400 font-medium block">
-                          Hazır Seçenekler:
+                          {t.agent.readyOptions}
                         </span>
                         <div className="flex flex-wrap gap-1.5 pt-0.5">
                           {pendingQuestion.options.map((opt, idx) => (
@@ -545,7 +545,7 @@ export const AgentWorkspace: React.FC = () => {
                     {/* Custom Answer Input */}
                     <div className="space-y-1 pt-0.5">
                       <span className="text-[11px] text-zinc-400 font-medium block">
-                        Veya Özel Bir Yanıt Belirtin:
+                        {t.agent.orCustomAnswer}
                       </span>
                       <div className="flex gap-2">
                         <input
@@ -558,10 +558,7 @@ export const AgentWorkspace: React.FC = () => {
                               setCustomAnswerText('');
                             }
                           }}
-                          placeholder={
-                            t.agent?.customAnswerPlaceholder ||
-                            'Özel yanıtınızı buraya yazın... (Enter)'
-                          }
+                          placeholder={t.agent.customAnswerPlaceholder}
                           className="flex-1 bg-zinc-950 border border-zinc-800 rounded-md px-2.5 py-1.5 text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-zinc-600 font-sans"
                         />
                         <button
@@ -575,7 +572,7 @@ export const AgentWorkspace: React.FC = () => {
                           className="px-3 py-1.5 bg-zinc-100 hover:bg-white text-zinc-900 disabled:opacity-30 disabled:hover:bg-zinc-100 text-xs font-medium rounded-md flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm"
                         >
                           <Send size={12} />
-                          <span>{t.agent?.submitAnswer || 'İlet'}</span>
+                          <span>{t.agent.submitAnswer}</span>
                         </button>
                       </div>
                     </div>
@@ -598,11 +595,11 @@ export const AgentWorkspace: React.FC = () => {
                           <Brain size={13} className="text-zinc-500 shrink-0" />
                         )}
                         <span className="font-medium text-zinc-300">
-                          {isBusy ? 'Düşünülüyor...' : 'Muhakeme süreci'}
+                          {isBusy ? t.agent.thinking : t.agent.reasoningProcess}
                         </span>
                         {isStreamingResponse && (
                           <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold bg-blue-500/20 text-blue-400 border border-blue-500/30 uppercase tracking-wider animate-pulse">
-                            CANLI TOKEN AKIŞI
+                            {t.agent.liveTokenStream}
                           </span>
                         )}
                       </div>
@@ -610,7 +607,7 @@ export const AgentWorkspace: React.FC = () => {
                       <div className="flex items-center gap-2 text-zinc-500 group-hover:text-zinc-300 transition-colors">
                         {steps.length > 0 && (
                           <span className="text-[11px] font-mono text-zinc-600">
-                            {steps.length} adım
+                            {steps.length} {t.agent.stepsCount}
                           </span>
                         )}
                         {inlineTranscriptOpen ? (
@@ -638,7 +635,7 @@ export const AgentWorkspace: React.FC = () => {
                           </div>
                         ) : (
                           <div className="p-2 text-zinc-500 text-xs italic font-sans">
-                            {isBusy ? 'Yanıt bekleniyor...' : 'Döküm bulunmuyor.'}
+                            {isBusy ? t.agent.waitingResponse : t.agent.noTrace}
                           </div>
                         )}
 
@@ -676,8 +673,8 @@ export const AgentWorkspace: React.FC = () => {
                   onClick={openWorkspaceDialog}
                   title={
                     workspaceRoot
-                      ? `Proje: ${workspaceName || workspaceRoot} (Klasörü Değiştir)`
-                      : (t.agent?.openFolder || 'Proje Klasörü Aç')
+                      ? `${workspaceName || workspaceRoot} (${t.agent.changeFolder})`
+                      : t.agent.openFolder
                   }
                   className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/80 transition-colors cursor-pointer shrink-0 mb-0.5"
                 >
@@ -705,10 +702,10 @@ export const AgentWorkspace: React.FC = () => {
                   disabled={!workspaceRoot}
                   placeholder={
                     !workspaceRoot
-                      ? (t.agent?.noFolderSelected || 'Ajanı çalıştırmak için önce yukarıdan bir proje klasörü açın.')
+                      ? t.agent.noFolderSelected
                       : isBusy
-                      ? (t.agent?.interruptPlaceholder || 'Ajan çalışıyor... Araya girip yeni talimat vermek için buraya yazın (Enter)...')
-                      : (t.agent?.inputPlaceholder || 'Ajan için bir hedef yazın... (Göndermek için Enter, yeni satır için Shift+Enter)')
+                      ? t.agent.interruptPlaceholder
+                      : t.agent.inputPlaceholder
                   }
                   className="flex-1 bg-transparent border-0 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:ring-0 resize-none max-h-44 py-1.5 leading-relaxed font-sans selectable-text"
                 />
@@ -720,17 +717,17 @@ export const AgentWorkspace: React.FC = () => {
                       <button
                         type="button"
                         onClick={handleInterrupt}
-                        title={t.agent?.interruptAndSteer || 'Araya Gir & Yönlendir (Enter)'}
+                        title={`${t.agent.interruptAndSteer} (Enter)`}
                         className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 font-medium text-xs transition-colors cursor-pointer shadow-sm animate-in fade-in"
                       >
                         <Zap size={14} className="fill-zinc-950" />
-                        <span className="hidden sm:inline font-semibold">{t.agent?.interruptAndSteer || 'Araya Gir'}</span>
+                        <span className="hidden sm:inline font-semibold">{t.agent.interruptAndSteer}</span>
                       </button>
                     )}
                     <button
                       type="button"
                       onClick={stopGoal}
-                      title={t.agent?.stop || 'Durdur (Görevi İptal Et)'}
+                      title={`${t.agent.stop}`}
                       className="p-1.5 rounded-lg bg-red-600/90 hover:bg-red-500 text-white transition-colors cursor-pointer shadow-sm"
                     >
                       <Square size={16} strokeWidth={2} />
@@ -741,7 +738,7 @@ export const AgentWorkspace: React.FC = () => {
                     type="button"
                     onClick={handleStart}
                     disabled={!workspaceRoot || !goalInput.trim()}
-                    title={t.agent?.start || 'Başlat'}
+                    title={t.agent.start}
                     className="p-1.5 rounded-lg bg-zinc-100 hover:bg-white text-zinc-900 disabled:opacity-30 disabled:hover:bg-zinc-100 transition-colors cursor-pointer shrink-0 mb-0.5 shadow-sm"
                   >
                     <ArrowUp size={16} strokeWidth={2} />
@@ -759,12 +756,12 @@ export const AgentWorkspace: React.FC = () => {
             <div className="p-2.5 border-b border-zinc-800/60 flex items-center justify-between">
               <div className="flex items-center gap-1.5 text-xs font-medium text-zinc-300">
                 <Brain size={13} className="text-zinc-400" />
-                <span>{t.agent?.reasoningTrace || 'Muhakeme & Döküm'}</span>
+                <span>{t.agent.reasoningTrace}</span>
               </div>
               <button
                 onClick={toggleReasoningDump}
                 className="p-1 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/40 transition-colors cursor-pointer"
-                title="Paneli Kapat"
+                title={t.common.close}
               >
                 <X size={12} />
               </button>
@@ -781,7 +778,7 @@ export const AgentWorkspace: React.FC = () => {
                     : 'border-transparent hover:text-zinc-200'
                 )}
               >
-                Düşünce
+                {t.agent.thoughtTab}
               </button>
               <button
                 onClick={() => setDumpTab('logs')}
@@ -792,7 +789,7 @@ export const AgentWorkspace: React.FC = () => {
                     : 'border-transparent hover:text-zinc-200'
                 )}
               >
-                Loglar ({executionLogs.length})
+                {t.agent.logsTab} ({executionLogs.length})
               </button>
               <button
                 onClick={() => setDumpTab('raw')}
@@ -803,7 +800,7 @@ export const AgentWorkspace: React.FC = () => {
                     : 'border-transparent hover:text-zinc-200'
                 )}
               >
-                Ham Döküm
+                {t.agent.rawDumpTab}
               </button>
             </div>
 
@@ -813,7 +810,7 @@ export const AgentWorkspace: React.FC = () => {
                 <div className="space-y-3">
                   {thoughts.length === 0 ? (
                     <div className="p-4 text-center text-zinc-500 font-sans text-xs">
-                      {t.agent?.reasoningEmpty || 'Henüz muhakeme dökümü yok.'}
+                      {t.agent.reasoningEmpty}
                     </div>
                   ) : (
                     thoughts.map((th, idx) => (
@@ -822,7 +819,7 @@ export const AgentWorkspace: React.FC = () => {
                         className="p-2.5 rounded-md bg-zinc-900/40 border border-zinc-800/70 space-y-1"
                       >
                         <div className="flex items-center justify-between text-[10px] text-zinc-400 font-sans">
-                          <span className="font-medium">Adım #{idx + 1} Muhakemesi</span>
+                          <span className="font-medium">{t.agent.stepReasoning} #{idx + 1}</span>
                           <span className="text-zinc-600 font-mono text-[10px]">
                             {new Date(th.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                           </span>
@@ -839,9 +836,9 @@ export const AgentWorkspace: React.FC = () => {
                       <div className="flex items-center justify-between text-[10px] text-zinc-300 font-sans">
                         <span className="font-medium flex items-center gap-1.5">
                           <Loader2 size={10} className="animate-spin text-zinc-400" />
-                          Aktif Muhakeme
+                          {t.agent.activeReasoning}
                         </span>
-                        <span className="text-zinc-500 font-mono text-[9px]">akış</span>
+                        <span className="text-zinc-500 font-mono text-[9px]">{t.agent.streamBadge}</span>
                       </div>
                       <p className="text-zinc-200 text-[11px] leading-relaxed whitespace-pre-wrap font-mono">
                         {activeStreamText}
@@ -854,7 +851,7 @@ export const AgentWorkspace: React.FC = () => {
               {dumpTab === 'logs' && (
                 <div className="space-y-1 text-[11px] leading-relaxed select-text">
                   {executionLogs.length === 0 ? (
-                    <div className="p-4 text-center text-zinc-500 font-sans">Henüz log yok.</div>
+                    <div className="p-4 text-center text-zinc-500 font-sans">{t.agent.noLogs}</div>
                   ) : (
                     executionLogs.map((log, idx) => (
                       <div key={idx} className="text-zinc-400 hover:text-zinc-200">
@@ -868,16 +865,16 @@ export const AgentWorkspace: React.FC = () => {
               {dumpTab === 'raw' && (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between text-[11px] text-zinc-400 font-sans">
-                    <span>{isStreamingResponse ? 'Canlı Model Akışı:' : 'Son Adım Ham LLM Çıktısı:'}</span>
+                    <span>{isStreamingResponse ? t.agent.liveModelStream : t.agent.lastStepRawOutput}</span>
                     {isStreamingResponse && (
-                      <span className="text-[10px] text-zinc-400 font-mono">akış</span>
+                      <span className="text-[10px] text-zinc-400 font-mono">{t.agent.streamBadge}</span>
                     )}
                   </div>
                   <pre className="p-2.5 bg-zinc-950 rounded-md border border-zinc-800/80 text-[11px] text-zinc-300 overflow-x-auto whitespace-pre-wrap select-text font-mono">
                     {activeStreamText ||
                       latestThought?.rawOutput ||
                       steps[steps.length - 1]?.rawOutput ||
-                      '(Ham çıktı henüz üretilmedi)'}
+                      t.agent.noRawOutput}
                   </pre>
                 </div>
               )}

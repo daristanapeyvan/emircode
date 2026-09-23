@@ -36,41 +36,6 @@ interface CuratedModelOption {
   recommendedRam: string;
 }
 
-const RECOMMENDED_MODELS: CuratedModelOption[] = [
-  {
-    id: 'qwen2.5-coder:7b',
-    name: 'Qwen 2.5 Coder 7B',
-    size: '4.7 GB',
-    desc: 'Kod yazma, refactor ve hata çözmede en dengeli otonom model.',
-    tag: 'Önerilen',
-    recommendedRam: '8 GB RAM',
-  },
-  {
-    id: 'qwen2.5-coder:1.5b',
-    name: 'Qwen 2.5 Coder 1.5B',
-    size: '1.0 GB',
-    desc: 'Düşük RAM ve CPU sistemleri için ultra hafif, hızlı model.',
-    tag: 'Hafif & Hızlı',
-    recommendedRam: '4 GB RAM',
-  },
-  {
-    id: 'qwen3:8b',
-    name: 'Qwen3 8B',
-    size: '5.2 GB',
-    desc: 'Dahili düşünce ve derin muhakeme yeteneğine sahip yeni nesil model.',
-    tag: 'Muhakeme',
-    recommendedRam: '8 GB RAM',
-  },
-  {
-    id: 'llama3.1:8b',
-    name: 'Llama 3.1 8B',
-    size: '4.7 GB',
-    desc: 'Meta genel amaçlı ve kod destekli endüstri standardı model.',
-    tag: 'Genel Amaçlı',
-    recommendedRam: '8 GB RAM',
-  },
-];
-
 export const OnboardingModal: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [currentStep, setCurrentStep] = useState<1 | 2 | 3>(1);
@@ -94,6 +59,41 @@ export const OnboardingModal: React.FC = () => {
 
   const { settings, updateSettings } = useSettingsStore();
   const t = getTranslations(settings.language);
+
+  const curatedModels: CuratedModelOption[] = [
+    {
+      id: 'qwen2.5-coder:7b',
+      name: 'Qwen 2.5 Coder 7B',
+      size: '4.7 GB',
+      desc: t.onboarding.modelQwen7bDesc,
+      tag: t.onboarding.tagRecommended,
+      recommendedRam: '8 GB RAM',
+    },
+    {
+      id: 'qwen2.5-coder:1.5b',
+      name: 'Qwen 2.5 Coder 1.5B',
+      size: '1.0 GB',
+      desc: t.onboarding.modelQwen15bDesc,
+      tag: t.onboarding.tagLightweight,
+      recommendedRam: '4 GB RAM',
+    },
+    {
+      id: 'qwen3:8b',
+      name: 'Qwen3 8B',
+      size: '5.2 GB',
+      desc: t.onboarding.modelQwen3Desc,
+      tag: t.onboarding.tagReasoning,
+      recommendedRam: '8 GB RAM',
+    },
+    {
+      id: 'llama3.1:8b',
+      name: 'Llama 3.1 8B',
+      size: '4.7 GB',
+      desc: t.onboarding.modelLlamaDesc,
+      tag: t.onboarding.tagGeneral,
+      recommendedRam: '8 GB RAM',
+    },
+  ];
 
   // Check if onboarding was completed previously
   useEffect(() => {
@@ -228,7 +228,7 @@ export const OnboardingModal: React.FC = () => {
           <button
             onClick={handleClose}
             className="p-1 rounded-lg text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/80 transition-colors cursor-pointer"
-            title="Kapat"
+            title={t.common.close}
           >
             <X size={16} />
           </button>
@@ -244,11 +244,10 @@ export const OnboardingModal: React.FC = () => {
                 <Info size={16} className="text-amber-400 shrink-0 mt-0.5" />
                 <div className="space-y-1">
                   <span className="font-semibold text-amber-300 block">
-                    {t.onboarding?.externalDownloadNoticeTitle || 'Dış Kaynak İndirme Bildirimi'}
+                    {t.onboarding.externalDownloadNoticeTitle}
                   </span>
                   <p className="text-amber-200/90 leading-relaxed text-[11px]">
-                    {t.onboarding?.externalDownloadNoticeDesc ||
-                      'Kurulum dosyaları ve modeller doğrudan resmi sağlayıcılardan (ollama.com, nodejs.org, registry.ollama.ai) indirilir. Sisteminizde zaten kurulu olan araçlar tekrar indirilmez veya kurulmaz.'}
+                    {t.onboarding.externalDownloadNoticeDesc}
                   </p>
                 </div>
               </div>
@@ -280,24 +279,24 @@ export const OnboardingModal: React.FC = () => {
                         {isOllamaReady ? (
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-950/80 border border-emerald-700 text-emerald-300 flex items-center gap-1">
                             <CheckCircle2 size={10} />
-                            {t.onboarding?.ollamaStatusRunning || 'Çalışıyor (Hazır)'}
+                            {t.onboarding.ollamaStatusRunning}
                           </span>
                         ) : prereqs?.ollama.installed ? (
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-950/80 border border-amber-700 text-amber-300">
-                            {t.onboarding?.ollamaStatusStopped || 'Kurulu (Servis Durduruldu)'}
+                            {t.onboarding.ollamaStatusStopped}
                           </span>
                         ) : (
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-red-950/80 border border-red-700 text-red-300">
-                            {t.onboarding?.ollamaStatusMissing || 'Kurulu Değil'}
+                            {t.onboarding.ollamaStatusMissing}
                           </span>
                         )}
                       </div>
                       <p className="text-[11px] text-zinc-400 mt-0.5">
                         {isOllamaReady
-                          ? 'Yerel LLM motoru bağlı ve hazır. Sisteminizde mevcut olduğu için yeniden kurulmadı.'
+                          ? t.onboarding.ollamaReadyDesc
                           : prereqs?.ollama.installed
-                          ? 'Ollama kurulu fakat arka planda çalışmıyor.'
-                          : 'Yapay zekâ modellerini yerel bilgisayarınızda çalıştırmak için gereklidir.'}
+                          ? t.onboarding.ollamaStoppedDesc
+                          : t.onboarding.ollamaMissingDesc}
                       </p>
                     </div>
                   </div>
@@ -305,7 +304,7 @@ export const OnboardingModal: React.FC = () => {
                   <div className="flex items-center gap-2 shrink-0">
                     {isOllamaReady ? (
                       <span className="text-[11px] text-zinc-500 font-mono">
-                        {t.onboarding?.alreadyInstalledBadge || 'Sistemde Kurulu (Atlandı)'}
+                        {t.onboarding.alreadyInstalledBadge}
                       </span>
                     ) : prereqs?.ollama.installed ? (
                       <button
@@ -314,7 +313,7 @@ export const OnboardingModal: React.FC = () => {
                         className="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-medium transition-colors cursor-pointer flex items-center gap-1.5 shadow-sm"
                       >
                         <Play size={12} />
-                        <span>{t.onboarding?.startOllamaService || 'Servisi Başlat'}</span>
+                        <span>{t.onboarding.startOllamaService}</span>
                       </button>
                     ) : (
                       <button
@@ -327,7 +326,7 @@ export const OnboardingModal: React.FC = () => {
                         ) : (
                           <Download size={12} />
                         )}
-                        <span>{t.onboarding?.installOllama || 'Ollama İndir & Kur'}</span>
+                        <span>{t.onboarding.installOllama}</span>
                       </button>
                     )}
                   </div>
@@ -345,18 +344,18 @@ export const OnboardingModal: React.FC = () => {
                         {isNodeReady ? (
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-950/80 border border-emerald-700 text-emerald-300 flex items-center gap-1">
                             <CheckCircle2 size={10} />
-                            {prereqs?.node.version || 'Kurulu (Hazır)'}
+                            {prereqs?.node.version || 'Ready'}
                           </span>
                         ) : (
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-950/80 border border-amber-700 text-amber-300">
-                            {t.onboarding?.nodeStatusMissing || 'Node.js (v18+) Gerekli'}
+                            {t.onboarding.nodeStatusMissing}
                           </span>
                         )}
                       </div>
                       <p className="text-[11px] text-zinc-400 mt-0.5">
                         {isNodeReady
-                          ? `Node.js (${prereqs?.node.version}) ve npm (${prereqs?.npm.version || 'aktif'}) kurulu.`
-                          : 'Kaynak koddan derleme veya proje test komutları için Node.js önerilir.'}
+                          ? `Node.js (${prereqs?.node.version}) & npm (${prereqs?.npm.version || 'ok'})`
+                          : t.onboarding.nodeMissingDesc}
                       </p>
                     </div>
                   </div>
@@ -440,11 +439,11 @@ export const OnboardingModal: React.FC = () => {
                             </span>
                             {isSelected ? (
                               <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-cyan-600 text-white">
-                                {t.onboarding?.modelReady || 'Seçildi'}
+                                {t.onboarding.modelReady}
                               </span>
                             ) : (
                               <span className="text-[10px] text-zinc-400 hover:text-zinc-200">
-                                Seç
+                                {t.onboarding.selectModelBtn}
                               </span>
                             )}
                           </div>
@@ -459,11 +458,11 @@ export const OnboardingModal: React.FC = () => {
               <div className="space-y-2 pt-2">
                 <span className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
                   <Sparkles size={13} className="text-amber-400" />
-                  <span>{t.onboarding?.recommendedModelsTitle || 'Önerilen Kodlama Modelleri'}</span>
+                  <span>{t.onboarding.recommendedModelsTitle}</span>
                 </span>
 
                 <div className="space-y-2">
-                  {RECOMMENDED_MODELS.map((opt) => {
+                  {curatedModels.map((opt) => {
                     const isInstalled = installedModels.some((m) => m.name === opt.id);
                     const isSelected = selectedModel === opt.id;
                     const activeDownload = downloads[opt.id];
@@ -505,7 +504,7 @@ export const OnboardingModal: React.FC = () => {
                                     : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-200'
                                 )}
                               >
-                                {isSelected ? 'Aktif Model' : 'Seç'}
+                                {isSelected ? t.onboarding.activeModelBadge : t.onboarding.selectModelBtn}
                               </button>
                             ) : activeDownload ? (
                               <div className="text-right">
@@ -519,7 +518,7 @@ export const OnboardingModal: React.FC = () => {
                                 className="px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-medium transition-colors cursor-pointer flex items-center gap-1.5 shadow-sm"
                               >
                                 <Download size={12} />
-                                <span>{t.onboarding?.downloadAndSelect || 'İndir ve Seç'}</span>
+                                <span>{t.onboarding.downloadAndSelect}</span>
                               </button>
                             )}
                           </div>
@@ -530,7 +529,7 @@ export const OnboardingModal: React.FC = () => {
                           <div className="space-y-1.5 pt-1 border-t border-zinc-800/80">
                             <div className="flex items-center justify-between text-[10px] text-zinc-400 font-mono">
                               <span>
-                                {activeDownload.status || 'İndiriliyor...'} (
+                                {activeDownload.status || t.onboarding.downloading} (
                                 {formatBytes(activeDownload.completed)} /{' '}
                                 {formatBytes(activeDownload.total)})
                               </span>
@@ -561,33 +560,32 @@ export const OnboardingModal: React.FC = () => {
 
               <div>
                 <h3 className="text-base font-bold text-zinc-100">
-                  {t.onboarding?.step3Title || 'Kodlamaya Hazırsınız!'}
+                  {t.onboarding.readyToCodeTitle}
                 </h3>
                 <p className="text-xs text-zinc-400 max-w-md mx-auto mt-1 leading-relaxed">
-                  {t.onboarding?.step3Subtitle ||
-                    'Yerel yapay zekâ modeliniz bağlandı ve kriptografik sandbox koruması aktif hale getirildi.'}
+                  {t.onboarding.readyToCodeSubtitle}
                 </p>
               </div>
 
               {/* Summary Badges */}
               <div className="max-w-md mx-auto p-4 rounded-xl bg-zinc-950/80 border border-zinc-800 space-y-2 text-left text-xs font-sans">
                 <div className="flex items-center justify-between py-1 border-b border-zinc-800/80">
-                  <span className="text-zinc-400">Aktif Model:</span>
+                  <span className="text-zinc-400">{t.onboarding.selectedModelLabel}</span>
                   <span className="text-cyan-400 font-semibold font-mono">
                     {selectedModel || 'qwen2.5-coder:7b'}
                   </span>
                 </div>
                 <div className="flex items-center justify-between py-1 border-b border-zinc-800/80">
-                  <span className="text-zinc-400">Ollama Servisi:</span>
-                  <span className="text-emerald-400 font-medium">Bağlı & Aktif (127.0.0.1:11434)</span>
+                  <span className="text-zinc-400">{t.onboarding.ollamaServiceLabel}</span>
+                  <span className="text-emerald-400 font-medium">{t.onboarding.ollamaRunningReady}</span>
                 </div>
                 <div className="flex items-center justify-between py-1 border-b border-zinc-800/80">
-                  <span className="text-zinc-400">Güvenlik Katmanı:</span>
-                  <span className="text-purple-400 font-medium">Realpath Jail & 256-bit Token</span>
+                  <span className="text-zinc-400">{t.onboarding.securityLayerLabel}</span>
+                  <span className="text-purple-400 font-medium">{t.onboarding.securityLayerDesc}</span>
                 </div>
                 <div className="flex items-center justify-between py-1">
-                  <span className="text-zinc-400">Gizlilik:</span>
-                  <span className="text-emerald-400 font-medium">%100 Çevrimdışı (Sıfır Telemetri)</span>
+                  <span className="text-zinc-400">{t.onboarding.privacyLabel}</span>
+                  <span className="text-emerald-400 font-medium">{t.onboarding.privacyDesc}</span>
                 </div>
               </div>
             </div>

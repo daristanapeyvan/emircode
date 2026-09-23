@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { useAgentStore } from '@/stores/agentStore';
+import { useSettingsStore } from '@/stores/settingsStore';
+import { getTranslations } from '@/lib/localization/i18n';
 import { Check, X, ShieldAlert, FileEdit, PlusCircle, AlertTriangle } from 'lucide-react';
 import { DiffViewer } from '@/components/common/DiffViewer';
 
@@ -11,6 +13,9 @@ export const ChangesetModal: React.FC = () => {
     approveSelectedChangeset,
     rejectChangeset,
   } = useAgentStore();
+
+  const { settings } = useSettingsStore();
+  const t = getTranslations(settings.language);
 
   const [activeFileIndex, setActiveFileIndex] = useState(0);
 
@@ -30,13 +35,13 @@ export const ChangesetModal: React.FC = () => {
             </div>
             <div>
               <h2 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
-                Önerilen Kod Değişiklikleri (Changeset Review)
+                {t.agent.changesetTitle}
                 <span className="text-xs px-2 py-0.5 bg-blue-600/20 text-blue-400 rounded-full border border-blue-500/30">
-                  {selectedCount}/{pendingChangeset.length} Dosya Seçili
+                  {selectedCount}/{pendingChangeset.length} {t.agent.filesSelected}
                 </span>
               </h2>
               <p className="text-xs text-zinc-400">
-                Diske yazılmadan önce her dosya SHA-256 hash ve Realpath sandbox kontrolünden geçirilir.
+                {t.agent.changesetNotice}
               </p>
             </div>
           </div>
@@ -55,19 +60,19 @@ export const ChangesetModal: React.FC = () => {
           <div className="w-72 border-r border-zinc-800/80 p-3 overflow-y-auto bg-zinc-950/30 flex flex-col justify-between shrink-0">
             <div>
               <div className="flex items-center justify-between pb-2 mb-2 border-b border-zinc-800 text-xs text-zinc-400">
-                <span>Değişecek Dosyalar</span>
+                <span>{t.agent.filesToModify}</span>
                 <div className="flex gap-2 text-xs">
                   <button
                     onClick={() => selectAllChangeset(true)}
                     className="hover:text-blue-400 cursor-pointer"
                   >
-                    Tümünü Seç
+                    {t.agent.selectAll}
                   </button>
                   <button
                     onClick={() => selectAllChangeset(false)}
                     className="hover:text-zinc-200 cursor-pointer"
                   >
-                    Temizle
+                    {t.agent.clearSelection}
                   </button>
                 </div>
               </div>
@@ -109,7 +114,7 @@ export const ChangesetModal: React.FC = () => {
             {/* Sandbox Security Badge */}
             <div className="mt-4 p-2 rounded bg-blue-950/30 border border-blue-900/40 text-[11px] text-blue-300 flex items-center gap-1.5">
               <ShieldAlert size={14} className="shrink-0 text-blue-400" />
-              <span>Tek kullanımlık token ve atomik kayıt devrede.</span>
+              <span>{t.agent.oneTimeTokenNotice}</span>
             </div>
           </div>
 
@@ -121,12 +126,12 @@ export const ChangesetModal: React.FC = () => {
                   {currentItem.relativePath}
                 </span>
                 <p className="text-xs text-zinc-400 mt-0.5">
-                  <span className="font-semibold text-zinc-300">Gerekçe:</span> {currentItem.reason}
+                  <span className="font-semibold text-zinc-300">{t.agent.reason}</span> {currentItem.reason}
                 </p>
               </div>
 
               <span className="text-xs text-zinc-500 font-mono">
-                Base Hash: {currentItem.baseHash ? currentItem.baseHash.slice(0, 8) + '...' : '(Yeni)'}
+                Base Hash: {currentItem.baseHash ? currentItem.baseHash.slice(0, 8) + '...' : `(${t.agent.newFile})`}
               </span>
             </div>
 
@@ -152,8 +157,8 @@ export const ChangesetModal: React.FC = () => {
         <div className="px-5 py-3 border-t border-zinc-800 bg-zinc-950/80 flex items-center justify-between">
           <span className="text-xs text-zinc-400">
             {selectedCount === 0
-              ? 'En az bir dosya seçmelisiniz.'
-              : `${selectedCount} dosya için onay verilecek.`}
+              ? t.agent.mustSelectAtLeastOneFile
+              : `${selectedCount} ${t.agent.filesWillBeApproved}`}
           </span>
 
           <div className="flex items-center gap-2">
@@ -161,7 +166,7 @@ export const ChangesetModal: React.FC = () => {
               onClick={rejectChangeset}
               className="px-4 py-1.5 text-xs font-medium text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
             >
-              Tümünü Reddet
+              {t.agent.rejectAll}
             </button>
             <button
               disabled={selectedCount === 0}
@@ -169,7 +174,7 @@ export const ChangesetModal: React.FC = () => {
               className="px-4 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg shadow-sm flex items-center gap-1.5 transition-colors cursor-pointer"
             >
               <Check size={14} />
-              Seçilenleri Uygula ({selectedCount})
+              {t.agent.applySelected} ({selectedCount})
             </button>
           </div>
         </div>

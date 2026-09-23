@@ -293,7 +293,7 @@ test('19. Live Token Streaming: onStreamChunk emits character chunks into inline
   const wsSrc = fs.readFileSync(path.join(__dirname, '../src/components/agent/AgentWorkspace.tsx'), 'utf-8');
   assert(wsSrc.includes('toggleInlineTranscript'), 'AgentWorkspace does not wire toggleInlineTranscript');
   assert(wsSrc.includes('activeStreamText'), 'AgentWorkspace does not display activeStreamText');
-  assert(wsSrc.includes('CANLI TOKEN AKIŞI'), 'AgentWorkspace lacks live token stream badge');
+  assert(wsSrc.includes('liveTokenStream') || wsSrc.includes('CANLI TOKEN AKIŞI'), 'AgentWorkspace lacks live token stream badge');
 });
 
 // 20. HiDPI Multi-Resolution Icon & App Branding
@@ -312,6 +312,51 @@ test('20. HiDPI Support: Crisp multi-resolution icon exists and Electron brandin
   assert(mainSrc.includes("icon: appIcon"), 'main.ts BrowserWindow does not configure icon');
 });
 
+// 21. Linux OS Compatibility & Environment Isolation
+test('21. Linux Compatibility: main.ts contains Linux Ollama paths, GPU lspci detection, and POSIX STRICT_ENV', () => {
+  const mainSrc = fs.readFileSync(path.join(__dirname, '../electron/main.ts'), 'utf-8');
+  assert(mainSrc.includes('setDesktopFileName') && mainSrc.includes('emir-code.desktop'), 'main.ts missing Linux desktop file registration');
+  assert(mainSrc.includes('/usr/local/bin/ollama'), 'main.ts checkOllamaStatus missing Linux Ollama path');
+  assert(mainSrc.includes('lspci'), 'main.ts system:getHardware missing Linux lspci GPU detection');
+  assert(mainSrc.includes('HOME: process.env.HOME'), 'main.ts STRICT_ENV missing HOME variable for Linux subprocesses');
+  assert(mainSrc.includes('SHELL: process.env.SHELL'), 'main.ts STRICT_ENV missing SHELL variable for Linux');
+  assert(mainSrc.includes('pkill -P'), 'main.ts timeout handler missing Linux process kill');
+});
+
+// 22. Linux Desktop Integration & Standalone GUI Installer Wizard
+test('22. Linux GUI Installer: Standalone installer script exists and Preload exposes Desktop Integration APIs', () => {
+  const installerPath = path.join(__dirname, '../build/linux-installer.sh');
+  assert(fs.existsSync(installerPath), 'build/linux-installer.sh does not exist');
+  const installerContent = fs.readFileSync(installerPath, 'utf-8');
+  assert(installerContent.includes('zenity'), 'linux-installer.sh missing Zenity GUI support');
+  assert(installerContent.includes('kdialog'), 'linux-installer.sh missing KDialog GUI support');
+  assert(installerContent.includes('uninstall.sh'), 'linux-installer.sh missing uninstaller generator');
+
+  const preloadSrc = fs.readFileSync(path.join(__dirname, '../electron/preload.ts'), 'utf-8');
+  assert(preloadSrc.includes('getPlatform: () => Promise<'), 'preload.ts missing getPlatform');
+  assert(preloadSrc.includes('isLinuxIntegrated?: () => Promise<boolean>'), 'preload.ts missing isLinuxIntegrated');
+  assert(preloadSrc.includes('integrateLinuxDesktop?: () => Promise<'), 'preload.ts missing integrateLinuxDesktop');
+});
+
+// 23. Cross-Platform Packaging & GitHub Actions Release Matrix
+test('23. Linux Packaging: package.json has full Linux targets and release.yml defines dual-platform matrix', () => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'), 'utf-8'));
+  assert(pkg.build && pkg.build.linux, 'package.json missing build.linux configuration');
+  assert(pkg.build.linux.target.includes('deb'), 'package.json build.linux missing deb target');
+  assert(pkg.build.linux.target.includes('rpm'), 'package.json build.linux missing rpm target');
+  assert(pkg.build.linux.target.includes('AppImage'), 'package.json build.linux missing AppImage target');
+  assert(pkg.build.linux.target.includes('tar.gz'), 'package.json build.linux missing tar.gz target');
+  assert(pkg.build.linux.maintainer, 'package.json build.linux missing maintainer field');
+
+  const releaseWorkflow = fs.readFileSync(path.join(__dirname, '../.github/workflows/release.yml'), 'utf-8');
+  assert(releaseWorkflow.includes('build-windows:'), 'release.yml missing build-windows job');
+  assert(releaseWorkflow.includes('build-linux:'), 'release.yml missing build-linux job');
+  assert(releaseWorkflow.includes('publish-release:'), 'release.yml missing publish-release job');
+  assert(releaseWorkflow.includes('release-dist/*.deb'), 'release.yml missing deb in published release files');
+  assert(releaseWorkflow.includes('release-dist/*.AppImage'), 'release.yml missing AppImage in published release files');
+  assert(releaseWorkflow.includes('release-dist/*.rpm'), 'release.yml missing rpm in published release files');
+});
+
 console.log(`\n==============================================`);
 console.log(`📊 RESULTS: ${passedTests}/${totalTests} TESTS PASSED`);
 console.log(`==============================================\n`);
@@ -319,3 +364,4 @@ console.log(`==============================================\n`);
 if (passedTests !== totalTests) {
   process.exit(1);
 }
+
