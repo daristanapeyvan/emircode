@@ -220,6 +220,17 @@ export const tr: typeof en = {
     ollamaHelp: 'Ollama\'nın bilgisayarınızda kurulu ve çalışır durumda olduğundan emin olun. ollama.com adresinden indirebilirsiniz.',
     remoteWarning: 'Uyarı: Uzak bir HTTP uç noktasına bağlanmak, istemleri şifrelenmemiş ağ üzerinden iletir. Özel yerel kullanım için HTTPS veya localhost tercih edin.',
 
+    // Web Access
+    webAccess: 'Web Erişimi',
+    webAccessTitle: 'WEB ERİŞİMİ',
+    webAccessSubtitle: 'Yerel modeller için internette arama ve çevrimiçi dokümantasyon araştırma yeteneklerini yapılandırın.',
+    internetAccess: 'İnternet Erişimi',
+    internetAccessDesc: 'Gerektiğinde asistanın internete erişmesine izin verin.',
+    chatSearch: 'Sohbet Araması',
+    chatSearchDesc: 'Normal sohbet sırasında web aramasına izin ver.',
+    codingSearch: 'Kodlama Ajanı Araması',
+    codingSearchDesc: 'Kodlama ajanının çevrimiçi dokümantasyon ve hata araştırması yapmasına izin ver.',
+
     // About
     aboutTitle: 'Emir Code Hakkında',
     version: 'Sürüm',
@@ -298,6 +309,14 @@ export const tr: typeof en = {
     securityProfileStrict: 'Sıkı',
     securityProfileBalanced: 'Dengeli',
     securityProfileAutonomous: 'Otonom',
+    subtasksTitle: 'Görev Kontrol Listesi',
+    subtasksProgress: 'Alt Görev Tamamlandı',
+    activeSubtask: 'Aktif Odak',
+    pendingSubtask: 'Beklemede',
+    completedSubtask: 'Tamamlandı',
+    autonomousModeBadge: 'Otonom Profil (Sıfır Onay Penceresi)',
+    slmCompactModeBadge: 'Kompakt SLM Modu',
+    elapsedTime: 'Geçen Süre',
     diffViewer: 'Fark Görüntüleyici',
     liveTranscript: 'Canlı Transkript & Muhakeme Akışı',
     clickToToggleTranscript: 'Transkripti açmak / kapatmak için tıklayın',

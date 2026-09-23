@@ -4,6 +4,7 @@ export type SettingsCategory =
   | 'general'
   | 'appearance'
   | 'chat'
+  | 'webAccess'
   | 'models'
   | 'generation'
   | 'keyboard'

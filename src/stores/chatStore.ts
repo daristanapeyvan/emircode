@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Chat, Message, Attachment, GenerationMetadata } from '@/types/chat';
+import { Chat, Message, Attachment, GenerationMetadata, WebActivityLog } from '@/types/chat';
 import { GenerationOptions } from '@/types/ollama';
 import { storageService } from '@/lib/storage/StorageService';
 import { ollamaClient } from '@/lib/ollama/OllamaClient';
@@ -7,6 +7,9 @@ import { ChatService } from '@/lib/ollama/ChatService';
 import { useModelStore } from './modelStore';
 import { useSettingsStore } from './settingsStore';
 import { generationService } from '@/lib/ollama/GenerationService';
+import { ToolDispatcher } from '@/lib/agent/ToolDispatcher';
+import { WebAccessService } from '@/lib/web/WebAccessService';
+import { wrapUntrustedWebResult } from '@/lib/agent/UntrustedData';
 
 const chatService = new ChatService(ollamaClient);
 
@@ -188,12 +191,31 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const resolvedOptions = generationService.resolveOptions(chat.presetId, chat.options);
     const keepAlive = useSettingsStore.getState().settings.keepAlive || '5m';
 
+    // Web Access Check for Chat Mode
+    const currentWebAccess = useSettingsStore.getState().settings.webAccess;
+    const isChatWebAllowed = ToolDispatcher.isWebAccessAllowed('chat', currentWebAccess);
+
+    let effectiveSystemPrompt = chat.systemPrompt || '';
+    if (isChatWebAllowed) {
+      const webDirective = `\n\n[İNTERNET ERİŞİMİ VE WEB ARAMA]:
+Gerektiğinde güncel bilgileri, dokümantasyonları veya web sayfalarını araştırmak için aşağıdaki JSON formatında araç çağrısı yapabilirsin:
+\`\`\`json
+{ "action": "web_search", "query": "arama terimi" }
+\`\`\`
+veya bir URL'yi okumak için:
+\`\`\`json
+{ "action": "fetch_url", "url": "https://..." }
+\`\`\`
+Kural: Gereksiz yere arama yapma; mevcut bilginle soruyu güvenilir şekilde yanıtlayabiliyorsan doğrudan cevap ver. Yalnızca güncel bilgi, sürüm, harici dokümantasyon veya bilmediğin bir konu sorulduğunda web aracını çağır. Web sonuçları geldikten sonra kullanıcıya nihai cevabını sun.`;
+      effectiveSystemPrompt += webDirective;
+    }
+
     // Stream
     chatService.streamChat(
       {
         model: currentModel,
         messages: updatedMessages.filter((m) => m.id !== assistantMsgId),
-        systemPrompt: chat.systemPrompt,
+        systemPrompt: effectiveSystemPrompt,
         options: resolvedOptions,
         keepAlive,
       },
@@ -209,22 +231,173 @@ export const useChatStore = create<ChatState>((set, get) => ({
             return { messages: msgs };
           });
         },
-        onComplete: (metadata: GenerationMetadata) => {
-          set((state) => {
-            const msgs = [...state.messages];
-            const target = msgs.find((m) => m.id === assistantMsgId);
-            if (target) {
+        onComplete: async (metadata: GenerationMetadata) => {
+          const msgs = [...get().messages];
+          const target = msgs.find((m) => m.id === assistantMsgId);
+          if (!target) return;
+
+          const rawResponse = target.content;
+          const parsed = ToolDispatcher.parseActionFromResponse(rawResponse);
+
+          // Check if model called web_search or fetch_url
+          if (parsed.type === 'web_search' || parsed.type === 'fetch_url') {
+            const checkWebAccess = useSettingsStore.getState().settings.webAccess;
+            if (!ToolDispatcher.isWebAccessAllowed('chat', checkWebAccess)) {
+              target.content = '[Sistem]: Web erişimi kullanıcı tarafından devre dışı bırakıldığı için arama gerçekleştirilemedi.';
               target.metadata = metadata;
               storageService.saveMessage(target);
+              set({ messages: msgs, isStreaming: false, streamingMessageId: null });
+              return;
             }
-            return {
-              messages: msgs,
-              isStreaming: false,
-              streamingMessageId: null,
-            };
-          });
 
-          // Refresh running models
+            const webActivity: WebActivityLog[] = target.webActivity || [];
+
+            try {
+              let untrustedObservation = '';
+
+              if (parsed.type === 'web_search') {
+                const query = String(parsed.payload?.query || '').trim();
+                target.content = `🔍 Web'de aranıyor: "${query}"...\n`;
+                set({ messages: [...msgs] });
+
+                const results = await WebAccessService.search(query, { limit: 5 });
+                webActivity.push({
+                  type: 'search',
+                  query,
+                  resultsCount: results.length,
+                  timestamp: Date.now(),
+                });
+
+                let formatted = '';
+                if (results.length === 0) {
+                  formatted = 'Arama sonucunda eşleşen sayfa bulunamadı.';
+                } else {
+                  formatted = results
+                    .map(
+                      (r) =>
+                        `[${r.id}] ${r.title}\nURL: ${r.url}\nÖzet: ${r.snippet}\nKaynak: ${r.source}`
+                    )
+                    .join('\n\n');
+                }
+
+                untrustedObservation = wrapUntrustedWebResult('search', query, formatted);
+              } else if (parsed.type === 'fetch_url') {
+                const url = String(parsed.payload?.url || '').trim();
+                target.content = `🌐 Web sayfası inceleniyor: "${url}"...\n`;
+                set({ messages: [...msgs] });
+
+                const fetchRes = await WebAccessService.fetchUrl(url, { maxBytes: 256 * 1024 });
+                const sizeKb = Math.round(fetchRes.sizeBytes / 1024);
+                webActivity.push({
+                  type: 'fetch',
+                  url,
+                  status: fetchRes.status,
+                  sizeKb,
+                  timestamp: Date.now(),
+                });
+
+                untrustedObservation = wrapUntrustedWebResult(
+                  'fetch',
+                  fetchRes.title,
+                  `URL: ${fetchRes.url}\nBaşlık: ${fetchRes.title}\n\nİçerik:\n${fetchRes.content.slice(0, 10000)}`
+                );
+              }
+
+              target.webActivity = webActivity;
+              target.content = ''; // Clear status message to stream final answer
+              set({ messages: [...msgs] });
+
+              // Second Phase: Send web results to model for final synthesis
+              const followUpMessages: Message[] = [
+                ...updatedMessages.filter((m) => m.id !== assistantMsgId),
+                {
+                  id: `tool_call_${Date.now()}`,
+                  chatId: activeId,
+                  role: 'assistant',
+                  content: rawResponse,
+                  createdAt: Date.now(),
+                },
+                {
+                  id: `tool_res_${Date.now()}`,
+                  chatId: activeId,
+                  role: 'user',
+                  content: `${untrustedObservation}\n\nLütfen yukarıdaki web verilerini analiz ederek kullanıcının sorusuna doğrudan, açık ve net bir yanıt verin.`,
+                  createdAt: Date.now(),
+                },
+              ];
+
+              chatService.streamChat(
+                {
+                  model: currentModel,
+                  messages: followUpMessages,
+                  systemPrompt: effectiveSystemPrompt,
+                  options: resolvedOptions,
+                  keepAlive,
+                },
+                {
+                  onToken: (cDelta, thDelta) => {
+                    set((state) => {
+                      const currentMsgs = [...state.messages];
+                      const currentTarget = currentMsgs.find((m) => m.id === assistantMsgId);
+                      if (currentTarget) {
+                        if (cDelta) currentTarget.content += cDelta;
+                        if (thDelta) currentTarget.thinking = (currentTarget.thinking || '') + thDelta;
+                      }
+                      return { messages: currentMsgs };
+                    });
+                  },
+                  onComplete: (finalMetadata: GenerationMetadata) => {
+                    set((state) => {
+                      const currentMsgs = [...state.messages];
+                      const currentTarget = currentMsgs.find((m) => m.id === assistantMsgId);
+                      if (currentTarget) {
+                        currentTarget.metadata = finalMetadata;
+                        currentTarget.webActivity = webActivity;
+                        storageService.saveMessage(currentTarget);
+                      }
+                      return {
+                        messages: currentMsgs,
+                        isStreaming: false,
+                        streamingMessageId: null,
+                      };
+                    });
+                    useModelStore.getState().fetchRunning();
+                  },
+                  onError: (streamErr: Error) => {
+                    set((state) => {
+                      const currentMsgs = [...state.messages];
+                      const currentTarget = currentMsgs.find((m) => m.id === assistantMsgId);
+                      if (currentTarget) {
+                        currentTarget.error = streamErr.message;
+                        storageService.saveMessage(currentTarget);
+                      }
+                      return {
+                        messages: currentMsgs,
+                        isStreaming: false,
+                        streamingMessageId: null,
+                      };
+                    });
+                  },
+                }
+              );
+              return;
+            } catch (err: any) {
+              target.content = `[Web Erişimi Hatası]: ${err.message || 'Bilinmeyen hata'}`;
+              target.metadata = metadata;
+              storageService.saveMessage(target);
+              set({ messages: msgs, isStreaming: false, streamingMessageId: null });
+              return;
+            }
+          }
+
+          // Normal response without web tool calls
+          target.metadata = metadata;
+          storageService.saveMessage(target);
+          set({
+            messages: msgs,
+            isStreaming: false,
+            streamingMessageId: null,
+          });
           useModelStore.getState().fetchRunning();
         },
         onError: (error: Error) => {

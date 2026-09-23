@@ -1,8 +1,9 @@
 import { create } from 'zustand';
-import { AppSettings, DEFAULT_SETTINGS, Language, Theme, FontSize } from '@/types/settings';
+import { AppSettings, DEFAULT_SETTINGS, Language, Theme, FontSize, WebAccessConfig } from '@/types/settings';
 import { HardwareInfo } from '@/types/hardware';
 import { storageService } from '@/lib/storage/StorageService';
 import { ollamaClient } from '@/lib/ollama/OllamaClient';
+import { WebAccessService } from '@/lib/web/WebAccessService';
 
 interface SettingsState {
   settings: AppSettings;
@@ -10,6 +11,7 @@ interface SettingsState {
   isInitialized: boolean;
   init: () => Promise<void>;
   updateSettings: (partial: Partial<AppSettings>) => void;
+  setWebAccess: (config: Partial<WebAccessConfig>) => void;
   setLanguage: (language: Language) => void;
   setTheme: (theme: Theme) => void;
   setFontSize: (size: FontSize) => void;
@@ -71,6 +73,20 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     }
 
     set({ settings: newSettings });
+  },
+
+  setWebAccess: (partialConfig) => {
+    const currentWeb = get().settings.webAccess || DEFAULT_SETTINGS.webAccess;
+    const newWebAccess = { ...currentWeb, ...partialConfig };
+    get().updateSettings({ webAccess: newWebAccess });
+
+    // Immediate in-flight request cancellation if Web Access is toggled OFF
+    if (newWebAccess.enabled === false) {
+      WebAccessService.abortAllActiveRequests('Kullanıcı Web Erişimini kapattı.');
+      if (typeof window !== 'undefined' && (window as any).electronAPI?.webAbortAll) {
+        (window as any).electronAPI.webAbortAll().catch(() => {});
+      }
+    }
   },
 
   setLanguage: (language) => {

@@ -103,3 +103,9 @@ export interface AgentMemoryLedger {
   currentPhase: 'investigation' | 'modification' | 'verification' | 'completion';
 }
 
+export interface AgentCapabilities {
+  webSearch: boolean;
+  webFetch: boolean;
+  git?: boolean;
+}
+

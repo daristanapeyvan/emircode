@@ -20,6 +20,16 @@ export interface GenerationMetadata {
   durationSeconds?: number;
 }
 
+export interface WebActivityLog {
+  type: 'search' | 'fetch';
+  query?: string;
+  url?: string;
+  resultsCount?: number;
+  status?: number;
+  sizeKb?: number;
+  timestamp: number;
+}
+
 export interface Message {
   id: string;
   chatId: string;
@@ -30,6 +40,7 @@ export interface Message {
   model?: string;
   metadata?: GenerationMetadata;
   attachments?: Attachment[];
+  webActivity?: WebActivityLog[];
   error?: string;
 }
 
@@ -44,6 +55,7 @@ export interface Chat {
   agentSteps?: AgentStep[];
   executionLogs?: string[];
   appliedTransactions?: AppliedTransaction[];
+  agentSubtasks?: import('./agent').TaskChecklistItem[];
   systemPrompt?: string;
   presetId?: string;
   options?: GenerationOptions;

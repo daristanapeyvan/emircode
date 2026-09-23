@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-09-23
+
+### Added
+- **Configurable Zero-Trust Web Access & Search Subsystem (Kullanıcı Kontrollü Sıfır-Güven Web Erişim & Arama Sistemi)**:
+  - Global `Web Access: ON / OFF` master toggle with granular child controls (`Chat Search: ON / OFF`, `Coding Agent Search: ON / OFF`).
+  - Strict Schema Exclusion: When Web Access is OFF, web tool schemas (`web_search`, `fetch_url`) are completely excised from prompt schemas to prevent hallucinated calls.
+  - Dual-Layer Runtime Enforcement: Unauthorized tool invocations are blocked immediately at both ToolDispatcher and AgentEngine boundaries with system notices.
+  - Zero-Trust Untrusted Boundary Delimiters (`<<<WEB_RESULT_UNTRUSTED>>> ... <<<END_WEB_RESULT_UNTRUSTED>>>`): Injected search snippets and fetched pages are strictly quarantined to prevent prompt injection and indirect jailbreaks.
+  - Anti-DNS-Rebinding & Multi-IP SSRF Shield: Resolves all A and AAAA DNS records (`{ all: true }`); blocks IPv4/IPv6 private ranges, loopbacks, link-local, carrier-grade NAT, multicast; validates redirect targets step-by-step up to 3 hops with single network authority in Electron Main process.
+  - Instant In-Flight Abort: Immediately cancels running searches/fetches via `AbortController` and `web:abortAll` IPC if the user switches Web Access OFF mid-operation.
+  - Pluggable `SearchProvider` Interface: Clean provider abstraction with default `DuckDuckGoProvider` (Lite POST, no API key required) outputting structured source IDs (`web-001`, `web-002`) for precise document grounding.
+  - Modern UI & Settings: Lucide line icons, dedicated Web Access tab in SettingsModal, and non-intrusive collapsible activity badges in Chat and Timeline.
+- **Evidence-Based Stateful Agent Architecture (Kanıta Dayalı Durumsal Ajan Mimarisi)**:
+  - Strict `AgentStateMachine`: Formal state machine (`PENDING -> PLANNING -> EXECUTING -> VALIDATING -> COMPLETED -> DONE`) preventing illegal transitions and execution loops.
+  - `TaskCompiler` & `Compiler Guard`: Compiles overarching user goals into typed `TaskContract` specifications with enforceable acceptance criteria (`contains_style`, `contains_script`, `html_structure`, etc.) and consolidated subtasks.
+  - Evidence-Based `TaskValidator`: Prevents false completion reports by validating disk artifacts against tangible evidence criteria before marking tasks completed.
+  - Coder Model Strict Fallback Hierarchy: Explicit file path resolution with contract mapping, eliminating blind hallucinated file path guessing.
+  - SLM (Small Language Model) Optimization: Compact system prompts tailored for efficient 1B-3B parameter models (`qwen2.5-coder:1.5b`, `deepseek-coder:1.3b`, `codegemma:2b`, etc.).
+
 ## [1.4.0] - 2026-09-22
 
 ### Added

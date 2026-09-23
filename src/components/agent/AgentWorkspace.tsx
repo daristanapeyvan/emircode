@@ -46,6 +46,8 @@ export const AgentWorkspace: React.FC = () => {
     openFiles,
     activeTabId,
     agentStatus,
+    taskStartTime,
+    subtasks,
     steps,
     executionLogs,
     appliedTransactions,
@@ -81,7 +83,27 @@ export const AgentWorkspace: React.FC = () => {
   const [customAnswerText, setCustomAnswerText] = useState('');
   const [isExplorerOpen, setIsExplorerOpen] = useState(true);
   const [dumpTab, setDumpTab] = useState<'reasoning' | 'logs' | 'raw'>('reasoning');
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (!taskStartTime || (agentStatus !== 'thinking' && agentStatus !== 'running_command')) {
+      setElapsedSeconds(0);
+      return;
+    }
+    const updateElapsed = () => {
+      setElapsedSeconds(Math.max(0, Math.floor((Date.now() - taskStartTime) / 1000)));
+    };
+    updateElapsed();
+    const interval = setInterval(updateElapsed, 1000);
+    return () => clearInterval(interval);
+  }, [taskStartTime, agentStatus]);
+
+  const formatElapsed = (secs: number) => {
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return `${m}:${s < 10 ? '0' : ''}${s}`;
+  };
 
   useEffect(() => {
     init();
@@ -205,6 +227,28 @@ export const AgentWorkspace: React.FC = () => {
               </option>
             </select>
           </div>
+
+          {/* Autonomous Mode Pill */}
+          {settings.securityProfile === 'autonomous' && (
+            <div
+              className="hidden sm:flex items-center gap-1 px-2 py-1 rounded-md bg-amber-950/30 border border-amber-800/40 text-[10px] font-medium text-amber-400 tracking-tight shrink-0 select-none"
+              title={t.agent.autonomousModeBadge}
+            >
+              <Zap size={11} className="text-amber-400" />
+              <span>{t.agent.securityProfileAutonomous}</span>
+            </div>
+          )}
+
+          {/* Live Elapsed Timer */}
+          {isBusy && elapsedSeconds > 0 && (
+            <div
+              className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-zinc-900/80 border border-cyan-800/50 text-[11px] font-mono text-cyan-300 shadow-sm shrink-0"
+              title={t.agent.elapsedTime}
+            >
+              <Clock size={12} className="animate-spin text-cyan-400" />
+              <span>{formatElapsed(elapsedSeconds)}</span>
+            </div>
+          )}
 
           {/* Rollback Button (Conditional) */}
           {appliedTransactions.length > 0 && (
@@ -402,7 +446,88 @@ export const AgentWorkspace: React.FC = () => {
                     )}
                   </div>
                 ) : (
-                  steps.map((step) => {
+                  <>
+                    {/* PINNED SUBTASK CHECKLIST WIDGET */}
+                    {subtasks.length > 0 && (
+                      <div className="p-3.5 rounded-xl bg-zinc-950/70 border border-zinc-800/80 shadow-md space-y-3 shrink-0 mb-1">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <div className="w-5 h-5 rounded-md bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
+                              <CheckCircle2 size={13} />
+                            </div>
+                            <span className="text-xs font-semibold text-zinc-100 tracking-tight">
+                              {t.agent.subtasksTitle}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[11px] font-mono font-medium text-cyan-400 bg-cyan-950/40 px-2 py-0.5 rounded-full border border-cyan-800/40">
+                              {subtasks.filter((t) => t.status === 'completed').length} / {subtasks.length} {t.agent.subtasksProgress}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Progress Bar */}
+                        <div className="w-full bg-zinc-900 rounded-full h-1.5 overflow-hidden">
+                          <div
+                            className="bg-cyan-500 h-1.5 rounded-full transition-all duration-300"
+                            style={{
+                              width: `${Math.round(
+                                (subtasks.filter((t) => t.status === 'completed').length / subtasks.length) * 100
+                              )}%`,
+                            }}
+                          />
+                        </div>
+
+                        {/* Subtasks List */}
+                        <div className="space-y-1.5 pt-1">
+                          {subtasks.map((task, idx) => {
+                            const isCompleted = task.status === 'completed';
+                            const isInProgress = task.status === 'in_progress';
+                            return (
+                              <div
+                                key={task.id || idx}
+                                className={cn(
+                                  'flex items-start gap-2.5 px-2.5 py-1.5 rounded-lg text-xs transition-colors',
+                                  isInProgress
+                                    ? 'bg-cyan-950/25 border border-cyan-800/40 text-zinc-100'
+                                    : isCompleted
+                                    ? 'bg-zinc-900/30 text-zinc-400'
+                                    : 'text-zinc-500'
+                                )}
+                              >
+                                <div className="mt-0.5 shrink-0">
+                                  {isCompleted ? (
+                                    <CheckCircle2 size={14} className="text-emerald-400" />
+                                  ) : isInProgress ? (
+                                    <Loader2 size={14} className="animate-spin text-cyan-400" />
+                                  ) : (
+                                    <div className="w-3.5 h-3.5 rounded-full border border-zinc-700 flex items-center justify-center text-[9px] font-mono text-zinc-500">
+                                      {idx + 1}
+                                    </div>
+                                  )}
+                                </div>
+                                <span
+                                  className={cn(
+                                    'flex-1 font-sans text-xs leading-relaxed',
+                                    isCompleted && 'line-through text-zinc-500',
+                                    isInProgress && 'font-medium text-zinc-200'
+                                  )}
+                                >
+                                  {task.description}
+                                </span>
+                                {isInProgress && (
+                                  <span className="text-[10px] uppercase tracking-wider font-semibold text-cyan-400 shrink-0 bg-cyan-950/50 px-1.5 py-0.5 rounded border border-cyan-800/40">
+                                    {t.agent.activeSubtask}
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {steps.map((step) => {
                     if (step.type === 'thought') {
                       return (
                         <div
@@ -508,7 +633,8 @@ export const AgentWorkspace: React.FC = () => {
                         {step.content}
                       </div>
                     );
-                  })
+                    })}
+                  </>
                 )}
 
                 {/* INLINE CLARIFICATION QUESTION CARD */}

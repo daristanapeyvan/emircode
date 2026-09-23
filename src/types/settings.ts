@@ -3,6 +3,12 @@ export type Theme = 'dark' | 'light';
 export type FontSize = 'sm' | 'base' | 'lg';
 export type SecurityProfile = 'strict' | 'balanced' | 'autonomous';
 
+export interface WebAccessConfig {
+  enabled: boolean;
+  chatEnabled: boolean;
+  codingEnabled: boolean;
+}
+
 export interface AppSettings {
   // General
   language: Language;
@@ -20,6 +26,9 @@ export interface AppSettings {
   showMetadata: boolean;
   autoGenerateTitles: boolean;
   streamResponse: boolean;
+
+  // Web Access (Zero-Trust, user-configurable internet search & fetch)
+  webAccess: WebAccessConfig;
 
   // Ollama
   ollamaEndpoint: string;
@@ -43,6 +52,11 @@ export const DEFAULT_SETTINGS: AppSettings = {
   showMetadata: true,
   autoGenerateTitles: true,
   streamResponse: true,
+  webAccess: {
+    enabled: false,
+    chatEnabled: false,
+    codingEnabled: false,
+  },
   ollamaEndpoint: 'http://localhost:11434',
   ollamaTimeoutMs: 60000,
   keepAlive: '5m',

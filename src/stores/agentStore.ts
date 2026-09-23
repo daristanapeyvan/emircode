@@ -6,6 +6,7 @@ import {
   CommandApprovalItem,
   ClarificationItem,
   AppliedTransaction,
+  TaskChecklistItem,
 } from '@/types/agent';
 import { WorkspaceFileInfo } from '../../electron/preload';
 import { agentEngine } from '@/lib/agent/AgentEngine';
@@ -24,6 +25,7 @@ interface AgentState {
   agentStatus: AgentStatus;
   currentGoal: string;
   taskStartTime: number | null;
+  subtasks: TaskChecklistItem[];
   steps: AgentStep[];
   executionLogs: string[];
   appliedTransactions: AppliedTransaction[];
@@ -100,6 +102,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   agentStatus: 'idle',
   currentGoal: '',
   taskStartTime: null,
+  subtasks: [],
   steps: [],
   executionLogs: [],
   appliedTransactions: [],
@@ -131,6 +134,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     chat.workspaceRoot = get().workspaceRoot || undefined;
     chat.workspaceName = get().workspaceName || undefined;
     chat.agentGoal = get().currentGoal || undefined;
+    chat.agentSubtasks = get().subtasks;
     chat.agentSteps = get().steps;
     chat.executionLogs = get().executionLogs;
     chat.appliedTransactions = get().appliedTransactions;
@@ -163,6 +167,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     // 2. Restore steps, logs, transactions, and goal
     set({
       currentGoal: chat.agentGoal || (chat.title !== 'Yeni Görev' ? chat.title : ''),
+      subtasks: chat.agentSubtasks || [],
       steps: chat.agentSteps || [],
       executionLogs: chat.executionLogs || [],
       appliedTransactions: chat.appliedTransactions || [],
@@ -310,6 +315,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     const startTime = Date.now();
     set({
       currentGoal: trimmed,
+      subtasks: [],
       agentStatus: 'thinking',
       taskStartTime: startTime,
       steps: [
@@ -333,6 +339,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       trimmed,
       selectedModel,
       {
+        onSubtasksUpdated: (subtasks: TaskChecklistItem[]) => {
+          set({ subtasks: [...subtasks] });
+          get().persistCurrentSession();
+        },
         onStep: (step: AgentStep) => {
           set((state) => ({
             steps: [...state.steps, step],
@@ -460,6 +470,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     useChatStore.setState({ activeChatId: null, messages: [] });
     set({
       currentGoal: '',
+      subtasks: [],
       agentStatus: 'idle',
       taskStartTime: null,
       steps: [],

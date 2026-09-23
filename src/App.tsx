@@ -37,6 +37,15 @@ export const App: React.FC = () => {
   // App Initialization
   useEffect(() => {
     (async () => {
+      if (typeof window !== 'undefined') {
+        (window as any).__stores = {
+          useSettingsStore,
+          useModelStore,
+          useChatStore,
+          useAgentStore,
+          useUIStore,
+        };
+      }
       await initSettings();
       await checkConnection();
       await initChat();

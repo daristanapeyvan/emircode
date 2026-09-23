@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Copy, Check, RotateCw, Edit2, FileText, User, Sparkles, AlertTriangle } from 'lucide-react';
+import { Copy, Check, RotateCw, Edit2, FileText, User, Sparkles, AlertTriangle, Globe } from 'lucide-react';
 import { Message } from '@/types/chat';
 import { ReasoningBlock } from './ReasoningBlock';
 import { MarkdownContent } from './MarkdownContent';
@@ -132,6 +132,29 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, isStreaming }
                   )}
                   <span className="truncate max-w-[160px] font-mono text-[11px]">{att.name}</span>
                   <span className="text-[10px] text-zinc-500">({formatBytes(att.size)})</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Web Access / Activity Indicator */}
+          {message.webActivity && message.webActivity.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-2">
+              {message.webActivity.map((act, idx) => (
+                <div
+                  key={idx}
+                  className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-zinc-850 border border-zinc-750 text-[11px] text-zinc-400 select-none"
+                >
+                  <Globe size={11} className="text-blue-400 shrink-0" strokeWidth={1.5} />
+                  {act.type === 'search' ? (
+                    <span>
+                      Web Arama: <span className="text-zinc-200 font-medium">"{act.query}"</span> ({act.resultsCount ?? 0} sonuç)
+                    </span>
+                  ) : (
+                    <span>
+                      Web Sayfası: <span className="text-zinc-200 font-medium truncate max-w-[200px] inline-block align-bottom">{act.url}</span> {act.sizeKb ? `(${act.sizeKb} KB)` : ''}
+                    </span>
+                  )}
                 </div>
               ))}
             </div>

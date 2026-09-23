@@ -73,6 +73,22 @@ Customize the autonomous threshold to match your personal workflow while keeping
 - **Smart Directory Memory**: Remembers the last opened workspace directory and restores historical sessions along with their respective project trees on demand.
 - **Startup Clean State**: Launching the app presents a clean, unselected slate without false visual session locks, while maintaining full one-click historical accessibility.
 
+### 🌐 10. Configurable Zero-Trust Web Access & Search Subsystem
+- **User-Controlled & Offline-First**: Web access is completely optional (default: OFF). Master toggle with granular control (`Chat Search: ON/OFF`, `Coding Agent Search: ON/OFF`).
+- **Prompt Schema Omission**: When disabled, web tools (`web_search`, `fetch_url`) are completely excised from prompt schemas to prevent hallucinated calls.
+- **Dual-Layer Runtime Enforcement**: Unauthorized tool invocations are blocked instantly at both ToolDispatcher and AgentEngine boundaries.
+- **Anti-DNS-Rebinding & Multi-IP SSRF Shield**: Resolves all A and AAAA DNS records (`{ all: true }`); blocks IPv4/IPv6 private ranges, loopbacks, link-local, carrier-grade NAT, multicast; validates redirect targets step-by-step up to 3 hops with single network authority in Electron Main process.
+- **Instant In-Flight Abort**: Immediately cancels running searches/fetches via `AbortController` and `web:abortAll` IPC if the user switches Web Access OFF mid-operation.
+- **Zero-Trust Untrusted Boundary Delimiters**: Injected search snippets and fetched pages are strictly quarantined inside `<<<WEB_RESULT_UNTRUSTED>>> ... <<<END_WEB_RESULT_UNTRUSTED>>>` tags to thwart prompt injection and indirect jailbreaks.
+- **Pluggable SearchProvider**: Pluggable provider architecture with default `DuckDuckGoProvider` (Lite POST, no API key required) outputting structured source IDs (`web-001`, `web-002`) for precise document grounding.
+
+### 🎯 11. Evidence-Based Stateful Agent Architecture
+- **Strict AgentStateMachine**: Formal state machine (`PENDING -> PLANNING -> EXECUTING -> VALIDATING -> COMPLETED -> DONE`) preventing illegal transitions and execution loops.
+- **TaskCompiler & Compiler Guard**: Compiles overarching user goals into typed `TaskContract` specifications with enforceable acceptance criteria (`contains_style`, `contains_script`, `html_structure`, etc.) and consolidated subtasks.
+- **Evidence-Based TaskValidator**: Prevents false completion reports by validating disk artifacts against tangible evidence criteria before marking tasks completed.
+- **Coder Model Strict Fallback Hierarchy**: Explicit file path resolution with contract mapping, eliminating blind hallucinated file path guessing.
+- **SLM (Small Language Model) Optimization**: Compact system prompts tailored for efficient 1B-3B parameter models (`qwen2.5-coder:1.5b`, `deepseek-coder:1.3b`, `codegemma:2b`, etc.).
+
 ---
 
 ## 🏛️ Architecture Overview
@@ -85,10 +101,14 @@ flowchart TD
         UI_Diff["Rich LCS Diff Viewer"]
         UI_Dump["Reasoning & Live Dump"]
         UI_Ledger["Session Memory Ledger"]
+        UI_Web["Web Access Service & Badges"]
     end
 
     subgraph AgentEngine["Agent Engine"]
+        AE_SM["Strict AgentStateMachine"]
+        AE_Contract["TaskCompiler & Compiler Guard"]
         AE_Loop["Autonomous Tool Loop"]
+        AE_Validate["Evidence-Based TaskValidator"]
         AE_Timer["Active-Time Tracker (Paused on Prompts)"]
         AE_Compress["Sliding-Window Context Compression"]
     end
@@ -97,12 +117,17 @@ flowchart TD
         OLLAMA_Model["qwen2.5-coder / deepseek-coder"]
     end
 
-    subgraph MainProcess["Electron Main Process (Privileged)"]
+    subgraph MainProcess["Electron Main Process (Privileged Authority)"]
         MP_Jail["Realpath Path Containment"]
         MP_Token["256-Bit One-Time Mutation Token Vault"]
         MP_Hash["Authentic SHA-256 Base Hash Verifier"]
         MP_Atomic["Atomic Temp-File Rename Engine"]
         MP_Rollback["Snapshot & Rollback Registry"]
+        MP_Web["Multi-IP Anti-DNS-Rebinding SSRF Shield"]
+    end
+
+    subgraph External["External Network (Optional)"]
+        EXT_Net["DuckDuckGo Lite / Web Fetch"]
     end
 
     subgraph Disk["Local Project Filesystem"]
@@ -119,6 +144,8 @@ flowchart TD
     MP_Token --> MP_Hash
     MP_Hash -->|Apply Approved Mutation| MP_Atomic
     MP_Atomic --> FS_Files
+    UI_Web -->|IPC web:search / web:fetchUrl| MP_Web
+    MP_Web -->|SSRF Validated Request| EXT_Net
 ```
 
 ---
@@ -145,8 +172,8 @@ Pre-built binaries for both Windows and Linux are published automatically on eve
 
 | Package | Format | Description |
 | :--- | :--- | :--- |
-| **Windows Setup (Recommended)** | `Emir Code Setup 1.4.0.exe` | Multilingual NSIS GUI installer with custom folder selection, Desktop shortcut, and Start Menu registration. |
-| **Windows Portable** | `Emir Code 1.4.0.exe` | Completely self-contained single executable. Zero installation required. |
+| **Windows Setup (Recommended)** | `Emir Code Setup 1.5.0.exe` | Multilingual NSIS GUI installer with custom folder selection, Desktop shortcut, and Start Menu registration. |
+| **Windows Portable** | `Emir Code 1.5.0.exe` | Completely self-contained single executable. Zero installation required. |
 
 ---
 
@@ -157,9 +184,9 @@ Emir Code provides a first-class, native desktop experience across all major Lin
 ##### 1. Debian / Ubuntu / Linux Mint / Pop!_OS (.deb GUI Package)
 Download the `.deb` package and install it using your system's native Software Center:
 ```bash
-# GUI Installation: Double-click 'emir-code_1.4.0_amd64.deb' in your file manager to open Ubuntu Software / GDebi
+# GUI Installation: Double-click 'emir-code_1.5.0_amd64.deb' in your file manager to open Ubuntu Software / GDebi
 # Or via terminal:
-sudo apt install ./emir-code_1.4.0_amd64.deb
+sudo apt install ./emir-code_1.5.0_amd64.deb
 ```
 *Automatically registers the application menu entry, high-DPI desktop icons, and the `/usr/bin/emir-code` command.*
 
@@ -167,19 +194,19 @@ sudo apt install ./emir-code_1.4.0_amd64.deb
 Download the `.rpm` package and double-click to install via GNOME Software / Discover:
 ```bash
 # Or via dnf:
-sudo dnf install ./emir-code-1.4.0.x86_64.rpm
+sudo dnf install ./emir-code-1.5.0.x86_64.rpm
 ```
 
 ##### 3. Universal Portable AppImage
 Download and run directly on any Linux distribution without root privileges:
 ```bash
-chmod +x Emir-Code-1.4.0.AppImage
-./Emir-Code-1.4.0.AppImage
+chmod +x Emir-Code-1.5.0.AppImage
+./Emir-Code-1.5.0.AppImage
 ```
 
 ##### 4. Standalone Linux GUI Setup Wizard (`emir-code-setup-linux.sh`)
 For users who prefer a Windows-like graphical setup wizard:
-1. Download `emir-code-1.4.0.tar.gz` and extract it, or download `emir-code-setup-linux.sh`.
+1. Download `emir-code-1.5.0.tar.gz` and extract it, or download `emir-code-setup-linux.sh`.
 2. Run the graphical installer:
    ```bash
    chmod +x emir-code-setup-linux.sh

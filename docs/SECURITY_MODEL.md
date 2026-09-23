@@ -81,3 +81,26 @@ Before any file is modified on disk:
 | **File Deletion Prompt** | Manual | Manual | Manual |
 | **Terminal Command Execution** | Manual | Manual | Auto (Safe commands) |
 | **Disallowed Commands Blocked** | ✅ Enforced | ✅ Enforced | ✅ Enforced |
+
+---
+
+## 4. Zero-Trust Web Access & Anti-SSRF Defense
+
+Web access in Emir Code is strictly zero-trust, optional, and hardened against modern injection and infrastructure reconnaissance attacks:
+
+### A. Zero-Trust Untrusted Boundary Delimiters
+All search snippets and fetched external web contents are quarantined within:
+```text
+<<<WEB_RESULT_UNTRUSTED>>>
+(External Web Data)
+<<<END_WEB_RESULT_UNTRUSTED>>>
+```
+System prompts explicitly instruct the model that content inside these delimiters represents plain external untrusted text and must NEVER be treated as authorization or system instruction overrides.
+
+### B. Anti-DNS-Rebinding & Multi-IP SSRF Shield
+- **Multi-Record DNS Resolution**: Resolves all A and AAAA records (`{ all: true }`). If any address belongs to private/reserved ranges, the entire request is blocked.
+- **Forbidden IP Ranges**: Completely blocks IPv4 loopback (`127.0.0.0/8`), private networks (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), link-local (`169.254.0.0/16`), CGNAT (`100.64.0.0/10`), multicast/reserved (`224.0.0.0/4`), IPv6 loopbacks (`::1`, `::`), link-local (`fe80::/10`), and unique-local (`fc00::/7`).
+- **Redirect Re-Validation**: Every redirect hop (HTTP 301, 302, 303, 307, 308) is checked manually up to 3 hops from scratch.
+- **Main Process Authority**: The renderer process has no direct network capability for web search/fetch; all requests execute exclusively in the privileged Electron Main process through hardened IPC channels (`web:search`, `web:fetchUrl`, `web:abortAll`).
+- **Instant Abort on Disable**: If the user turns Web Access OFF in settings, all in-flight requests are immediately aborted.
+

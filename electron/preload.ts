@@ -85,7 +85,8 @@ export interface ElectronAPI {
     operation: 'create' | 'edit' | 'delete';
     expectedBaseHash: string;
     proposedContentHash: string;
-  }) => Promise<{ success: boolean; token?: string; expiresAt?: number; baseHash?: string; conflict?: boolean; currentHash?: string; error?: string }>;
+    allowOverwrite?: boolean;
+  }) => Promise<{ success: boolean; token?: string; expiresAt?: number; baseHash?: string; conflict?: boolean; currentHash?: string; overwritten?: boolean; error?: string }>;
 
   applyApprovedMutation: (params: {
     token: string;
@@ -103,6 +104,11 @@ export interface ElectronAPI {
 
   // Transactional Hash-checked Rollback
   rollbackTransaction: (transactionId: string, force?: boolean) => Promise<{ success: boolean; conflict?: boolean; error?: string }>;
+
+  // Emir Code: Zero-Trust Web Access & Search Bridge
+  webSearch: (query: string, options?: { limit?: number; timeoutMs?: number }) => Promise<Array<{ id: string; title: string; url: string; snippet: string; source: string }>>;
+  webFetch: (url: string, options?: { maxBytes?: number; timeoutMs?: number }) => Promise<{ title: string; url: string; content: string; status: number; sizeBytes: number }>;
+  webAbortAll?: () => Promise<boolean>;
 }
 
 const electronAPI: ElectronAPI = {
@@ -148,6 +154,11 @@ const electronAPI: ElectronAPI = {
   applyApprovedMutation: (params) => ipcRenderer.invoke('workspace:applyApprovedMutation', params),
   runApprovedCommand: (params) => ipcRenderer.invoke('workspace:runApprovedCommand', params),
   rollbackTransaction: (transactionId, force) => ipcRenderer.invoke('workspace:rollbackTransaction', { transactionId, force }),
+
+  // Web Access Bridge
+  webSearch: (query, options) => ipcRenderer.invoke('web:search', { query, options }),
+  webFetch: (url, options) => ipcRenderer.invoke('web:fetchUrl', { url, options }),
+  webAbortAll: () => ipcRenderer.invoke('web:abortAll'),
 };
 
 contextBridge.exposeInMainWorld('electronAPI', electronAPI);

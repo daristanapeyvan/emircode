@@ -218,6 +218,17 @@ export const en = {
     ollamaHelp: 'Make sure Ollama is installed and running on your computer. You can download it from ollama.com.',
     remoteWarning: 'Warning: Connecting to a remote HTTP endpoint sends prompts over unencrypted network traffic. Use HTTPS or localhost for private local operation.',
 
+    // Web Access
+    webAccess: 'Web Access',
+    webAccessTitle: 'WEB ACCESS',
+    webAccessSubtitle: 'Configure online search and documentation lookup capabilities for local models.',
+    internetAccess: 'Internet Access',
+    internetAccessDesc: 'Allow the assistant to access the web when needed.',
+    chatSearch: 'Chat Search',
+    chatSearchDesc: 'Allow web search during chat.',
+    codingSearch: 'Coding Agent Search',
+    codingSearchDesc: 'Allow the coding agent to research documentation online.',
+
     // About
     aboutTitle: 'About Emir Code',
     version: 'Version',
@@ -296,6 +307,14 @@ export const en = {
     securityProfileStrict: 'Strict',
     securityProfileBalanced: 'Balanced',
     securityProfileAutonomous: 'Autonomous',
+    subtasksTitle: 'Task Checklist',
+    subtasksProgress: 'Subtasks Completed',
+    activeSubtask: 'Active Focus',
+    pendingSubtask: 'Pending',
+    completedSubtask: 'Completed',
+    autonomousModeBadge: 'Autonomous Profile (Zero Approval Prompts)',
+    slmCompactModeBadge: 'Compact SLM Mode',
+    elapsedTime: 'Elapsed Time',
     diffViewer: 'Diff Viewer',
     liveTranscript: 'Live Transcript & Reasoning Stream',
     clickToToggleTranscript: 'Click to expand / collapse transcript',

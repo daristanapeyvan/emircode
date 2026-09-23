@@ -262,4 +262,67 @@ Emir Code guarantees zero state loss across application restarts through unified
 - **Smart Directory Memory**: The application remembers the last active project folder, allowing instant continuation upon reboot.
 - **Startup Clean Slate**: The application launches in a clean, unselected state (`activeChatId: null`), eliminating misleading visual selection of previous sessions while maintaining instantaneous access through the unified history sidebar.
 
+---
+
+## 10. Configurable Zero-Trust Web Access & Search Architecture
+
+Web access in Emir Code is strictly an optional, isolated capability designed around a Zero-Trust security model:
+
+```
+UI (Settings / Chat / Timeline)
+           ↓
+    Settings State (Web Access: ON / OFF, Chat / Coding)
+           ↓
+    Tool Schema Filter (Omitted from prompt when disabled)
+           ↓
+    ToolDispatcher (Runtime permission validation)
+           ↓
+    IPC (web:search / web:fetchUrl / web:abortAll)
+           ↓
+Electron Main Process (Single Network Authority)
+  - Anti-DNS-Rebinding Multi-IP Lookup ({ all: true })
+  - SSRF Private / Reserved IP Range Shield
+  - Step-by-Step Manual Redirect Verification (Max 3 hops)
+  - Pluggable SearchProvider (DuckDuckGo Lite POST)
+  - In-flight AbortController Registry
+           ↓
+Untrusted Result Delimitation (<<<WEB_RESULT_UNTRUSTED>>>)
+           ↓
+    Local LLM Context (Grounding only, never system commands)
+```
+
+### Architectural Key Elements:
+1. **Schema Omission**: If Web Access is disabled globally or for a specific mode, tool definitions (`web_search`, `fetch_url`) are completely omitted from prompts.
+2. **Dual-Layer Runtime Enforcement**: Even if a model hallucinates a web call, both `ToolDispatcher` and `AgentEngine` block the call with a system notice.
+3. **Multi-IP Anti-DNS-Rebinding**: Resolves all A and AAAA records simultaneously. If ANY record resolves to a private, loopback, link-local, carrier-grade NAT, or multicast address, the entire request is blocked.
+4. **Structured Source IDs**: Search results return structured IDs (`web-001`, `web-002`) allowing local models to ground statements accurately.
+5. **Instant In-Flight Abort**: Disabling Web Access mid-run invokes `WebAccessService.abortAllActiveRequests()` and `web:abortAll` to immediately terminate pending sockets.
+
+---
+
+## 11. Evidence-Based Stateful Agent Architecture
+
+To ensure deterministic reliability and prevent false completion reports from smaller local models, Emir Code implements a formal state machine and evidence compiler:
+
+### 1. Strict AgentStateMachine
+The agent transitions through a formal state machine:
+```text
+PENDING ──> PLANNING ──> EXECUTING ──> VALIDATING ──> COMPLETED ──> DONE
+                             │              │
+                             ▼              ▼
+                          BLOCKED <─────────┘
+```
+Illegal state transitions (e.g. jumping from `BLOCKED` directly to `COMPLETED`) are strictly rejected.
+
+### 2. TaskCompiler & Compiler Guard
+User requests are compiled into typed `TaskContract` objects with formal acceptance criteria:
+- `html_structure`: Valid HTML boilerplate (`<!DOCTYPE html>`, `<html>`, `<head>`, `<body>`).
+- `contains_style`: Verifies embedded or external stylesheet tags.
+- `contains_script`: Verifies script tags and functionality.
+- Consolidates redundant constraint clauses to prevent fragmented subtasks.
+
+### 3. Evidence-Based TaskValidator
+Before transitioning to `COMPLETED`, `TaskValidator` inspects the actual disk state and produced files. If required evidence is missing, the agent is kept in `EXECUTING` with specific diagnostic feedback, completely eliminating hallucinated "false success" claims.
+
+
 

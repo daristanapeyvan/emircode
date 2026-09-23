@@ -3,6 +3,7 @@ import {
   Sliders,
   Palette,
   MessageSquare,
+  Globe,
   Layers,
   Cpu,
   Keyboard,
@@ -14,6 +15,7 @@ import { Modal } from '../common/Modal';
 import { GeneralSettings } from './GeneralSettings';
 import { AppearanceSettings } from './AppearanceSettings';
 import { ChatSettings } from './ChatSettings';
+import { WebAccessSettings } from './WebAccessSettings';
 import { GenerationSettings } from './GenerationSettings';
 import { KeyboardSettings } from './KeyboardSettings';
 import { StorageSettings } from './StorageSettings';
@@ -33,6 +35,7 @@ export const SettingsModal: React.FC = () => {
     { id: 'general', label: t.settings.general, icon: <Sliders size={14} strokeWidth={1.5} /> },
     { id: 'appearance', label: t.settings.appearance, icon: <Palette size={14} strokeWidth={1.5} /> },
     { id: 'chat', label: t.settings.chat, icon: <MessageSquare size={14} strokeWidth={1.5} /> },
+    { id: 'webAccess', label: t.settings.webAccess || 'Web Access', icon: <Globe size={14} strokeWidth={1.5} /> },
     { id: 'generation', label: t.settings.generation, icon: <Cpu size={14} strokeWidth={1.5} /> },
     { id: 'keyboard', label: t.settings.keyboard, icon: <Keyboard size={14} strokeWidth={1.5} /> },
     { id: 'storage', label: t.settings.storage, icon: <HardDrive size={14} strokeWidth={1.5} /> },
@@ -78,6 +81,7 @@ export const SettingsModal: React.FC = () => {
           {settingsCategory === 'general' && <GeneralSettings />}
           {settingsCategory === 'appearance' && <AppearanceSettings />}
           {settingsCategory === 'chat' && <ChatSettings />}
+          {settingsCategory === 'webAccess' && <WebAccessSettings />}
           {settingsCategory === 'generation' && <GenerationSettings />}
           {settingsCategory === 'keyboard' && <KeyboardSettings />}
           {settingsCategory === 'storage' && <StorageSettings />}

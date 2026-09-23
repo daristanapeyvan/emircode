@@ -3,6 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import os from 'os';
 import crypto from 'crypto';
+import dns from 'dns';
 import { exec, spawn } from 'child_process';
 
 let mainWindow: BrowserWindow | null = null;
@@ -672,7 +673,7 @@ async function isCanonicalPathSafe(relativePathOrAbsolute: string): Promise<{
     };
   }
 
-  const relative = path.relative(normalizedRoot, resolvedTarget);
+  const relative = path.relative(normalizedRoot, resolvedTarget).replace(/\\/g, '/');
   return { safe: true, fullPath: resolvedTarget, canonicalPath: canonicalTarget, relativePath: relative };
 }
 
@@ -898,11 +899,13 @@ ipcMain.handle(
       operation,
       expectedBaseHash,
       proposedContentHash,
+      allowOverwrite,
     }: {
       relativePath: string;
       operation: 'create' | 'edit' | 'delete';
       expectedBaseHash: string;
       proposedContentHash: string;
+      allowOverwrite?: boolean;
     }
   ) => {
     const check = await isCanonicalPathSafe(relativePath);
@@ -929,11 +932,16 @@ ipcMain.handle(
           };
         }
       } else if (operation === 'create') {
-        return {
-          success: false,
-          conflict: true,
-          error: `Oluşturulmak istenen "${relativePath}" dosyası diskte zaten mevcut.`,
-        };
+        if (allowOverwrite) {
+          // Explicit overwrite allowed by user or engine directive
+          expectedBaseHash = diskHash;
+        } else {
+          return {
+            success: false,
+            conflict: true,
+            error: `Oluşturulmak istenen "${relativePath}" dosyası diskte zaten mevcut. Mevcut dosyayı değiştirmek için 'propose_edit' kullanın veya açıkça 'overwrite: true' belirtin.`,
+          };
+        }
       }
     } else if (operation === 'edit' || operation === 'delete') {
       return {
@@ -948,7 +956,7 @@ ipcMain.handle(
       token,
       relativePath: check.relativePath,
       operation,
-      expectedBaseHash: diskHash,
+      expectedBaseHash: operation === 'create' && allowOverwrite && diskHash ? diskHash : (operation === 'create' ? '' : diskHash),
       proposedContentHash,
       createdAt: Date.now(),
       expiresAt: Date.now() + 5 * 60 * 1000, // 5 minute TTL
@@ -956,7 +964,13 @@ ipcMain.handle(
     };
 
     mutationTokens.set(token, record);
-    return { success: true, token, expiresAt: record.expiresAt, baseHash: diskHash };
+    return {
+      success: true,
+      token,
+      expiresAt: record.expiresAt,
+      baseHash: diskHash,
+      overwritten: operation === 'create' && Boolean(diskHash),
+    };
   }
 );
 
@@ -991,12 +1005,15 @@ ipcMain.handle(
       return { success: false, error: 'Zaman Aşımı: Transaction onay tokenının süresi dolmuştur (TTL: 5dk).' };
     }
 
-    if (record.relativePath !== relativePath || record.operation !== operation) {
-      return { success: false, error: 'Güvenlik İhlali: Token ile talep edilen dosya/eylem parametreleri eşleşmiyor.' };
-    }
-
     const check = await isCanonicalPathSafe(relativePath);
     if (!check.safe) return { success: false, error: check.error };
+
+    const normRecordRel = record.relativePath.replace(/\\/g, '/').replace(/^\.\//, '');
+    const normCheckRel = check.relativePath.replace(/\\/g, '/').replace(/^\.\//, '');
+
+    if (normRecordRel !== normCheckRel || record.operation !== operation) {
+      return { success: false, error: 'Güvenlik İhlali: Token ile talep edilen dosya/eylem parametreleri eşleşmiyor.' };
+    }
 
     try {
       let originalContent = '';
@@ -1164,6 +1181,15 @@ ipcMain.handle(
           exitCode: 1,
           output: '',
           error: `Güvenlik Politikası: npm altında sadece test ve tanımlı betikler çalıştırılabilir. Verilen: "${sub}"`,
+        };
+      }
+      const pkgJsonPath = path.join(canonicalWorkspaceRoot, 'package.json');
+      if (!fs.existsSync(pkgJsonPath)) {
+        return {
+          success: false,
+          exitCode: 1,
+          output: '',
+          error: `Proje klasöründe "package.json" dosyası mevcut değil. npm komutları çalıştırılamaz.`,
         };
       }
       if (sub === 'run') {
@@ -1406,6 +1432,304 @@ Keywords=AI;Agent;Code;Ollama;Editor;IDE;
   } catch (err: any) {
     return { success: false, error: `Masaüstü entegrasyonu başarısız: ${err.message}` };
   }
+});
+
+// ==========================================
+// Emir Code: Zero-Trust Web Access & Search Bridge
+// ==========================================
+function isPrivateIpAddress(ip: string): boolean {
+  if (!ip) return true;
+  const clean = ip.trim().toLowerCase();
+  if (clean === '::1' || clean === '::' || clean === '0:0:0:0:0:0:0:1') return true;
+  if (clean.startsWith('::ffff:')) {
+    return isPrivateIpAddress(clean.replace('::ffff:', ''));
+  }
+  if (clean.startsWith('fc') || clean.startsWith('fd') || clean.startsWith('fe80:')) return true;
+
+  const parts = clean.split('.').map((p) => parseInt(p, 10));
+  if (parts.length === 4 && parts.every((p) => !isNaN(p) && p >= 0 && p <= 255)) {
+    const [a, b] = parts;
+    if (a === 0 || a === 127 || a === 10) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 169 && b === 254) return true;
+    if (a === 100 && b >= 64 && b <= 127) return true;
+    if (a >= 224) return true;
+    return false;
+  }
+  return false;
+}
+
+async function validateUrlForWebAccess(urlStr: string): Promise<{ valid: boolean; reason?: string; parsed?: URL; verifiedIps?: string[] }> {
+  if (!urlStr || typeof urlStr !== 'string') {
+    return { valid: false, reason: 'URL belirtilmedi.' };
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(urlStr.trim());
+  } catch {
+    return { valid: false, reason: 'Geçersiz URL formatı.' };
+  }
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return { valid: false, reason: `Yasaklı protokol: ${parsed.protocol}` };
+  }
+
+  const hostname = parsed.hostname.toLowerCase();
+  if (
+    hostname === 'localhost' ||
+    hostname.endsWith('.localhost') ||
+    hostname.endsWith('.local') ||
+    hostname.endsWith('.internal') ||
+    hostname === '127.0.0.1' ||
+    hostname === '0.0.0.0' ||
+    hostname === '::1'
+  ) {
+    return { valid: false, reason: `SSRF Koruması: ${hostname} adresine erişim engellendi.` };
+  }
+
+  if (isPrivateIpAddress(hostname)) {
+    return { valid: false, reason: `SSRF Koruması: Özel IP adresine erişim engellendi (${hostname}).` };
+  }
+
+  const verifiedIps: string[] = [];
+  try {
+    const lookups = await dns.promises.lookup(hostname, { all: true });
+    if (!lookups || lookups.length === 0) {
+      return { valid: false, reason: 'DNS çözümleme hatası: Kayıt bulunamadı.' };
+    }
+    for (const entry of lookups) {
+      if (isPrivateIpAddress(entry.address)) {
+        return { valid: false, reason: `SSRF Koruması: Alan adı özel IP'ye çözümlendi (${entry.address}).` };
+      }
+      verifiedIps.push(entry.address);
+    }
+  } catch (err: any) {
+    return { valid: false, reason: `DNS çözümleme hatası: ${err.message}` };
+  }
+
+  return { valid: true, parsed, verifiedIps };
+}
+
+function cleanHtmlContent(html: string): { title: string; text: string } {
+  let title = '';
+  const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  if (titleMatch) {
+    title = titleMatch[1].replace(/<[^>]+>/g, '').trim();
+  }
+
+  let text = html
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ')
+    .replace(/<svg[\s\S]*?<\/svg>/gi, ' ')
+    .replace(/<nav[\s\S]*?<\/nav>/gi, ' ')
+    .replace(/<footer[\s\S]*?<\/footer>/gi, ' ')
+    .replace(/<iframe[\s\S]*?<\/iframe>/gi, ' ')
+    .replace(/<h[1-2][^>]*>([\s\S]*?)<\/h[1-2]>/gi, '\n\n## $1\n\n')
+    .replace(/<h[3-6][^>]*>([\s\S]*?)<\/h[3-6]>/gi, '\n\n### $1\n\n')
+    .replace(/<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, '$2 ($1)')
+    .replace(/<pre[^>]*><code[^>]*>([\s\S]*?)<\/code><\/pre>/gi, '\n```\n$1\n```\n')
+    .replace(/<code[^>]*>([\s\S]*?)<\/code>/gi, '`$1`')
+    .replace(/<p[^>]*>/gi, '\n\n')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<li[^>]*>/gi, '\n* ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, ' ')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n\s*\n\s*\n+/g, '\n\n')
+    .trim();
+
+  return { title: title || 'Belge', text };
+}
+
+// In-flight request tracking for instant cancellation from UI or settings
+const activeWebControllers = new Set<AbortController>();
+
+ipcMain.handle('web:abortAll', async () => {
+  for (const c of activeWebControllers) {
+    try {
+      c.abort('Kullanıcı web erişimini durdurdu');
+    } catch {}
+  }
+  activeWebControllers.clear();
+  return true;
+});
+
+ipcMain.handle('web:search', async (_event, { query, options }: { query: string; options?: { limit?: number; timeoutMs?: number } }) => {
+  const trimmed = (query || '').trim();
+  if (!trimmed) {
+    throw new Error('Arama sorgusu boş olamaz.');
+  }
+
+  const limit = Math.min(Math.max(options?.limit || 5, 1), 10);
+  const timeoutMs = options?.timeoutMs || 10000;
+
+  const controller = new AbortController();
+  activeWebControllers.add(controller);
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch('https://lite.duckduckgo.com/lite/', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        Accept: 'text/html,application/xhtml+xml',
+      },
+      body: `q=${encodeURIComponent(trimmed)}`,
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      throw new Error(`Arama servisi hatası: HTTP ${response.status}`);
+    }
+
+    const html = await response.text();
+
+    const results: Array<{ id: string; title: string; url: string; snippet: string; source: string }> = [];
+    const blockRegex =
+      /<a[^>]+href=["']([^"']+)["'][^>]*class=['"]result-link['"][^>]*>([\s\S]*?)<\/a>[\s\S]*?<td[^>]*class=['"]result-snippet['"][^>]*>([\s\S]*?)<\/td>/gi;
+    let match: RegExpExecArray | null;
+    let counter = 1;
+
+    while ((match = blockRegex.exec(html)) !== null && results.length < limit) {
+      let rawUrl = match[1];
+      if (rawUrl.includes('uddg=')) {
+        try {
+          const u = new URL(rawUrl, 'https://lite.duckduckgo.com');
+          const uddg = u.searchParams.get('uddg');
+          if (uddg) rawUrl = decodeURIComponent(uddg);
+        } catch {}
+      }
+
+      const title = match[2].replace(/<[^>]+>/g, '').trim();
+      const snippet = match[3].replace(/<[^>]+>/g, '').trim();
+
+      const check = await validateUrlForWebAccess(rawUrl);
+      if (!check.valid) continue;
+
+      let source = '';
+      try {
+        source = new URL(rawUrl).hostname;
+      } catch {}
+
+      const sourceId = `web-${String(counter).padStart(3, '0')}`;
+      counter++;
+
+      results.push({
+        id: sourceId,
+        title: title || 'Arama Sonucu',
+        url: rawUrl,
+        snippet: snippet || '',
+        source: source || 'web',
+      });
+    }
+
+    return results;
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    if (err.name === 'AbortError') {
+      throw new Error(`Web arama zaman aşımına uğradı veya kullanıcı tarafından durduruldu (${timeoutMs}ms).`);
+    }
+    throw new Error(`Arama başarısız: ${err.message}`);
+  } finally {
+    activeWebControllers.delete(controller);
+  }
+});
+
+ipcMain.handle('web:fetchUrl', async (_event, { url, options }: { url: string; options?: { maxBytes?: number; timeoutMs?: number } }) => {
+  const validation = await validateUrlForWebAccess(url);
+  if (!validation.valid || !validation.parsed) {
+    throw new Error(validation.reason || 'Geçersiz veya yasaklı URL.');
+  }
+
+  const maxBytes = options?.maxBytes || 512 * 1024;
+  const timeoutMs = options?.timeoutMs || 10000;
+  const MAX_REDIRECTS = 3;
+
+  let currentUrl = validation.parsed.href;
+  let redirectCount = 0;
+
+  while (redirectCount <= MAX_REDIRECTS) {
+    const controller = new AbortController();
+    activeWebControllers.add(controller);
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const response = await fetch(currentUrl, {
+        method: 'GET',
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 EmirCode/1.4',
+          Accept: 'text/html,text/plain,application/xhtml+xml;q=0.9,*/*;q=0.8',
+        },
+        redirect: 'manual',
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if ([301, 302, 303, 307, 308].includes(response.status)) {
+        redirectCount++;
+        if (redirectCount > MAX_REDIRECTS) {
+          throw new Error('Yönlendirme sınırı aşıldı.');
+        }
+
+        const location = response.headers.get('location');
+        if (!location) throw new Error('Yönlendirme başlığı (Location) bulunamadı.');
+
+        const nextUrl = new URL(location, currentUrl).href;
+        const redirectCheck = await validateUrlForWebAccess(nextUrl);
+        if (!redirectCheck.valid) {
+          throw new Error(`Yönlendirme engellendi: ${redirectCheck.reason}`);
+        }
+
+        currentUrl = nextUrl;
+        continue;
+      }
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const buffer = await response.arrayBuffer();
+      const bytes = Math.min(buffer.byteLength, maxBytes);
+      const textDecoder = new TextDecoder('utf-8', { fatal: false });
+      let rawText = textDecoder.decode(buffer.slice(0, bytes));
+      if (buffer.byteLength > maxBytes) {
+        rawText += '\n\n[İçerik boyutu sınırına ulaşıldığı için kalan kısım kırpıldı]';
+      }
+
+      const { title, text } = cleanHtmlContent(rawText);
+
+      return {
+        title,
+        url: currentUrl,
+        content: text,
+        status: response.status,
+        sizeBytes: buffer.byteLength,
+      };
+    } catch (err: any) {
+      clearTimeout(timeoutId);
+      if (err.name === 'AbortError') {
+        throw new Error(`Web isteği zaman aşımına uğradı veya kullanıcı tarafından durduruldu (${timeoutMs}ms).`);
+      }
+      throw err;
+    } finally {
+      activeWebControllers.delete(controller);
+    }
+  }
+
+  throw new Error('Maksimum yönlendirme sınırına ulaşıldı.');
 });
 
 app.whenReady().then(() => {
