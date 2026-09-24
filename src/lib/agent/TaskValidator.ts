@@ -20,6 +20,106 @@ export interface ValidationReport {
 
 export type FileContentProvider = (relativePath: string) => Promise<string | null>;
 
+/**
+ * True when a file was written with JSON string escapes instead of real characters
+ * (e.g. `<html lang=\"tr\">\n<head>` on a single line). Browsers then ignore class names,
+ * charset and scripts, which is why such pages looked like "plain HTML without styles".
+ */
+export function looksJsonEscaped(content: string): boolean {
+  if (!content || content.length < 40) return false;
+  const realNewlines = (content.match(/\n/g) || []).length;
+  const literalNewlines = (content.match(/\\n/g) || []).length;
+  const escapedQuotes = (content.match(/\\"/g) || []).length;
+  if (realNewlines > 1 || escapedQuotes < 2 || (literalNewlines < 3 && escapedQuotes < 4)) return false;
+  // A document written as one JSON string has an escape on every line or attribute (and escaped
+  // quotes around attributes/strings); a minified bundle or a one-line data string with many
+  // "\n" inside a string literal is valid code and must not be "unescaped".
+  return (literalNewlines + escapedQuotes) * 150 >= content.length;
+}
+
+/**
+ * True when a script body is plausibly JavaScript. Small models sometimes put HTML markup
+ * inside <script> ("<script><h1>Merhaba</h1></script>"), which satisfied a length-only check.
+ */
+export function looksLikeJavaScript(body: string): boolean {
+  const code = (body || '')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '')
+    .trim();
+  if (code.length < 10) return false;
+  if (/^<\/?[a-zA-Z!]/.test(code)) return false;
+  return /[(=;{]/.test(code) || /\b(?:function|const|let|var|document|window|console|return|import|export)\b/.test(code);
+}
+
+function resolveRelative(fromFile: string, ref: string): string {
+  const baseParts = fromFile.replace(/\\/g, '/').split('/').slice(0, -1);
+  const clean = ref.split('#')[0].split('?')[0];
+  const parts = clean.startsWith('/') ? [] : [...baseParts];
+  for (const seg of clean.replace(/^\/+/, '').split('/')) {
+    if (!seg || seg === '.') continue;
+    if (seg === '..') parts.pop();
+    else parts.push(seg);
+  }
+  return parts.join('/');
+}
+
+function isRemoteRef(ref: string): boolean {
+  return /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(ref.trim());
+}
+
+export function extractLocalStylesheets(html: string): string[] {
+  const refs: string[] = [];
+  const re = /<link\b[^>]*>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    const tag = m[0];
+    if (!/rel\s*=\s*["']?stylesheet/i.test(tag)) continue;
+    const href = tag.match(/href\s*=\s*["']([^"']+)["']/i);
+    if (href && !isRemoteRef(href[1])) refs.push(href[1].trim());
+  }
+  return refs;
+}
+
+export function extractLocalScripts(html: string): string[] {
+  const refs: string[] = [];
+  const re = /<script\b[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    if (!isRemoteRef(m[1])) refs.push(m[1].trim());
+  }
+  return refs;
+}
+
+/** 1-based line of the last occurrence of `tag` (case-insensitive), or 0. */
+function lineOfTag(content: string, tag: string): number {
+  const idx = content.toLowerCase().lastIndexOf(tag);
+  return idx === -1 ? 0 : content.slice(0, idx).split('\n').length;
+}
+
+const SCRIPT_CANDIDATES = ['script.js', 'main.js', 'app.js', 'index.js', 'js/script.js', 'js/main.js', 'js/app.js'];
+const STYLE_CANDIDATES = ['style.css', 'styles.css', 'main.css', 'index.css', 'css/style.css', 'css/styles.css', 'css/main.css'];
+
+/**
+ * A JS/CSS file next to the page that has real content but is not linked from it (small models
+ * write script.js and forget the <script src> tag). Returns the page-relative reference.
+ */
+async function findUnlinkedAsset(
+  page: string,
+  candidates: string[],
+  linked: string[],
+  isValid: (text: string) => boolean,
+  fileProvider: FileContentProvider
+): Promise<string | null> {
+  const linkedPaths = new Set(linked.map((ref) => resolveRelative(page, ref)));
+  for (const candidate of candidates) {
+    const resolved = resolveRelative(page, candidate);
+    if (linkedPaths.has(resolved)) continue;
+    const text = await fileProvider(resolved);
+    if (text && isValid(text)) return candidate;
+  }
+  return null;
+}
+
 export class TaskValidator {
   /**
    * Validates a TaskContract against actual disk/workspace state via evidence provider.
@@ -31,50 +131,55 @@ export class TaskValidator {
     const criterionResults: CriterionResult[] = [];
     const missingEvidence: string[] = [];
 
+    const fail = (crit: ValidationCriterion, error: string, evidence?: string) => {
+      criterionResults.push({ criterion: crit, passed: false, error });
+      missingEvidence.push(evidence || error);
+    };
+    const pass = (crit: ValidationCriterion) => criterionResults.push({ criterion: crit, passed: true });
+
     for (const crit of contract.criteria) {
+      let target = crit.target;
       let content = await fileProvider(crit.target);
       if (content === null && (crit.target === 'index.html' || crit.target === 'src/index.html')) {
         const altTarget = crit.target === 'index.html' ? 'src/index.html' : 'index.html';
         const altContent = await fileProvider(altTarget);
         if (altContent !== null) {
           content = altContent;
+          target = altTarget;
         }
       }
 
       switch (crit.type) {
         case 'file_exists': {
-          if (content === null) {
-            criterionResults.push({
-              criterion: crit,
-              passed: false,
-              error: `'${crit.target}' dosyası bulunamadı.`,
-            });
-            missingEvidence.push(crit.description);
-          } else {
-            criterionResults.push({ criterion: crit, passed: true });
-          }
+          if (content === null) fail(crit, `'${crit.target}' dosyası bulunamadı.`, crit.description);
+          else pass(crit);
           break;
         }
 
         case 'min_size': {
           const minBytes = crit.params?.minBytes || 1;
           if (content === null || content.trim().length < minBytes) {
-            criterionResults.push({
-              criterion: crit,
-              passed: false,
-              error: `'${crit.target}' içeriği çok kısa veya boş (${content?.trim().length || 0} < ${minBytes} bayt).`,
-            });
-            missingEvidence.push(crit.description);
+            fail(
+              crit,
+              `'${crit.target}' içeriği çok kısa veya boş (${content?.trim().length || 0} < ${minBytes} bayt).`,
+              crit.description
+            );
           } else {
-            criterionResults.push({ criterion: crit, passed: true });
+            pass(crit);
           }
           break;
         }
 
         case 'html_structure': {
           if (!content) {
-            criterionResults.push({ criterion: crit, passed: false, error: 'Dosya içeriği boş.' });
-            missingEvidence.push(crit.description);
+            fail(crit, 'Dosya içeriği boş.', crit.description);
+            break;
+          }
+          if (looksJsonEscaped(content)) {
+            fail(
+              crit,
+              `'${target}' JSON kaçış karakterleriyle bozulmuş (gerçek satır sonu yerine "\\n", tırnak yerine \\"). Dosyayı gerçek satır sonları ve normal tırnaklarla baştan yazın.`
+            );
             break;
           }
           const lower = content.toLowerCase();
@@ -83,116 +188,180 @@ export class TaskValidator {
           const hasClosingHtml = lower.includes('</html>');
 
           if (!hasDocTypeOrHtml || (!hasBody && !hasClosingHtml)) {
-            criterionResults.push({
-              criterion: crit,
-              passed: false,
-              error: `'${crit.target}' geçerli bir HTML5 iskeletine sahip değil. (<html, <body, </html> etiketleri eksik)`,
-            });
-            missingEvidence.push(crit.description);
+            fail(
+              crit,
+              `'${target}' geçerli bir HTML5 iskeletine sahip değil. (<html, <body, </html> etiketleri eksik)`,
+              crit.description
+            );
           } else {
-            criterionResults.push({ criterion: crit, passed: true });
+            pass(crit);
           }
           break;
         }
 
         case 'contains_style': {
           if (!content) {
-            criterionResults.push({ criterion: crit, passed: false, error: 'Dosya içeriği boş.' });
-            missingEvidence.push(crit.description);
+            fail(crit, 'Dosya içeriği boş.', crit.description);
             break;
           }
-          // Check for external link tags
-          const hasExternalCssLink = /<link\s+[^>]*rel=["']stylesheet["']/i.test(content);
+          const inlineOnly = !!crit.params?.inlineOnly;
           // Validate real <style> block with actual CSS rules (not just empty tag)
-          const styleMatch = content.match(/<style[^>]*>([\s\S]*?)<\/style>/i);
-          const hasInlineStyleAttr = /style\s*=\s*["'][^"']{5,}["']/i.test(content);
-
           let hasValidCss = false;
-          if (styleMatch && styleMatch[1]) {
-            const cssBody = styleMatch[1].trim();
-            // Check for at least one CSS rule-like structure (selector { property: value })
+          const styleBlocks = content.match(/<style[^>]*>([\s\S]*?)<\/style>/gi) || [];
+          for (const block of styleBlocks) {
+            const cssBody = block.replace(/<\/?style[^>]*>/gi, '').trim();
             if (cssBody.length >= 10 && cssBody.includes('{') && cssBody.includes('}')) {
               hasValidCss = true;
+              break;
             }
           }
 
-          if (hasValidCss || (hasInlineStyleAttr && !hasExternalCssLink)) {
-            criterionResults.push({ criterion: crit, passed: true });
+          const externalSheets = extractLocalStylesheets(content);
+          let hasValidExternalCss = false;
+          if (!hasValidCss && !inlineOnly) {
+            for (const href of externalSheets) {
+              const css = await fileProvider(resolveRelative(target, href));
+              if (css && css.trim().length >= 10 && css.includes('{') && css.includes('}')) {
+                hasValidExternalCss = true;
+                break;
+              }
+            }
+          }
+
+          if (hasValidCss || hasValidExternalCss) {
+            pass(crit);
           } else {
-            const errorMsg = hasExternalCssLink
-              ? `'${crit.target}' içinde harici '<link rel="stylesheet">' tespit edildi; stiller dosya içine (<style>...</style>) gömülü olmalıdır.`
-              : `'${crit.target}' dosyasında geçerli bir <style> bloğu veya stil tanımları bulunamadı.`;
-            criterionResults.push({
-              criterion: crit,
-              passed: false,
-              error: errorMsg,
-            });
-            missingEvidence.push(errorMsg);
+            const headLine = lineOfTag(content, '</head>');
+            const where = headLine ? `</head> etiketinden (satır ${headLine}) hemen önce` : '<head> içine';
+            const unlinked =
+              externalSheets.length === 0
+                ? await findUnlinkedAsset(target, STYLE_CANDIDATES, externalSheets, (css) => css.includes('{') && css.includes('}'), fileProvider)
+                : null;
+            const errorMsg =
+              externalSheets.length > 0 && inlineOnly
+                ? `'${target}' içinde harici '<link rel="stylesheet">' tespit edildi; stiller dosya içine (<style>...</style>) gömülü olmalıdır.`
+                : externalSheets.length > 0
+                ? `'${target}' harici stil dosyasına (${externalSheets.join(', ')}) bağlanıyor ama bu dosya yok veya içinde CSS kuralı yok.`
+                : unlinked && !inlineOnly
+                ? `'${target}' stil yüklemiyor: '${unlinked}' dosyası var ama sayfaya bağlanmamış. ${where} <link rel="stylesheet" href="${unlinked}"> satırını ekleyin.`
+                : `'${target}' dosyasında geçerli bir <style> bloğu veya stil tanımları bulunamadı. ${where} CSS kuralları içeren bir <style>...</style> bloğu ekleyin.`;
+            fail(crit, errorMsg);
           }
           break;
         }
 
         case 'contains_script': {
           if (!content) {
-            criterionResults.push({ criterion: crit, passed: false, error: 'Dosya içeriği boş.' });
-            missingEvidence.push(crit.description);
+            fail(crit, 'Dosya içeriği boş.', crit.description);
             break;
           }
-          // Check for external script src tags
-          const hasExternalScriptSrc = /<script\s+[^>]*src=/i.test(content);
+          const inlineOnly = !!crit.params?.inlineOnly;
           // Validate real <script> block with actual JS code (excluding external src)
           const scriptMatches = content.match(/<script(?![^>]*src=)[^>]*>([\s\S]*?)<\/script>/gi);
           let hasValidJs = false;
+          let markupInScript = false;
           if (scriptMatches) {
             for (const sm of scriptMatches) {
               const body = sm.replace(/<script[^>]*>|<\/script>/gi, '').trim();
-              if (body.length >= 10) {
+              if (looksLikeJavaScript(body)) {
                 hasValidJs = true;
+                break;
+              }
+              if (/^<\/?[a-zA-Z!]/.test(body)) markupInScript = true;
+            }
+          }
+
+          const externalScripts = extractLocalScripts(content);
+          let hasValidExternalJs = false;
+          if (!hasValidJs && !inlineOnly) {
+            for (const src of externalScripts) {
+              const js = await fileProvider(resolveRelative(target, src));
+              if (js && looksLikeJavaScript(js)) {
+                hasValidExternalJs = true;
                 break;
               }
             }
           }
 
-          if (hasValidJs) {
-            criterionResults.push({ criterion: crit, passed: true });
+          if (hasValidJs || hasValidExternalJs) {
+            pass(crit);
           } else {
-            const errorMsg = hasExternalScriptSrc
-              ? `'${crit.target}' içinde harici '<script src="..."> tespit edildi; JavaScript kodları dosya içine (<script>...</script>) gömülü olmalıdır.`
-              : `'${crit.target}' dosyasında geçerli bir <script> bloğu veya JavaScript kodu bulunamadı.`;
-            criterionResults.push({
-              criterion: crit,
-              passed: false,
-              error: errorMsg,
-            });
-            missingEvidence.push(errorMsg);
+            const bodyLine = lineOfTag(content, '</body>');
+            const where = bodyLine ? `</body> etiketinden (satır ${bodyLine}) hemen önce` : 'sayfanın sonuna';
+            const unlinked =
+              externalScripts.length === 0 && !markupInScript
+                ? await findUnlinkedAsset(target, SCRIPT_CANDIDATES, externalScripts, looksLikeJavaScript, fileProvider)
+                : null;
+            const errorMsg =
+              markupInScript
+                ? `'${target}' içindeki <script> bloğunda JavaScript yerine HTML işaretlemesi var; <script> içine çalışan JavaScript kodu yazın (ör. form doğrulaması için addEventListener).`
+                : externalScripts.length > 0 && inlineOnly
+                ? `'${target}' içinde harici '<script src="..."> tespit edildi; JavaScript kodları dosya içine (<script>...</script>) gömülü olmalıdır.`
+                : externalScripts.length > 0
+                ? `'${target}' harici script dosyasına (${externalScripts.join(', ')}) bağlanıyor ama bu dosya yok veya JavaScript içermiyor.`
+                : unlinked && !inlineOnly
+                ? `'${target}' JavaScript yüklemiyor: '${unlinked}' dosyası var ama sayfaya bağlanmamış. ${where} <script src="${unlinked}"></script> satırını ekleyin.`
+                : `'${target}' dosyasında geçerli bir <script> bloğu veya JavaScript kodu bulunamadı. ${where} çalışan JavaScript içeren bir <script>...</script> bloğu ekleyin.`;
+            fail(crit, errorMsg);
+          }
+          break;
+        }
+
+        case 'references_resolve': {
+          if (!content) {
+            pass(crit); // file_exists already reports the missing file
+            break;
+          }
+          const missing: string[] = [];
+          for (const ref of [...extractLocalStylesheets(content), ...extractLocalScripts(content)]) {
+            const resolved = resolveRelative(target, ref);
+            const refContent = await fileProvider(resolved);
+            if (refContent === null || !refContent.trim()) missing.push(ref);
+          }
+          if (missing.length > 0) {
+            fail(
+              crit,
+              `'${target}' mevcut olmayan veya boş dosyalara bağlanıyor: ${missing.join(', ')}. Bu dosyaları oluşturun ya da içeriklerini sayfaya gömün.`
+            );
+          } else {
+            pass(crit);
+          }
+          break;
+        }
+
+        case 'viewport_meta': {
+          if (!content) {
+            fail(crit, 'Dosya içeriği boş.', crit.description);
+            break;
+          }
+          if (/<meta\b[^>]*name\s*=\s*["']?viewport["']?[^>]*>/i.test(content)) {
+            pass(crit);
+          } else {
+            fail(
+              crit,
+              `'${target}' içinde <meta name="viewport" content="width=device-width, initial-scale=1.0"> yok; sayfa telefonlarda responsive görünmez. Bunu <head> içine ekleyin.`
+            );
           }
           break;
         }
 
         case 'json_valid': {
           if (!content) {
-            criterionResults.push({ criterion: crit, passed: false, error: 'Dosya içeriği boş.' });
-            missingEvidence.push(crit.description);
+            fail(crit, 'Dosya içeriği boş.', crit.description);
             break;
           }
           try {
             JSON.parse(content);
-            criterionResults.push({ criterion: crit, passed: true });
+            pass(crit);
           } catch (e: any) {
-            criterionResults.push({
-              criterion: crit,
-              passed: false,
-              error: `JSON sözdizim hatası: ${e.message}`,
-            });
-            missingEvidence.push(crit.description);
+            fail(crit, `JSON sözdizim hatası: ${e.message}`, crit.description);
           }
           break;
         }
 
         case 'syntax_valid': {
           if (!content) {
-            criterionResults.push({ criterion: crit, passed: false, error: 'Dosya içeriği boş.' });
-            missingEvidence.push(crit.description);
+            fail(crit, 'Dosya içeriği boş.', crit.description);
             break;
           }
           // Balanced bracket validation
@@ -203,14 +372,9 @@ export class TaskValidator {
             if (balance < 0) break;
           }
           if (balance === 0) {
-            criterionResults.push({ criterion: crit, passed: true });
+            pass(crit);
           } else {
-            criterionResults.push({
-              criterion: crit,
-              passed: false,
-              error: `'${crit.target}' dosyasında dengesiz parantez ({}) sözdizimi tespit edildi.`,
-            });
-            missingEvidence.push(crit.description);
+            fail(crit, `'${crit.target}' dosyasında dengesiz parantez ({}) sözdizimi tespit edildi.`, crit.description);
           }
           break;
         }

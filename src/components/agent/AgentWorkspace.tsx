@@ -42,13 +42,34 @@ import { SecurityProfile, DEFAULT_SETTINGS } from '@/types/settings';
 import { tokenizeCode, getTokenClassName } from '@/lib/utils/SyntaxHighlighter';
 import { cleanChatContent, cleanThoughtContent } from '@/lib/web/WebIntentDetector';
 
+/** Decodes a (possibly unterminated) JSON string body such as the streaming "thought" value. */
+function decodePartialJsonString(body: string): string {
+  return body
+    .replace(/\\u([0-9a-fA-F]{4})/g, (_m, hex) => String.fromCharCode(parseInt(hex, 16)))
+    .replace(/\\(["\\/bfnrt])/g, (_m, c) => ({ b: '\b', f: '\f', n: '\n', r: '', t: '\t' } as Record<string, string>)[c] ?? c)
+    .replace(/\\$/, '');
+}
+
 function parseAgentStream(rawText: string) {
   if (!rawText) return { thought: '', actionLabel: '', actionTarget: '', isGeneratingAction: false };
 
-  // 1. Extract thought
+  // Reasoning tokens of thinking models are streamed first as "<think>..."
+  if (rawText.startsWith('<think>')) {
+    return {
+      thought: `💭 ${rawText.slice('<think>'.length).trim().slice(-1500)}`,
+      actionLabel: '',
+      actionTarget: '',
+      isGeneratingAction: false,
+    };
+  }
+
+  // 1. Extract thought (structured JSON output first, legacy <thought> tags second)
   let thought = '';
+  const jsonThought = rawText.match(/^\s*\{\s*"thought"\s*:\s*"((?:[^"\\]|\\.)*)/);
   const thoughtMatch = rawText.match(/<thought>([\s\S]*?)(?:<\/thought>|$)/i);
-  if (thoughtMatch) {
+  if (jsonThought) {
+    thought = decodePartialJsonString(jsonThought[1]).trim();
+  } else if (thoughtMatch) {
     thought = thoughtMatch[1].trim();
   } else {
     const jsonIdx = rawText.search(/```(?:json)?|\{\s*"action"/i);
@@ -74,18 +95,23 @@ function parseAgentStream(rawText: string) {
   if (actionName) {
     switch (actionName) {
       case 'propose_edit':
+      case 'edit_file':
+      case 'replace_lines':
         actionLabel = 'Kod Düzenleme';
         break;
       case 'propose_create':
-        actionLabel = 'Yeni Dosya Oluşturma';
+      case 'write_file':
+        actionLabel = 'Dosya Yazma';
         break;
       case 'propose_delete':
+      case 'delete_file':
         actionLabel = 'Dosya Silme';
         break;
       case 'read_file':
         actionLabel = 'Dosya İnceleme';
         break;
       case 'read_directory':
+      case 'list_dir':
         actionLabel = 'Dizin Taraması';
         break;
       case 'search_code':
@@ -98,12 +124,18 @@ function parseAgentStream(rawText: string) {
         actionLabel = 'Web Sayfası İnceleme';
         break;
       case 'propose_command':
+      case 'run_command':
         actionLabel = 'Komut Çalıştırma';
+        break;
+      case 'git_status':
+      case 'git_diff':
+        actionLabel = 'Git İncelemesi';
         break;
       case 'finish':
         actionLabel = 'Görevi Tamamlama';
         break;
       case 'ask_question':
+      case 'ask_user':
         actionLabel = 'Kullanıcıya Soru';
         break;
       default:
@@ -778,13 +810,22 @@ export const AgentWorkspace: React.FC = () => {
                     }
 
                     if (step.type === 'final_answer') {
+                      const incomplete = step.status === 'failed';
                       return (
                         <div
                           key={step.id}
-                          className="p-3.5 rounded-lg bg-zinc-900/70 border border-zinc-700/60 text-xs text-zinc-100 space-y-2 shadow-sm"
+                          className={cn(
+                            'p-3.5 rounded-lg bg-zinc-900/70 border text-xs text-zinc-100 space-y-2 shadow-sm',
+                            incomplete ? 'border-amber-500/40' : 'border-zinc-700/60'
+                          )}
                         >
-                          <div className="flex items-center gap-2 text-xs font-semibold text-emerald-400">
-                            <CheckCircle2 size={15} />
+                          <div
+                            className={cn(
+                              'flex items-center gap-2 text-xs font-semibold',
+                              incomplete ? 'text-amber-400' : 'text-emerald-400'
+                            )}
+                          >
+                            {incomplete ? <AlertCircle size={15} /> : <CheckCircle2 size={15} />}
                             <span>{step.title || t.agent.taskCompleted}</span>
                           </div>
                           <div className="text-zinc-200 select-text leading-relaxed whitespace-pre-wrap font-sans text-xs">

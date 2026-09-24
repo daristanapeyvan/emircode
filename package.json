@@ -1,6 +1,6 @@
 {
   "name": "emir-code",
-  "version": "1.5.5",
+  "version": "1.6.0",
   "description": "Emir Code - AI Native Coding Agent Desktop Client",
   "main": "dist-electron/main.js",
   "author": {
@@ -25,7 +25,9 @@
     "build:all": "tsc && vite build && electron-builder -wl && node ./scripts/postbuild.js",
     "build:dir": "tsc && vite build && electron-builder --dir && node ./scripts/postbuild.js",
     "build:vite": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node ./scripts/verify_functionality.js && node ./scripts/run-ts-test.mjs test_agent_reliability.ts && node ./scripts/run-ts-test.mjs test_production_architecture.ts && node ./scripts/run-ts-test.mjs test_web_access.ts",
+    "test:agent": "node ./scripts/run-ts-test.mjs test_agent_reliability.ts"
   },
   "dependencies": {
     "clsx": "^2.1.1",
@@ -52,6 +54,7 @@
   "build": {
     "appId": "com.emircode.desktop",
     "productName": "Emir Code",
+    "afterPack": "./scripts/afterPack.js",
     "directories": {
       "output": "release"
     },
@@ -102,7 +105,6 @@
       "synopsis": "AI Native Coding Agent Desktop Client",
       "description": "Emir Code is an AI native coding agent desktop client featuring local LLM integration, sandboxed workspace tools, and visual diff reviews.",
       "desktop": {
-        "StartupWMClass": "emir-code",
         "Terminal": "false",
         "Type": "Application",
         "Categories": "Development;IDE;TextEditor;"

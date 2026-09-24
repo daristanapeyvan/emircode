@@ -4,6 +4,7 @@ import { useSettingsStore } from '@/stores/settingsStore';
 import { getTranslations } from '@/lib/localization/i18n';
 import { AppLogo } from '../common/AppLogo';
 import { Button } from '../common/Button';
+import { version as appVersion } from '../../../package.json';
 
 export const AboutSettings: React.FC = () => {
   const { settings, hardware } = useSettingsStore();
@@ -57,7 +58,7 @@ export const AboutSettings: React.FC = () => {
         <AppLogo size={32} />
         <div>
           <h3 className="text-sm font-semibold text-zinc-100">{t.settings.aboutTitle}</h3>
-          <p className="text-zinc-500 text-[11px] font-mono mt-0.5">{t.settings.version} 1.3.0 · {platformLabel}</p>
+          <p className="text-zinc-500 text-[11px] font-mono mt-0.5">{t.settings.version} {appVersion} · {platformLabel}</p>
         </div>
       </div>
 

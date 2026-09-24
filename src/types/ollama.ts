@@ -80,8 +80,22 @@ export interface GenerationOptions {
   top_k?: number;
   min_p?: number;
   repeat_penalty?: number;
+  repeat_last_n?: number;
+  presence_penalty?: number;
   seed?: number;
   num_predict?: number;
   num_ctx?: number;
   stop?: string[];
 }
+
+/**
+ * Ollama `format` parameter: 'json' for free-form JSON mode, or a JSON Schema object
+ * for grammar-constrained structured output (Ollama >= 0.5).
+ */
+export type OllamaFormat = 'json' | Record<string, any>;
+
+/**
+ * Ollama `think` parameter. Booleans toggle reasoning for thinking-capable models;
+ * gpt-oss style models accept an effort level instead.
+ */
+export type OllamaThinkValue = boolean | 'low' | 'medium' | 'high';

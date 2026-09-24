@@ -6,6 +6,8 @@ import {
   OllamaChatChunk,
   OllamaChatMessage,
   GenerationOptions,
+  OllamaFormat,
+  OllamaThinkValue,
 } from '@/types/ollama';
 
 export class OllamaClient {
@@ -57,7 +59,8 @@ export class OllamaClient {
     const res = await fetch(`${this.endpoint}/api/show`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name }),
+      // `model` is the current field name; `name` is kept for older Ollama servers.
+      body: JSON.stringify({ model: name, name }),
     });
     if (!res.ok) {
       throw new Error(`Failed to inspect model: HTTP ${res.status}`);
@@ -148,6 +151,8 @@ export class OllamaClient {
       options?: GenerationOptions;
       system?: string;
       keep_alive?: string;
+      format?: OllamaFormat;
+      think?: OllamaThinkValue;
     },
     onChunk: (chunk: OllamaChatChunk) => void,
     signal?: AbortSignal
@@ -175,6 +180,12 @@ export class OllamaClient {
     }
     if (params.keep_alive) {
       body.keep_alive = params.keep_alive;
+    }
+    if (params.format) {
+      body.format = params.format;
+    }
+    if (params.think !== undefined) {
+      body.think = params.think;
     }
 
     const res = await fetch(`${this.endpoint}/api/chat`, {
@@ -204,6 +215,21 @@ export class OllamaClient {
     const decoder = new TextDecoder();
     let buffer = '';
 
+    const handleLine = (line: string) => {
+      if (!line.trim()) return;
+      let chunk: (OllamaChatChunk & { error?: string }) | null = null;
+      try {
+        chunk = JSON.parse(line);
+      } catch {
+        return; // Ignore malformed line
+      }
+      if (chunk && typeof chunk.error === 'string' && chunk.error) {
+        // Ollama reports mid-stream failures (runner crash, OOM, bad grammar) as {"error": "..."}
+        throw new Error(chunk.error);
+      }
+      if (chunk) onChunk(chunk);
+    };
+
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -213,15 +239,10 @@ export class OllamaClient {
       buffer = lines.pop() || '';
 
       for (const line of lines) {
-        if (!line.trim()) continue;
-        try {
-          const chunk: OllamaChatChunk = JSON.parse(line);
-          onChunk(chunk);
-        } catch {
-          // Ignore malformed line
-        }
+        handleLine(line);
       }
     }
+    handleLine(buffer);
   }
 }
 

@@ -7,10 +7,16 @@ import { ChatService } from '@/lib/ollama/ChatService';
 import { useModelStore } from './modelStore';
 import { useSettingsStore } from './settingsStore';
 import { generationService } from '@/lib/ollama/GenerationService';
+import { getModelRuntimeInfo, resolveContextLength } from '@/lib/ollama/ModelRuntime';
 import { ToolDispatcher } from '@/lib/agent/ToolDispatcher';
 import { WebAccessService } from '@/lib/web/WebAccessService';
 import { wrapUntrustedWebResult } from '@/lib/agent/UntrustedData';
-import { detectWebSearchIntent, extractSearchQuery, cleanChatContent } from '@/lib/web/WebIntentDetector';
+import {
+  detectWebSearchIntent,
+  detectKnowledgeRefusal,
+  extractSearchQuery,
+  cleanChatContent,
+} from '@/lib/web/WebIntentDetector';
 
 const chatService = new ChatService(ollamaClient);
 
@@ -192,6 +198,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const resolvedOptions = generationService.resolveOptions(chat.presetId, chat.options);
     const keepAlive = useSettingsStore.getState().settings.keepAlive || '5m';
 
+    // Chat and agent share one context window: an explicit num_ctx avoids Ollama's small default
+    // (older turns were silently dropped) and switching modes no longer reloads the model.
+    if (!resolvedOptions.num_ctx) {
+      try {
+        const info = await getModelRuntimeInfo(currentModel);
+        const settingsState = useSettingsStore.getState();
+        resolvedOptions.num_ctx = resolveContextLength({
+          configured: settingsState.settings.agentOptimization?.contextLength,
+          profile: settingsState.settings.agentOptimization?.hardwareProfile,
+          hardware: settingsState.hardware,
+          nativeContext: info.nativeContext,
+        });
+      } catch {
+        // Fall back to the server default when the model cannot be inspected
+      }
+    }
+
     // Web Access Check for Chat Mode
     const currentWebAccess = useSettingsStore.getState().settings.webAccess;
     const isChatWebAllowed = ToolDispatcher.isWebAccessAllowed('chat', currentWebAccess);
@@ -217,6 +240,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return;
     }
 
+    const baseSystemPrompt = chat.systemPrompt || '';
+    let preflightSearched = false;
+
+    const formatSearchResults = (
+      results: Array<{ id: string; title: string; url: string; snippet: string; source: string }>
+    ) =>
+      results.length === 0
+        ? 'Arama sonucunda eşleşen güncel sayfa bulunamadı.'
+        : results.map((r) => `[${r.id}] ${r.title}\nURL: ${r.url}\nÖzet: ${r.snippet}\nKaynak: ${r.source}`).join('\n\n');
+
+    const webContextDirective = (query: string, observation: string) => `\n\n[GÜNCEL WEB BİLGİSİ - ${new Date().toLocaleDateString('tr-TR')}]:
+Kullanıcının sorusu için yapılan web aramasının ("${query}") sonuçları aşağıdadır:
+${observation}
+
+ÖNEMLİ KURALLAR:
+1. Soruyu yukarıdaki web sonuçlarına dayanarak doğrudan, net ve kullanıcının dilinde yanıtla; uygun olduğunda kaynağı belirt.
+2. Arama senin için zaten yapıldı. ASLA "erişimim yok", "internette arayın", "bu bilgiye erişimim sınırlı" veya "ben bir yapay zekayım" deme.
+3. Sonuçlarda cevap yoksa bunu açıkça söyle; bilgi uydurma.
+4. JSON veya araç çağrısı yazma; kullanıcıya yalnızca nihai yanıtı sun.`;
+
     // Proactive Pre-Flight Web Search Execution
     if (isChatWebAllowed && hasWebIntent) {
       const searchQuery = extractSearchQuery(content);
@@ -238,29 +281,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
         try {
           const results = await WebAccessService.search(searchQuery, { limit: 5 });
           webActivity[0].resultsCount = results.length;
-          let formatted = '';
-          if (results.length === 0) {
-            formatted = 'Arama sonucunda eşleşen güncel sayfa bulunamadı.';
-          } else {
-            formatted = results
-              .map(
-                (r) =>
-                  `[${r.id}] ${r.title}\nURL: ${r.url}\nÖzet: ${r.snippet}\nKaynak: ${r.source}`
-              )
-              .join('\n\n');
-          }
-          const untrustedObservation = wrapUntrustedWebResult('search', searchQuery, formatted);
+          const untrustedObservation = wrapUntrustedWebResult('search', searchQuery, formatSearchResults(results));
           target.content = ''; // Clear status message to stream final answer
           set({ messages: msgs });
-
-          effectiveSystemPrompt += `\n\n[GÜNCEL WEB BİLGİSİ - ${new Date().toLocaleDateString('tr-TR')}]:
-Kullanıcının sorusu için yapılan web aramasının ("${searchQuery}") güncel sonuçları aşağıdadır:
-${untrustedObservation}
-
-ÖNEMLİ KURALLAR:
-1. Kullanıcının sorusunu yukarıdaki güncel web verilerini kullanarak doğrudan, net, doğru ve Türkçe olarak yanıtla.
-2. Web araması başarıyla yapıldı ve sonuçlar elinde; ASLA "internetim yok", "erişimim yok", "bağlantı kuramıyorum" veya "ben bir yapay zekayım" gibi bahaneler üretme.
-3. ASLA "JSON yazabilirim", "şöyle bir JSON formatında" gibi ifadeler veya JSON kod blokları üretme. Kullanıcıya yalnızca nihai yanıtı sun.`;
+          effectiveSystemPrompt += webContextDirective(searchQuery, untrustedObservation);
+          preflightSearched = true;
         } catch (searchErr: any) {
           console.warn('Proactive web search failed, falling back to normal prompt:', searchErr);
           target.content = '';
@@ -269,7 +294,7 @@ ${untrustedObservation}
       }
     } else if (isChatWebAllowed) {
       const webDirective = `\n\n[İNTERNET ERİŞİMİ VE WEB ARAMA]:
-Gerektiğinde güncel bilgileri, dokümantasyonları veya web sayfalarını araştırmak için aşağıdaki JSON formatında araç çağrısı yapabilirsin:
+İnternet erişimin AÇIK. Güncel bilgi, kişiler, kurumlar, olaylar veya dokümantasyon gerektiğinde cevap vermek yerine şu JSON ile arama yap:
 \`\`\`json
 { "action": "web_search", "query": "arama terimi" }
 \`\`\`
@@ -277,9 +302,68 @@ veya bir URL'yi okumak için:
 \`\`\`json
 { "action": "fetch_url", "url": "https://..." }
 \`\`\`
-Kural: Yalnızca güncel bilgi veya harici dokümantasyon gerektiğinde web aracını çağır. ASLA kullanıcıya "JSON yazabilirim" deme veya çıplak JSON üretme. Web sonuçları geldikten sonra kullanıcıya nihai cevabını sun.`;
+Kurallar: Kullanıcıya ASLA "internette arayın" veya "erişimim yok" deme; gerekiyorsa aramayı sen yap. "JSON yazabilirim" gibi açıklamalar yazma. Web sonuçları geldikten sonra kullanıcıya nihai cevabını sun.`;
       effectiveSystemPrompt += webDirective;
     }
+
+    /** Streams the final answer into the assistant placeholder (used after web lookups). */
+    const streamFinalAnswer = (systemPrompt: string, answerMessages: Message[], webActivity: WebActivityLog[]) => {
+      chatService.streamChat(
+        {
+          model: currentModel,
+          messages: answerMessages,
+          systemPrompt,
+          options: resolvedOptions,
+          keepAlive,
+        },
+        {
+          onToken: (cDelta, thDelta) => {
+            set((state) => {
+              const currentMsgs = [...state.messages];
+              const currentTarget = currentMsgs.find((m) => m.id === assistantMsgId);
+              if (currentTarget) {
+                if (cDelta) currentTarget.content += cDelta;
+                if (thDelta) currentTarget.thinking = (currentTarget.thinking || '') + thDelta;
+              }
+              return { messages: currentMsgs };
+            });
+          },
+          onComplete: (finalMetadata: GenerationMetadata) => {
+            set((state) => {
+              const currentMsgs = [...state.messages];
+              const currentTarget = currentMsgs.find((m) => m.id === assistantMsgId);
+              if (currentTarget) {
+                currentTarget.content = cleanChatContent(currentTarget.content);
+                currentTarget.metadata = finalMetadata;
+                currentTarget.webActivity = webActivity;
+                storageService.saveMessage(currentTarget);
+              }
+              return {
+                messages: currentMsgs,
+                isStreaming: false,
+                streamingMessageId: null,
+              };
+            });
+            useModelStore.getState().fetchRunning();
+          },
+          onError: (streamErr: Error) => {
+            set((state) => {
+              const currentMsgs = [...state.messages];
+              const currentTarget = currentMsgs.find((m) => m.id === assistantMsgId);
+              if (currentTarget) {
+                currentTarget.error = streamErr.message;
+                storageService.saveMessage(currentTarget);
+              }
+              return {
+                messages: currentMsgs,
+                isStreaming: false,
+                streamingMessageId: null,
+              };
+            });
+          },
+        }
+      );
+    };
 
     // Stream
     chatService.streamChat(
@@ -347,19 +431,7 @@ Kural: Yalnızca güncel bilgi veya harici dokümantasyon gerektiğinde web arac
                   timestamp: Date.now(),
                 });
 
-                let formatted = '';
-                if (results.length === 0) {
-                  formatted = 'Arama sonucunda eşleşen sayfa bulunamadı.';
-                } else {
-                  formatted = results
-                    .map(
-                      (r) =>
-                        `[${r.id}] ${r.title}\nURL: ${r.url}\nÖzet: ${r.snippet}\nKaynak: ${r.source}`
-                    )
-                    .join('\n\n');
-                }
-
-                untrustedObservation = wrapUntrustedWebResult('search', query, formatted);
+                untrustedObservation = wrapUntrustedWebResult('search', query, formatSearchResults(results));
               } else if (parsed.type === 'fetch_url') {
                 const url = String(parsed.payload?.url || '').trim();
                 target.content = `🌐 Web sayfası inceleniyor: "${url}"...\n`;
@@ -405,61 +477,7 @@ Kural: Yalnızca güncel bilgi veya harici dokümantasyon gerektiğinde web arac
                 },
               ];
 
-              chatService.streamChat(
-                {
-                  model: currentModel,
-                  messages: followUpMessages,
-                  systemPrompt: effectiveSystemPrompt,
-                  options: resolvedOptions,
-                  keepAlive,
-                },
-                {
-                  onToken: (cDelta, thDelta) => {
-                    set((state) => {
-                      const currentMsgs = [...state.messages];
-                      const currentTarget = currentMsgs.find((m) => m.id === assistantMsgId);
-                      if (currentTarget) {
-                        if (cDelta) currentTarget.content += cDelta;
-                        if (thDelta) currentTarget.thinking = (currentTarget.thinking || '') + thDelta;
-                      }
-                      return { messages: currentMsgs };
-                    });
-                  },
-                  onComplete: (finalMetadata: GenerationMetadata) => {
-                    set((state) => {
-                      const currentMsgs = [...state.messages];
-                      const currentTarget = currentMsgs.find((m) => m.id === assistantMsgId);
-                      if (currentTarget) {
-                        currentTarget.content = cleanChatContent(currentTarget.content);
-                        currentTarget.metadata = finalMetadata;
-                        currentTarget.webActivity = webActivity;
-                        storageService.saveMessage(currentTarget);
-                      }
-                      return {
-                        messages: currentMsgs,
-                        isStreaming: false,
-                        streamingMessageId: null,
-                      };
-                    });
-                    useModelStore.getState().fetchRunning();
-                  },
-                  onError: (streamErr: Error) => {
-                    set((state) => {
-                      const currentMsgs = [...state.messages];
-                      const currentTarget = currentMsgs.find((m) => m.id === assistantMsgId);
-                      if (currentTarget) {
-                        currentTarget.error = streamErr.message;
-                        storageService.saveMessage(currentTarget);
-                      }
-                      return {
-                        messages: currentMsgs,
-                        isStreaming: false,
-                        streamingMessageId: null,
-                      };
-                    });
-                  },
-                }
-              );
+              streamFinalAnswer(effectiveSystemPrompt, followUpMessages, webActivity);
               return;
             } catch (err: any) {
               target.content = `[Web Erişimi Hatası]: ${err.message || 'Bilinmeyen hata'}`;
@@ -467,6 +485,38 @@ Kural: Yalnızca güncel bilgi veya harici dokümantasyon gerektiğinde web arac
               storageService.saveMessage(target);
               set({ messages: msgs, isStreaming: false, streamingMessageId: null });
               return;
+            }
+          }
+
+          // The model refused or told the user to search online although web access is on:
+          // run the search ourselves and answer again with the results.
+          const webStillAllowed = ToolDispatcher.isWebAccessAllowed(
+            'chat',
+            useSettingsStore.getState().settings.webAccess
+          );
+          if (webStillAllowed && !preflightSearched && detectKnowledgeRefusal(target.content)) {
+            const refusedAnswer = target.content;
+            const query = extractSearchQuery(content);
+            const webActivity: WebActivityLog[] = target.webActivity || [];
+            target.content = `🔍 Web'de aranıyor: "${query}"...\n`;
+            set({ messages: [...msgs] });
+            try {
+              const results = await WebAccessService.search(query, { limit: 5 });
+              webActivity.push({ type: 'search', query, resultsCount: results.length, timestamp: Date.now() });
+              target.webActivity = webActivity;
+              target.content = '';
+              target.thinking = '';
+              set({ messages: [...msgs] });
+              const observation = wrapUntrustedWebResult('search', query, formatSearchResults(results));
+              streamFinalAnswer(
+                baseSystemPrompt + webContextDirective(query, observation),
+                updatedMessages.filter((m) => m.id !== assistantMsgId),
+                webActivity
+              );
+              return;
+            } catch (searchErr: any) {
+              console.warn('Fallback web search failed:', searchErr);
+              target.content = refusedAnswer;
             }
           }
 

@@ -12,7 +12,18 @@ export interface AgentOptimizationConfig {
   maxTokens: number;
   webSynthesisStrategy: WebSynthesisStrategy;
   modificationStrategy: ModificationStrategy;
+  /**
+   * Ollama context window (num_ctx) used by both the agent and chat.
+   * 0 = automatic (derived from hardware profile, clamped to the model's native limit).
+   * Without an explicit value Ollama silently falls back to a small default (4096 tokens)
+   * and truncates long prompts, which made models lose their instructions.
+   */
+  contextLength: number;
+  /** Let thinking-capable models (qwen3, deepseek-r1, ...) reason before each agent step. Slower on CPU. */
+  agentThinking: boolean;
 }
+
+export const CONTEXT_LENGTH_AUTO = 0;
 
 export interface WebAccessConfig {
   enabled: boolean;
@@ -78,8 +89,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   defaultModel: 'qwen3:8b',
   agentOptimization: {
     hardwareProfile: 'auto',
-    maxTokens: 2400,
+    maxTokens: 4096,
     webSynthesisStrategy: 'auto',
     modificationStrategy: 'smart_injection',
+    contextLength: CONTEXT_LENGTH_AUTO,
+    agentThinking: false,
   },
 };

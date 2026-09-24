@@ -1195,7 +1195,8 @@ ipcMain.handle(
     }
 
     // 2. Allowed Executable Whitelist
-    const ALLOWED_BINARIES = new Set(['npm', 'cargo', 'pytest', 'python']);
+    // `node` runs project scripts like `python` does; both still need user approval for anything but tests.
+    const ALLOWED_BINARIES = new Set(['npm', 'node', 'cargo', 'pytest', 'python']);
     if (!ALLOWED_BINARIES.has(cleanBinary)) {
       return {
         success: false,
@@ -1262,6 +1263,9 @@ ipcMain.handle(
       TEMP: process.env.TEMP || process.env.TMPDIR || '/tmp',
       TMP: process.env.TMP || process.env.TMPDIR || '/tmp',
       NODE_ENV: 'test',
+      // Output is decoded as UTF-8; without this, Python on Windows prints in the ANSI code page
+      // and Turkish text reaches the agent as "Kullan�m".
+      PYTHONIOENCODING: 'utf-8',
       // POSIX / Linux essentials
       HOME: process.env.HOME || os.homedir() || '',
       USER: process.env.USER || '',
@@ -1273,14 +1277,38 @@ ipcMain.handle(
       XDG_CACHE_HOME: process.env.XDG_CACHE_HOME || '',
     };
 
+    // npm is a .cmd shim on Windows. Node refuses to spawn .cmd files without a shell
+    // (CVE-2024-27980), so the direct spawn always failed with "spawn npm ENOENT". Run it through
+    // cmd.exe as one command string, after rejecting every cmd metacharacter in the arguments.
+    const useWindowsShell = process.platform === 'win32' && cleanBinary === 'npm';
+    if (useWindowsShell) {
+      const cmdUnsafe = /["%^!()]/;
+      const badArg = args.find((a) => cmdUnsafe.test(a));
+      if (badArg !== undefined) {
+        return {
+          success: false,
+          exitCode: 1,
+          output: '',
+          error: `Güvenlik Koruması: Windows komut satırında izin verilmeyen karakter içeren argüman: "${badArg}"`,
+        };
+      }
+    }
+
     // 6. Spawn Process with Tree Kill & Timeout
     return new Promise((resolve) => {
-      const child = spawn(cleanBinary, args, {
-        cwd: canonicalWorkspaceRoot!,
-        env: STRICT_ENV,
-        windowsHide: true,
-        shell: false,
-      });
+      const child = useWindowsShell
+        ? spawn(['npm.cmd', ...args.map((a) => (/\s/.test(a) ? `"${a}"` : a))].join(' '), {
+            cwd: canonicalWorkspaceRoot!,
+            env: STRICT_ENV,
+            windowsHide: true,
+            shell: true,
+          })
+        : spawn(cleanBinary, args, {
+            cwd: canonicalWorkspaceRoot!,
+            env: STRICT_ENV,
+            windowsHide: true,
+            shell: false,
+          });
 
       let output = '';
       let isTimedOut = false;
@@ -1415,17 +1443,29 @@ ipcMain.handle('system:integrateLinuxDesktop', async () => {
   }
 
   try {
-    const execPath = process.execPath;
     const homeDir = os.homedir();
-    const appDir = path.dirname(execPath);
+    const binaryPath = process.execPath;
+    const appDir = path.dirname(binaryPath);
+    // Start through the AppImage file itself (its /tmp/.mount_* folder disappears on exit) or
+    // through the launcher script next to the binary (scripts/afterPack.js), which adds
+    // --no-sandbox on systems where Chromium's sandbox cannot start.
+    const launcher = binaryPath.endsWith('-bin') ? binaryPath.slice(0, -'-bin'.length) : binaryPath;
+    const execPath = process.env.APPIMAGE || (fs.existsSync(launcher) ? launcher : binaryPath);
 
-    // Icon resolution
-    let iconPath = path.join(appDir, 'icon.png');
-    if (!fs.existsSync(iconPath)) {
-      iconPath = path.join(appDir, 'resources', 'icon.png');
-    }
-    if (!fs.existsSync(iconPath)) {
-      iconPath = 'emir-code';
+    // Icon: a file next to the binary, else the one bundled with the UI. Icons inside app.asar
+    // or a temporary AppImage mount are copied out, since desktop files must point at a real file.
+    const iconCandidates = [
+      path.join(appDir, 'icon.png'),
+      path.join(appDir, 'resources', 'icon.png'),
+      path.join(__dirname, '../dist/icon.png'),
+    ];
+    let iconPath = iconCandidates.find((p) => fs.existsSync(p)) || 'emir-code';
+    if (iconPath !== 'emir-code' && (process.env.APPIMAGE || iconPath.includes('.asar'))) {
+      const iconDir = path.join(homeDir, '.local', 'share', 'icons');
+      await fs.promises.mkdir(iconDir, { recursive: true });
+      const persistentIcon = path.join(iconDir, 'emir-code.png');
+      await fs.promises.writeFile(persistentIcon, await fs.promises.readFile(iconPath));
+      iconPath = persistentIcon;
     }
 
     const desktopContent = `[Desktop Entry]
@@ -1437,7 +1477,7 @@ Icon=${iconPath}
 Terminal=false
 Type=Application
 Categories=Development;IDE;TextEditor;
-StartupWMClass=emir-code
+StartupWMClass=Emir Code
 MimeType=x-scheme-handler/emir-code;
 Keywords=AI;Agent;Code;Ollama;Editor;IDE;
 `;

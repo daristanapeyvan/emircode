@@ -55,12 +55,13 @@ export const DEFAULT_PRESETS: GenerationPreset[] = [
   {
     id: 'coding',
     name: 'Coding',
-    description: 'Low temperature with tight sampling for precise syntax and algorithms.',
+    description: 'Low temperature with focused sampling for precise syntax and algorithms.',
     options: {
-      temperature: 0.1,
-      top_p: 0.7,
-      top_k: 30,
-      repeat_penalty: 1.1,
+      // Near-greedy sampling (0.1) makes local models loop on repeated lines; 0.3 stays precise.
+      temperature: 0.3,
+      top_p: 0.9,
+      top_k: 40,
+      repeat_penalty: 1.05,
     },
     isBuiltIn: true,
   },

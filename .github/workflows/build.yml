@@ -33,6 +33,19 @@ jobs:
       - name: Run Functional Test Suite
         run: node ./scripts/verify_functionality.js
 
+      - name: Run Agent Reliability Tests
+        run: node ./scripts/run-ts-test.mjs test_agent_reliability.ts
+
+      - name: Run Architecture Tests
+        run: node ./scripts/run-ts-test.mjs test_production_architecture.ts
+
+      - name: Run Web Access Tests
+        run: node ./scripts/run-ts-test.mjs test_web_access.ts
+
+      - name: Check Shell Script Syntax
+        shell: bash
+        run: bash -n build/linux-installer.sh && bash -n scripts/linux-smoke-test.sh
+
       - name: Build Web Application
         run: npm run build:vite
 

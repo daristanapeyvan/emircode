@@ -72,8 +72,16 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
     set({ settings, isInitialized: true });
 
-    // Fetch hardware
-    get().refreshHardware();
+    // Fetch hardware, then re-derive the automatic profile so older saved values
+    // (e.g. the former 2400-token limit) follow the current recommendations.
+    get()
+      .refreshHardware()
+      .then(() => {
+        if ((get().settings.agentOptimization?.hardwareProfile || 'auto') === 'auto') {
+          get().setAgentOptimization({ hardwareProfile: 'auto' });
+        }
+      })
+      .catch(() => {});
   },
 
   updateSettings: (partial) => {
@@ -114,13 +122,15 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     const currentOpt = get().settings.agentOptimization || DEFAULT_SETTINGS.agentOptimization;
     let newOpt: AgentOptimizationConfig = { ...currentOpt, ...partialConfig };
 
-    // If a specific preset profile is selected, set recommended profile parameters
+    // If a specific preset profile is selected, set recommended profile parameters.
+    // maxTokens is only an upper bound per step; values below ~3000 truncated complete files
+    // (a styled page easily needs 2000-3000 tokens), which forced models into plain output.
     if (partialConfig.hardwareProfile) {
       if (partialConfig.hardwareProfile === 'low') {
         newOpt = {
           ...newOpt,
           hardwareProfile: 'low',
-          maxTokens: partialConfig.maxTokens ?? 1400,
+          maxTokens: partialConfig.maxTokens ?? 3072,
           webSynthesisStrategy: partialConfig.webSynthesisStrategy ?? 'single_file',
           modificationStrategy: partialConfig.modificationStrategy ?? 'full_overwrite',
         };
@@ -128,7 +138,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         newOpt = {
           ...newOpt,
           hardwareProfile: 'balanced',
-          maxTokens: partialConfig.maxTokens ?? 2400,
+          maxTokens: partialConfig.maxTokens ?? 4096,
           webSynthesisStrategy: partialConfig.webSynthesisStrategy ?? 'auto',
           modificationStrategy: partialConfig.modificationStrategy ?? 'smart_injection',
         };
@@ -136,7 +146,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         newOpt = {
           ...newOpt,
           hardwareProfile: 'high',
-          maxTokens: partialConfig.maxTokens ?? 3500,
+          maxTokens: partialConfig.maxTokens ?? 8192,
           webSynthesisStrategy: partialConfig.webSynthesisStrategy ?? 'modular',
           modificationStrategy: partialConfig.modificationStrategy ?? 'smart_injection',
         };
@@ -150,7 +160,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
           newOpt = {
             ...newOpt,
             hardwareProfile: 'auto',
-            maxTokens: 1400,
+            maxTokens: 3072,
             webSynthesisStrategy: 'single_file',
             modificationStrategy: 'full_overwrite',
           };
@@ -158,7 +168,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
           newOpt = {
             ...newOpt,
             hardwareProfile: 'auto',
-            maxTokens: 3500,
+            maxTokens: 6144,
             webSynthesisStrategy: 'auto',
             modificationStrategy: 'smart_injection',
           };
@@ -166,7 +176,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
           newOpt = {
             ...newOpt,
             hardwareProfile: 'auto',
-            maxTokens: 2400,
+            maxTokens: 4096,
             webSynthesisStrategy: 'auto',
             modificationStrategy: 'smart_injection',
           };

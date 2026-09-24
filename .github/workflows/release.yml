@@ -41,11 +41,17 @@ jobs:
       - name: Build Vite & Web Assets
         run: npm run build:vite
 
+      # scripts/afterPack.js embeds the Emir Code icon and version info into EmirCode.exe
+      # before the installer and the portable exe are created.
       - name: Build Windows Executables (Installer & Portable)
         run: npx electron-builder --win --publish never
 
-      - name: Post-build Metadata & Icon Embed
-        run: node ./scripts/postbuild.js
+      - name: Verify Executable Icon & Metadata
+        shell: pwsh
+        run: |
+          $info = (Get-Item "release/win-unpacked/EmirCode.exe").VersionInfo
+          Write-Host "ProductName=$($info.ProductName) FileVersion=$($info.FileVersion)"
+          if ($info.ProductName -ne 'Emir Code') { throw "EmirCode.exe still carries Electron's metadata/icon" }
 
       - name: Upload Windows Artifacts
         uses: actions/upload-artifact@v4
@@ -92,8 +98,10 @@ jobs:
 
       - name: Bundle Standalone Linux GUI Installer
         run: |
-          cp build/linux-installer.sh release/emir-code-setup-linux.sh
+          VERSION=$(node -p "require('./package.json').version")
+          sed "s/^APP_VERSION=.*/APP_VERSION=\"$VERSION\"/" build/linux-installer.sh > release/emir-code-setup-linux.sh
           chmod +x release/emir-code-setup-linux.sh
+          grep -n '^APP_VERSION=' release/emir-code-setup-linux.sh
 
       - name: Upload Linux Artifacts
         uses: actions/upload-artifact@v4
@@ -106,6 +114,32 @@ jobs:
             release/*.tar.gz
             release/*.sh
             release/*.blockmap
+
+  # Starts every Linux package (AppImage, deb, rpm, tar.gz, setup script) on a virtual display
+  # and checks that the main window loads. Reported separately; it does not block publishing.
+  linux-smoke-test:
+    name: Linux Smoke Test (AppImage, deb, rpm, tar.gz, setup script)
+    runs-on: ubuntu-latest
+    needs: build-linux
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Download Linux Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-release
+          path: release-dist
+
+      - name: Install Test Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb x11-utils rpm2cpio cpio
+          sudo apt-get install -y libfuse2t64 || sudo apt-get install -y libfuse2
+
+      - name: Launch Every Package
+        run: bash scripts/linux-smoke-test.sh release-dist
 
   publish-release:
     name: Publish All Release Packages

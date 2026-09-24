@@ -2,6 +2,11 @@
  * TaskContract.ts
  * Evidence-Based Task Contract & Compiler Guard for Emir Code.
  * Extracts source constraints and generates enforceable validation criteria.
+ *
+ * Contracts are only produced where they can be verified reliably: building or restyling a
+ * web page. Other tasks (bug fixes, refactors, Python/Node work in an existing project) get no
+ * file-name contract, because guessing an artifact such as "src/index.js" blocked `finish` for
+ * every task that did not happen to create that exact file.
  */
 
 export type CriterionType =
@@ -10,6 +15,8 @@ export type CriterionType =
   | 'html_structure'
   | 'contains_style'
   | 'contains_script'
+  | 'references_resolve'
+  | 'viewport_meta'
   | 'json_valid'
   | 'syntax_valid';
 
@@ -28,15 +35,38 @@ export interface TaskContract {
   criteria: ValidationCriterion[];
 }
 
+export interface CompileContext {
+  /** Relative paths of files already in the workspace. */
+  projectFiles?: string[];
+  /** Force styles/scripts to live inside the HTML file (single-file synthesis strategy). */
+  singleFile?: boolean;
+}
+
+const WEB_PATTERN = /web\s*sitesi|web\s*sayfa|website|web\s*page|landing|\bsite(?:si|sine|nin|de|ye)?\b|\bsayfa|\bhtml\b|frontend|arayüz|portfolyo|portfolio/i;
+const CREATE_PATTERN = /oluştur|yap(?:ar|abilir|)\b|yap\b|kur\b|hazırla|yarat|tasarla|geliştir|üret|yaz\b|create|build|make|generate|design|develop|write/i;
+const STYLE_PATTERN = /\bstil|\bcss\b|tasarım|style|görünüm|renk|tema\b|theme|responsive|duyarlı/i;
+const SCRIPT_PATTERN = /\bscript|javascript|\bjs\b|kod\s+etiket|etkileşim|interaktif|interactive|dinamik|dynamic/i;
+const RESPONSIVE_PATTERN = /responsive|duyarlı|mobil|mobile|telefon|phone|tablet/i;
+const NO_STYLE_PATTERN = /stil\s*(?:olmasın|istemiyorum|yok)|stilsiz|css\s*(?:olmasın|istemiyorum|yok)|without\s+(?:css|styles?)|no\s+(?:css|styles?)|unstyled/i;
+const SINGLE_FILE_PATTERN = /başka\s+dosya\s+oluşturma|tek\s+(?:bir\s+)?dosya|single[\s-]+file|sadece\s+(?:bir\s+)?html|yalnızca\s+(?:bir\s+)?html|only\s+(?:one\s+)?html|inline|içinde\s+(?:stil|css|script)|gömülü/i;
+
+function findHtmlTarget(projectFiles: string[]): string | null {
+  const html = projectFiles.filter((f) => /\.html?$/i.test(f));
+  const preferred = html.find((f) => /^(?:src\/)?index\.html?$/i.test(f.replace(/\\/g, '/')));
+  if (preferred) return preferred.replace(/\\/g, '/');
+  return html.length === 1 ? html[0].replace(/\\/g, '/') : null;
+}
+
 export class TaskCompiler {
   /**
-   * Compiles user prompt into one or more verifiable Task Contracts.
+   * Compiles user prompt into zero or more verifiable Task Contracts.
    * Employs Compiler Guard to guarantee user constraints map to concrete validation criteria.
    */
-  static compile(prompt: string): TaskContract[] {
+  static compile(prompt: string, context: CompileContext = {}): TaskContract[] {
     const trimmed = (prompt || '').trim();
     if (!trimmed) return [];
 
+    const projectFiles = context.projectFiles || [];
     const sourceConstraints: string[] = [];
 
     // 1. Detect and isolate source constraints
@@ -57,103 +87,106 @@ export class TaskCompiler {
       }
     }
 
-    // 2. Determine Primary Goal and Expected Artifacts
-    const lower = trimmed.toLowerCase();
-    const isWeb = /web\s*sitesi|web\s*sayfa|website|site|html|sayfa|frontend|arayüz/i.test(lower);
-    const isPython = /python|flask|fastapi|django|\.py\b/i.test(lower);
-    const isNode = /express|node|backend|\.js\b|\.ts\b/i.test(lower);
+    const existingHtml = findHtmlTarget(projectFiles);
+    const mentionsWeb = WEB_PATTERN.test(trimmed);
+    const wantsStyle = STYLE_PATTERN.test(trimmed);
+    const wantsScript = SCRIPT_PATTERN.test(trimmed);
 
-    const contracts: TaskContract[] = [];
-    const expectedArtifacts: string[] = [];
+    // A web contract is created for new web pages, or for restyling an existing page.
+    const isNewWebPage = mentionsWeb && (CREATE_PATTERN.test(trimmed) || !existingHtml);
+    const isRestyle = !!existingHtml && (wantsStyle || wantsScript) && (mentionsWeb || projectFiles.length <= 12);
+    if (!isNewWebPage && !isRestyle) return [];
+
+    const target = existingHtml || 'index.html';
+    const inlineOnly = !!context.singleFile || SINGLE_FILE_PATTERN.test(trimmed);
+    const expectedArtifacts = target === 'index.html' ? ['index.html', 'src/index.html'] : [target];
     const criteria: ValidationCriterion[] = [];
 
-    if (isWeb) {
-      const target = 'index.html';
-      expectedArtifacts.push('index.html', 'src/index.html');
+    // Baseline criterion: File must exist and have non-trivial size
+    criteria.push({
+      type: 'file_exists',
+      target,
+      description: `'${target}' dosyası diskte oluşturulmuş olmalıdır.`,
+    });
+    criteria.push({
+      type: 'min_size',
+      target,
+      description: `'${target}' dosyası en az 100 bayt içerik barındırmalıdır.`,
+      params: { minBytes: 100 },
+    });
+    criteria.push({
+      type: 'html_structure',
+      target,
+      description: `'${target}' geçerli bir HTML5 belge yapısına (DOCTYPE, html, body) ve gerçek satır sonlarına sahip olmalıdır.`,
+    });
 
-      // Baseline criterion: File must exist and have non-trivial size
+    // COMPILER GUARD: Verify constraints map to criteria.
+    // A styled result is the norm for any new page, so style is always required for new pages.
+    if ((wantsStyle || isNewWebPage) && !NO_STYLE_PATTERN.test(trimmed)) {
       criteria.push({
-        type: 'file_exists',
+        type: 'contains_style',
         target,
-        description: `'index.html' (veya 'src/index.html') dosyası diskte oluşturulmuş olmalıdır.`,
+        description: inlineOnly
+          ? `'${target}' içinde gömülü stil (<style>...</style>) tanımlanmış olmalıdır.`
+          : `'${target}' için gerçek CSS kuralları tanımlanmış olmalıdır (<style> bloğu veya mevcut bir .css dosyası).`,
+        params: { inlineOnly },
       });
+    }
+
+    if (wantsScript) {
       criteria.push({
-        type: 'min_size',
+        type: 'contains_script',
         target,
-        description: `'index.html' dosyası en az 100 bayt içerik barındırmalıdır.`,
-        params: { minBytes: 100 },
+        description: inlineOnly
+          ? `'${target}' içinde gömülü script (<script>...</script>) tanımlanmış olmalıdır.`
+          : `'${target}' için çalışan JavaScript kodu olmalıdır (<script> bloğu veya mevcut bir .js dosyası).`,
+        params: { inlineOnly },
       });
+    }
+
+    criteria.push({
+      type: 'references_resolve',
+      target,
+      description: `'${target}' içinde bağlantı verilen tüm yerel CSS/JS dosyaları diskte mevcut olmalıdır.`,
+    });
+
+    // Without the viewport meta tag no page is responsive on phones, whatever the CSS says.
+    if (isNewWebPage || RESPONSIVE_PATTERN.test(trimmed)) {
       criteria.push({
-        type: 'html_structure',
+        type: 'viewport_meta',
         target,
-        description: `'index.html' geçerli bir HTML5 belge yapısına (DOCTYPE, html, body) sahip olmalıdır.`,
+        description: `'${target}' <head> içinde <meta name="viewport" content="width=device-width, initial-scale=1.0"> içermelidir.`,
       });
+    }
 
-      // COMPILER GUARD: Verify constraints map to criteria
-      const requiresStyle = /stil|css|tasarım|style/i.test(lower);
-      if (requiresStyle) {
-        criteria.push({
-          type: 'contains_style',
-          target,
-          description: `'index.html' içinde gömülü stil (<style>...</style>) tanımlanmış olmalıdır.`,
-        });
-      }
-
-      const requiresScript = /script|kod\s+etiket|javascript|etkileşim|dinamik/i.test(lower);
-      if (requiresScript) {
-        criteria.push({
-          type: 'contains_script',
-          target,
-          description: `'index.html' içinde gömülü script (<script>...</script>) tanımlanmış olmalıdır.`,
-        });
-      }
-
-      contracts.push({
+    return [
+      {
         id: 'contract_web_1',
         goal: trimmed.split('.')[0].trim(),
         source_constraints: sourceConstraints,
         expected_artifacts: expectedArtifacts,
         criteria,
-      });
-    } else if (isPython) {
-      const target = 'main.py';
-      expectedArtifacts.push(target);
-      criteria.push({
-        type: 'file_exists',
-        target,
-        description: `'${target}' dosyası diskte oluşturulmuş olmalıdır.`,
-      });
-      criteria.push({
-        type: 'min_size',
-        target,
-        description: `'${target}' dosyası en az 50 bayt geçerli kod içermelidir.`,
-        params: { minBytes: 50 },
-      });
-      contracts.push({
-        id: 'contract_py_1',
-        goal: trimmed.split('.')[0].trim(),
-        source_constraints: sourceConstraints,
-        expected_artifacts: expectedArtifacts,
-        criteria,
-      });
-    } else {
-      // General Task fallback
-      const target = 'src/index.js';
-      expectedArtifacts.push(target);
-      criteria.push({
-        type: 'file_exists',
-        target,
-        description: `'${target}' veya talep edilen dosya oluşturulmalıdır.`,
-      });
-      contracts.push({
-        id: 'contract_gen_1',
-        goal: trimmed.split('.')[0].trim(),
-        source_constraints: sourceConstraints,
-        expected_artifacts: expectedArtifacts,
-        criteria,
-      });
-    }
+      },
+    ];
+  }
 
-    return contracts;
+  /**
+   * Merges a follow-up instruction (live steering, e.g. "stilleri de ekle") into the active
+   * contracts so the new requirement is actually verified instead of being ignored.
+   */
+  static mergeDirective(contracts: TaskContract[], directive: string, context: CompileContext = {}): TaskContract[] {
+    const extra = TaskCompiler.compile(directive, context);
+    if (extra.length === 0) return contracts;
+    if (contracts.length === 0) return extra;
+
+    const merged = contracts.map((c) => ({ ...c, criteria: [...c.criteria] }));
+    const base = merged[0];
+    for (const crit of extra[0].criteria) {
+      const exists = base.criteria.some((c) => c.type === crit.type);
+      if (!exists) {
+        base.criteria.push({ ...crit, target: base.criteria[0]?.target || crit.target });
+      }
+    }
+    return merged;
   }
 }

@@ -10,7 +10,9 @@ set -e
 
 APP_NAME="Emir Code"
 APP_EXEC_NAME="emir-code"
-APP_VERSION="1.3.0"
+# Replaced with the package.json version when the release is built (.github/workflows/release.yml).
+APP_VERSION="1.6.0"
+RELEASE_URL="https://github.com/daristanapeyvan/emircode/releases/download/v$APP_VERSION/emir-code-$APP_VERSION.tar.gz"
 APP_COMMENT="AI Native Coding Agent Desktop Client"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -56,6 +58,8 @@ if [ "$IS_TR" -eq 1 ]; then
     MSG_INSTALLING="Emir Code dosyaları kopyalanıyor ve sistem entegrasyonu yapılıyor..."
     MSG_SUCCESS="Emir Code başarıyla kuruldu!\n\nKurulum Yeri: %s\n\nEmir Code'u şimdi başlatmak ister misiniz?"
     MSG_CANCELLED="Kurulum kullanıcı tarafından iptal edildi."
+    MSG_DOWNLOADING="Uygulama dosyaları indiriliyor:"
+    MSG_NO_FILES="Emir Code dosyaları bulunamadı ve indirilemedi.\n\nemir-code-$APP_VERSION.tar.gz dosyasını GitHub sürüm sayfasından indirip bu betikle aynı klasöre koyun ve kurulumu yeniden çalıştırın."
 else
     MSG_TITLE="Emir Code Setup Wizard (v$APP_VERSION)"
     MSG_WELCOME="Welcome to the Emir Code v$APP_VERSION Setup Wizard!\n\nEmir Code - AI Native Autonomous Coding Agent will be installed and integrated with your Linux desktop.\n\nDo you wish to continue?"
@@ -70,6 +74,8 @@ else
     MSG_INSTALLING="Copying Emir Code binaries and integrating with desktop..."
     MSG_SUCCESS="Emir Code has been successfully installed!\n\nLocation: %s\n\nWould you like to launch Emir Code now?"
     MSG_CANCELLED="Installation was cancelled by the user."
+    MSG_DOWNLOADING="Downloading the application files:"
+    MSG_NO_FILES="The Emir Code files were not found and could not be downloaded.\n\nDownload emir-code-$APP_VERSION.tar.gz from the GitHub release page, put it next to this script and run the setup again."
 fi
 
 # ==============================================================================
@@ -186,11 +192,31 @@ if [ -d "$SOURCE_DIR" ] && [ -f "$SOURCE_DIR/emir-code" ]; then
 elif [ -f "$SCRIPT_DIR/emir-code" ]; then
     cp -r "$SCRIPT_DIR"/* "$INSTALL_DIR/"
 else
-    # Tarball / Archive extraction if present
+    # Tarball next to the script, otherwise download the release this script belongs to
+    # (the setup script is also offered on its own on the release page).
     TAR_BALL=$(find "$SCRIPT_DIR" -maxdepth 2 -name "emir-code-*.tar.gz" | head -n 1)
-    if [ -n "$TAR_BALL" ] && [ -f "$TAR_BALL" ]; then
+    if [ -z "$TAR_BALL" ]; then
+        TAR_BALL="$(mktemp -d)/emir-code-$APP_VERSION.tar.gz"
+        echo "$MSG_DOWNLOADING $RELEASE_URL"
+        if command -v curl >/dev/null 2>&1; then
+            curl -fL --progress-bar -o "$TAR_BALL" "$RELEASE_URL" || rm -f "$TAR_BALL"
+        elif command -v wget >/dev/null 2>&1; then
+            wget -q --show-progress -O "$TAR_BALL" "$RELEASE_URL" || rm -f "$TAR_BALL"
+        fi
+    fi
+    if [ -f "$TAR_BALL" ]; then
         tar -xzf "$TAR_BALL" -C "$INSTALL_DIR" --strip-components=1 || tar -xzf "$TAR_BALL" -C "$INSTALL_DIR"
     fi
+fi
+
+if [ ! -f "$INSTALL_DIR/$APP_EXEC_NAME" ]; then
+    if [ "$GUI_MODE" = "zenity" ]; then
+        zenity --error --title="$MSG_TITLE" --text="$MSG_NO_FILES" --width=450 2>/dev/null || true
+    elif [ "$GUI_MODE" = "kdialog" ]; then
+        kdialog --title "$MSG_TITLE" --error "$MSG_NO_FILES" 2>/dev/null || true
+    fi
+    echo -e "$MSG_NO_FILES" >&2
+    exit 1
 fi
 
 chmod +x "$INSTALL_DIR/$APP_EXEC_NAME" 2>/dev/null || true
@@ -224,7 +250,7 @@ Icon=$ICON_PATH
 Terminal=false
 Type=Application
 Categories=Development;IDE;TextEditor;
-StartupWMClass=emir-code
+StartupWMClass=Emir Code
 MimeType=x-scheme-handler/emir-code;
 Keywords=AI;Agent;Code;Ollama;Editor;IDE;
 "

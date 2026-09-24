@@ -6,8 +6,12 @@ import { useChatStore } from '@/stores/chatStore';
 import { storageService } from '@/lib/storage/StorageService';
 import { getTranslations } from '@/lib/localization/i18n';
 import { GenerationOptions } from '@/types/ollama';
-import { HardwareOptimizationProfile, DEFAULT_SETTINGS } from '@/types/settings';
+import { HardwareOptimizationProfile, DEFAULT_SETTINGS, WebSynthesisStrategy } from '@/types/settings';
+import { defaultContextForHardware } from '@/lib/ollama/ModelRuntime';
+import { Toggle } from '@/components/common/Toggle';
 import { cn } from '@/lib/utils/cn';
+
+const CONTEXT_LENGTH_OPTIONS = [4096, 8192, 12288, 16384, 24576, 32768, 65536];
 
 export const GenerationSettings: React.FC = () => {
   const { settings, updateSettings, setAgentOptimization, hardware, refreshHardware } = useSettingsStore();
@@ -166,14 +170,14 @@ export const GenerationSettings: React.FC = () => {
 
           <SettingsRow
             label={t.settings.contextWindowSize}
-            description="Ollama context size (num_ctx). Default is model native (e.g. 4096)."
+            description={t.settings.chatContextOverrideDesc}
           >
             <input
               type="number"
               step="1024"
               min="1024"
               max="131072"
-              placeholder="4096"
+              placeholder={t.settings.contextAuto}
               value={currentOptions.num_ctx ?? ''}
               onChange={(e) => handleOptionChange('num_ctx', e.target.value ? parseInt(e.target.value) : undefined)}
               className="w-28 h-7 px-2 rounded bg-zinc-900 border border-zinc-750 text-xs text-zinc-200 text-right font-mono"
@@ -280,22 +284,70 @@ export const GenerationSettings: React.FC = () => {
           </div>
         </SettingsRow>
 
+        {/* Context Length (num_ctx) shared by agent and chat */}
+        <SettingsRow
+          label={t.settings.contextWindowSize}
+          description={t.settings.contextLengthDesc}
+        >
+          <select
+            value={agentOpt.contextLength || 0}
+            onChange={(e) => setAgentOptimization({ contextLength: parseInt(e.target.value, 10) || 0 })}
+            className="h-8 px-2.5 rounded bg-zinc-900 border border-zinc-750 text-xs text-zinc-200 focus:outline-none focus:border-zinc-600 max-w-[220px]"
+          >
+            <option value={0}>
+              {t.settings.contextAuto} ({defaultContextForHardware(agentOpt.hardwareProfile, hardware).toLocaleString()})
+            </option>
+            {CONTEXT_LENGTH_OPTIONS.map((n) => (
+              <option key={n} value={n}>
+                {n.toLocaleString()} token
+              </option>
+            ))}
+          </select>
+        </SettingsRow>
+
         {/* Max Tokens Slider */}
         <SettingsRow
-          label={`${t.settings.maxTokens} (${agentOpt.maxTokens || 2400})`}
+          label={`${t.settings.maxTokens} (${agentOpt.maxTokens || 4096})`}
           description={t.settings.maxTokensDesc}
         >
           <div className="flex items-center gap-3 w-48">
             <input
               type="range"
-              min="512"
-              max="4096"
-              step="128"
-              value={agentOpt.maxTokens || 2400}
+              min="1024"
+              max="8192"
+              step="256"
+              value={agentOpt.maxTokens || 4096}
               onChange={(e) => setAgentOptimization({ maxTokens: parseInt(e.target.value) })}
               className="w-full h-1 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
             />
           </div>
+        </SettingsRow>
+
+        {/* Agent reasoning for thinking-capable models */}
+        <SettingsRow
+          label={t.settings.agentThinking}
+          description={t.settings.agentThinkingDesc}
+        >
+          <Toggle
+            checked={!!agentOpt.agentThinking}
+            onChange={(checked) => setAgentOptimization({ agentThinking: checked })}
+          />
+        </SettingsRow>
+
+        {/* Web Synthesis Strategy */}
+        <SettingsRow
+          label={t.settings.webSynthesisStrategy}
+          description={t.settings.webSynthesisStrategyDesc}
+        >
+          <select
+            value={agentOpt.webSynthesisStrategy || 'auto'}
+            onChange={(e) => setAgentOptimization({ webSynthesisStrategy: e.target.value as WebSynthesisStrategy })}
+            className="h-8 px-2.5 rounded bg-zinc-900 border border-zinc-750 text-xs text-zinc-200 focus:outline-none focus:border-zinc-600 max-w-[220px]"
+          >
+            <option value="auto">{t.settings.strategyAuto}</option>
+            <option value="single_file">{t.settings.strategySingleFile}</option>
+            <option value="modular">{t.settings.strategyModular}</option>
+          </select>
         </SettingsRow>
 
         {/* Modification Strategy */}

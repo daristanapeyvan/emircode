@@ -306,9 +306,26 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     const chatStore = useChatStore.getState();
     const activeChatId = chatStore.activeChatId;
     const activeChat = chatStore.chats.find((c) => c.id === activeChatId);
+    const isFollowUp = !!activeChat && activeChat.mode === 'agent' && get().steps.length > 0 && !!get().currentGoal;
+
+    // A follow-up in the same session ("devam", "stilleri de ekle") must know what happened before;
+    // previously every message started a blank run and the model had no idea what to continue.
+    let previousContext: string | undefined;
+    if (isFollowUp) {
+      const prevSteps = get().steps;
+      const finalStep = [...prevSteps].reverse().find((s) => s.type === 'final_answer');
+      const changedFiles = Array.from(new Set(get().appliedTransactions.map((tx) => tx.relativePath)));
+      // Only the facts: failure details of a previous run pulled models back into that detour.
+      previousContext = [
+        `Previous request: ${get().currentGoal}`,
+        `Outcome: ${finalStep ? finalStep.content.slice(0, 800) : 'not finished'}`,
+        `Files changed in this session: ${changedFiles.length > 0 ? changedFiles.join(', ') : 'none'}`,
+      ].join('\n');
+    }
+
     if (!activeChat || activeChat.mode !== 'agent') {
       chatStore.createNewChat(selectedModel, 'agent', trimmed.slice(0, 32));
-    } else {
+    } else if (!isFollowUp) {
       chatStore.updateChatTitle(activeChatId!, trimmed.slice(0, 32));
     }
 
@@ -435,7 +452,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         },
       },
       securityProfile,
-      timeoutMinutes
+      timeoutMinutes,
+      { previousContext }
     );
   },
 

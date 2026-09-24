@@ -20,16 +20,17 @@ When running autonomous coding agents powered by LLMs, developers face three pri
 The Chromium Renderer process (where UI and Ollama streaming take place) is treated as **untrusted**. The Electron Main process enforces operating-system-level confinement:
 
 ```ts
-// Enforced in electron/main.ts
-const resolvedPath = path.resolve(activeWorkspaceRoot, requestedPath);
-const realPath = fs.realpathSync(resolvedPath);
-
-if (!realPath.startsWith(activeWorkspaceRoot + path.sep) && realPath !== activeWorkspaceRoot) {
-  throw new SecurityError(`Access Denied: Path escapes active workspace jail: ${requestedPath}`);
-}
+// Enforced in electron/main.ts (simplified)
+const resolvedTarget = path.resolve(canonicalWorkspaceRoot, requestedPath);
+const canonicalTarget = fs.existsSync(resolvedTarget)
+  ? await fs.promises.realpath(resolvedTarget) // symlinks and junctions resolved
+  : resolvedTarget;                            // new file: its nearest existing parent is realpath-checked
+const isInside =
+  canonicalTarget === canonicalWorkspaceRoot || canonicalTarget.startsWith(canonicalWorkspaceRoot + path.sep);
+if (!isInside) return { safe: false, error: 'Güvenlik İhlali: ...' };
 ```
 
-- **Symlink & Junction Safe**: Symbolic links pointing outside the workspace boundary are fully resolved to their ultimate physical targets before any read or write access is granted.
+- **Symlink & Junction Safe**: Symbolic links pointing outside the workspace boundary are fully resolved to their ultimate physical targets before any read or write access is granted; for files that do not exist yet, the nearest existing parent folder is resolved and must be inside the workspace.
 - **Unbypassable**: The renderer process has `nodeIntegration: false` and `contextIsolation: true`. It cannot make direct `node:fs` calls.
 
 ---
@@ -44,21 +45,20 @@ No mutation (file create, edit, or delete) can occur with just a file path and c
    ```
 2. **State Binding**:
    The token is bound to:
-   - Specific target file path
-   - Specific mutation operation (`create`, `modify`, `delete`)
-   - Pre-mutation SHA-256 base hash of the file
-   - Short 60-second expiration window
+   - the canonical target path,
+   - the mutation operation (`create`, `edit`, `delete`),
+   - the pre-mutation SHA-256 base hash of the file,
+   - a 5-minute expiration window (long enough for a user to review a diff).
 3. **Atomic Consumption**:
    Upon submission, the Main process verifies the base hash matches current disk state, invalidates the token immediately (preventing replay attacks), and executes the mutation.
 
 ---
 
-### C. Atomic Swap via Temp-Files (`fs.renameSync`)
+### C. Atomic Swap via Temp-Files
 
 File corruption during power loss or system interruption is eliminated:
-1. New contents are written to a temporary sibling file: `${targetPath}.tmp.${token}`.
-2. Temporary file integrity is verified.
-3. An atomic directory rename operation (`fs.renameSync`) replaces the original file in a single OS kernel step.
+1. New contents are written to a hidden temporary sibling file: `.<name>.tmp.<uuid>`.
+2. A rename replaces the original file in a single filesystem operation.
 
 ---
 
@@ -77,16 +77,21 @@ Before any file is modified on disk:
 | **Realpath Jail Containment** | ✅ Enforced | ✅ Enforced | ✅ Enforced |
 | **Mutation Token Verification** | ✅ Enforced | ✅ Enforced | ✅ Enforced |
 | **Atomic Temp Swap** | ✅ Enforced | ✅ Enforced | ✅ Enforced |
-| **File Edit Prompt** | Manual | Auto (Non-conflicting) | Auto |
-| **File Deletion Prompt** | Manual | Manual | Manual |
-| **Terminal Command Execution** | Manual | Manual | Auto (Safe commands) |
-| **Disallowed Commands Blocked** | ✅ Enforced | ✅ Enforced | ✅ Enforced |
+| **File Create / Edit** | Manual approval | Auto (base-hash checked) | Auto (base-hash checked) |
+| **File Deletion** | Manual approval | Manual approval | Manual approval |
+| **Test Commands** (`npm test`, `npm run test`, `pytest`, `cargo test`) | Manual approval | Manual approval | Auto |
+| **Other Allowed Commands** (`node`, `python`, `npm run build/lint/…`) | Manual approval | Manual approval | Manual approval |
+| **Agent Questions** (`ask_user`) | Asked inline | Asked inline | Disabled (first option chosen) |
+| **Disallowed Commands Blocked** (`npx`, shells, other binaries) | ✅ Enforced | ✅ Enforced | ✅ Enforced |
+
+### Automatic content guards (all profiles)
+Before a file is written, the agent engine refuses content that would damage the project: empty files, placeholders instead of code ("rest of the code…"), status sentences written over a file's content, edits to existing tests the user did not ask for, invalid JSON over a valid config, rewrites that would drop most of a file or existing `package.json` keys, and re-applying an edit that was already applied. After every write, per-language checks (JSON, JS/TS, Python, HTML, CSS, YAML, …) report problems back to the model with line numbers. These guards protect the project from model mistakes; they are not a security boundary — the boundary is the main process.
 
 ---
 
 ## 4. Zero-Trust Web Access & Anti-SSRF Defense
 
-Web access in Emir Code is strictly zero-trust, optional, and hardened against modern injection and infrastructure reconnaissance attacks:
+Web access in Emir Code is zero-trust and hardened against injection and infrastructure reconnaissance attacks. It is enabled by default and can be switched off completely, or separately for chat and for the agent, in Settings → Web Access:
 
 ### A. Zero-Trust Untrusted Boundary Delimiters
 All search snippets and fetched external web contents are quarantined within:
@@ -103,4 +108,20 @@ System prompts explicitly instruct the model that content inside these delimiter
 - **Redirect Re-Validation**: Every redirect hop (HTTP 301, 302, 303, 307, 308) is checked manually up to 3 hops from scratch.
 - **Main Process Authority**: The renderer process has no direct network capability for web search/fetch; all requests execute exclusively in the privileged Electron Main process through hardened IPC channels (`web:search`, `web:fetchUrl`, `web:abortAll`).
 - **Instant Abort on Disable**: If the user turns Web Access OFF in settings, all in-flight requests are immediately aborted.
+
+---
+
+## 5. Command Execution
+
+`workspace:runApprovedCommand` in the main process is the only way to start a program:
+
+- **Allowlist**: `npm` (only `test` and `run test|build|lint|typecheck|check`, and only if the project has a `package.json`), `node`, `python`, `pytest`, `cargo`. `npx` is blocked even as an argument.
+- **Argument filter**: arguments containing `; & | $ < >`, backticks or line breaks are rejected.
+- **No shell**: programs are spawned directly with an argument array. The one exception is `npm` on Windows: it is a `.cmd` script, which Node.js refuses to spawn without a shell (CVE-2024-27980), so it runs through `cmd.exe` as one command string — after every `cmd.exe` metacharacter (`" % ^ ! ( )`) has additionally been rejected in the arguments.
+- **Minimal environment**: only `PATH`, temp/home folders, locale and a few system variables are passed; `PYTHONIOENCODING=utf-8` makes Python output readable for the agent.
+- **Timeout**: commands are killed (with their process tree on Windows) after the timeout.
+
+## 6. Linux Renderer Sandbox
+
+Chromium's renderer sandbox needs a root-owned SUID `chrome-sandbox` helper or unprivileged user namespaces. AppImage and tar.gz copies cannot have a SUID helper, and Ubuntu 23.10+ restricts user namespaces with AppArmor, so there the plain Electron binary exits at startup. The `emir-code` launcher (generated by `scripts/afterPack.js`) keeps the sandbox wherever it can work and adds `--no-sandbox` only where it cannot. This does not change the boundaries above: the renderer only loads Emir Code's own bundled interface (no remote pages are rendered in it), and file, command and network authority remains in the main process. `EMIR_CODE_FORCE_SANDBOX=1` disables the fallback.
 

@@ -1,123 +1,84 @@
 # 📖 Emir Code: Practical Workflow Examples
 
-This guide provides concrete, real-world examples demonstrating how Emir Code solves everyday software engineering tasks using local Ollama models with zero cloud dependencies and cryptographic sandbox isolation.
+Concrete walkthroughs of everyday tasks with local Ollama models. The requests are shown in Turkish (the app's primary language); English requests work the same way.
 
 ---
 
-## Example 1: Autonomous Bug Hunting & Fixing
+## Example 1: A New Web Page, Verified Before "Done"
 
-### Scenario
-A React component in your codebase crashes with a `Cannot read properties of undefined (reading 'map')` runtime exception when API data is delayed.
+**Request** (Emir Code tab, empty folder):
+```
+Bir kahve dükkanı için tek sayfalık modern bir web sitesi oluştur: menü (en az 6 ürün, fiyatlarıyla), hakkımızda ve iletişim bölümleri olsun. Responsive olsun ve iletişim formu JavaScript ile doğrulansın.
+```
 
-### Step-by-Step Execution
+**What happens**
+1. `TaskCompiler` turns the request into acceptance checks: the page exists, is a real HTML document, contains CSS rules, contains JavaScript that runs (because the form must be validated), links only files that exist, and declares the mobile viewport tag.
+2. The model answers with one JSON action per step, e.g. `{"thought": "...", "action": "write_file", "path": "index.html", "content": "<!DOCTYPE html>…"}`. Ollama's `format` schema guarantees a complete, valid action.
+3. After the write, the file checks run (unclosed tags, broken inline JavaScript, placeholder sections such as "içerik buraya gelecek"). The model sees the result, e.g. `Acceptance checks still failing: 'index.html' dosyasında geçerli bir <script> bloğu … </body> etiketinden (satır 58) hemen önce … ekleyin.`
+4. `finish` is refused until every check passes. The timeline ends with a green completion card listing the changed files — or an amber card that names what could not be verified.
 
-1. **User Goal Input in Emir Code:**
-   ```
-   Fix the runtime TypeError in src/components/UserProfile.tsx where user.roles causes a crash when undefined. Add defensive fallback and a loading skeleton.
-   ```
+## Example 2: Follow-Up Requests in the Same Session
 
-2. **Agent Engine Pre-Flight & Discovery:**
-   - Pre-flight check inspects the workspace tree and locates `src/components/UserProfile.tsx`.
-   - Tool `read_file` is invoked for `src/components/UserProfile.tsx`.
-   - Content is parsed and stored in the **Session Memory Ledger**.
+**Request** (after Example 1):
+```
+başlıkların rengini koyu mavi (#1e3a8a) yap ve sayfanın en altına telif yazısı olan bir footer ekle
+```
 
-3. **Autonomous Reasoning & Diff Preparation:**
-   - The model observes:
-     ```tsx
-     // Buggy Line:
-     {user.roles.map(r => <span key={r}>{r}</span>)}
-     ```
-   - Prepares an atomic Myers/LCS diff:
-     ```diff
-     - {user.roles.map(r => <span key={r}>{r}</span>)}
-     + {user.roles && user.roles.length > 0 ? (
-     +   user.roles.map((r) => <span key={r} className="role-badge">{r}</span>)
-     + ) : (
-     +   <span className="text-zinc-500">No roles assigned</span>
-     + )}
-     ```
+**What happens**
+- The task message contains the previous request, its outcome and the changed files, plus the current content of small projects (up to 6 files), so the model edits the real page instead of guessing.
+- A focused change is made with `edit_file` (find → replace) or `replace_lines` (line range → new text). If the model tries to replace the whole page with a fragment, the write is refused with guidance to use `edit_file`.
+- Live steering works too: typing "şimdi CSS ile stil ekle" while a task is running adds the style requirement to the running checks.
 
-4. **Human-in-the-Loop Diff Verification:**
-   - Under **Strict** security profile, Emir Code highlights exact green additions (`+`) and red deletions (`-`) in the rich Diff Viewer.
-   - User reviews the diff and clicks **"Değişiklikleri Onayla" (Approve Changes)**.
+## Example 3: Fix a Bug and Prove It with Tests
 
-5. **Atomic Execution:**
-   - Main process issues a cryptographic single-use 256-bit token.
-   - Verifies the SHA-256 base hash of `src/components/UserProfile.tsx`.
-   - Writes to a `.tmp` file and performs an atomic directory swap via `fs.renameSync`.
-   - Records a rollback snapshot.
+**Request** (project with `package.json` and tests):
+```
+indirim uygulanınca sepet toplamı yanlış hesaplanıyor, düzelt ve npm test ile doğrula
+```
 
----
+**What happens**
+1. The agent reads the relevant files, fixes the calculation and proposes `npm test`.
+2. Under **Strict** and **Balanced** you approve the command; under **Autonomous** test commands run automatically.
+3. If a test fails, the output is returned to the model. When the output points into the project (`src/cart.js:14`, a Python traceback, …), the model also gets the numbered lines around that location.
+4. The same failing command is not re-run until a file has changed.
+5. Existing test files are protected: the model must fix the code, not rewrite the failing assertion (unless you ask it to change the tests).
 
-## Example 2: Interactive Clarification Workflow (Non-Modal)
+## Example 4: A Command-Line Tool
 
-### Scenario
-You ask the agent to create a database schema, but you haven't specified whether to use SQLite or PostgreSQL.
+**Request**:
+```
+Python ile komut satırından çalışan bir yapılacaklar listesi yaz: ekle, listele, tamamla ve sil komutları olsun; veriler todos.json dosyasında saklansın.
+```
 
-### Execution Flow
+**What happens**
+- Every Python file is checked after each write: unterminated strings, brackets, tab/space mix and block indentation (`expected an indented block after line 12`, `unexpected indent at line 8 — the cause is probably line 7 …`). f-strings of every Python version are understood.
+- If the model runs `python todo.py` without arguments and the program prints its usage text, the result says that this is expected behaviour, not a bug, and that it should be tested with real arguments (e.g. `python todo.py ekle "süt al"`).
 
-1. **User Goal:**
-   ```
-   Add a migration and storage adapter for user session persistence.
-   ```
+## Example 5: Clarification Without Pop-ups
 
-2. **Agent Decision Point:**
-   - Rather than guessing or halting with an error, the agent invokes `ask_clarification`:
-     ```json
-     {
-       "question": "Which storage engine would you like to use for session persistence?",
-       "options": ["SQLite (Local file-based)", "PostgreSQL (Network client)", "In-Memory Map"]
-     }
-     ```
+**Request**:
+```
+Kullanıcı oturumlarını saklamak için bir depolama katmanı ekle
+```
 
-3. **Natural Inline Stream Rendering:**
-   - No intrusive popup covers your screen.
-   - A quiet, minimalist clarification card renders right inside the timeline stream with interactive option chips:
-     `[ SQLite (Local file-based) ]` `[ PostgreSQL (Network client) ]` `[ In-Memory Map ]`
-   - You click `[ SQLite (Local file-based) ]` (or type custom specifications).
+**What happens**
+- In **Strict** and **Balanced**, the model may call `ask_user`:
+  ```json
+  { "thought": "...", "action": "ask_user", "question": "Oturumlar nerede saklansın?", "options": ["SQLite", "PostgreSQL", "Bellekte (Map)"] }
+  ```
+  A small card with option chips appears in the timeline; click one or type your own answer. The answer is remembered for the rest of the session, and a repeated question is answered from memory.
+- In **Autonomous**, `ask_user` is not offered to the model at all; the agent decides itself.
 
-4. **Continuous Progress:**
-   - The answer is recorded in `ledger.userDecisions`.
-   - The agent creates the migration file and adapter tailored specifically to your choice.
+## Example 6: Multi-Step Refactoring with Rollback
 
----
+1. Every applied change is recorded with a snapshot of the previous content.
+2. The ↺ button in the agent header shows the number of applied changes; clicking it restores every file changed in the session to its state before the agent touched it (changes you made to those files outside Emir Code in the meantime are overwritten too).
 
-## Example 3: Multi-Step Refactoring with Rollback Safeguard
+## Example 7: Small Models and Missing Tools
 
-### Scenario
-You ask the agent to rename a utility function used across 12 files. During step 8, you decide you want to revert everything back to the original state.
+**Setup**: `gemma2:2b` on a laptop without Git installed.
 
-### Execution Flow
-
-1. **Transaction Ledger:**
-   - Every approved file modification is assigned a unique `txHash`:
-     - `Tx #1: src/utils/formatters.ts (Modified)`
-     - `Tx #2: src/components/Header.tsx (Modified)`
-     - `Tx #3: src/components/Footer.tsx (Modified)`
-   - The sub-header toolbar quietly shows: `[RotateCcw 3]`.
-
-2. **One-Click Rollback:**
-   - User clicks `[RotateCcw 3]`.
-   - Emir Code reads the clean pre-mutation snapshots from the Main process vault and restores all 3 files atomically.
-   - Discards invalid diffs without git dirtying.
-
----
-
-## Example 4: Anti-Loop Guard in Action with Small Local Models
-
-### Scenario
-Running a smaller model (such as `qwen2.5-coder:1.5b` or `3b`) on limited hardware. The model attempts to execute `git diff` when Git is not installed on the host machine.
-
-### Execution Flow
-
-1. **Pre-flight Interception:**
-   - Emir Code detects during startup that `git.exe` is absent.
-   - `git` is marked in `ledger.unavailableBinaries`.
-   - `read_git_diff` and `read_git_status` tools are dynamically omitted from the system prompt schema.
-
-2. **Fallback Intercept:**
-   - Even if the model tries calling `execute_command("git status")`, the Anti-Loop Guard intercepts the command before it reaches the OS:
-     ```
-     [Hata]: 'git' komutu sisteminizde bulunamadı. Lütfen doğrudan dosya okuma araçlarını kullanın.
-     ```
-   - The engine guides the model directly to `read_file` or `list_dir`, breaking the cycle in step 1.
+**What happens**
+- `git status` fails during the pre-flight probe, so `git_status` / `git_diff` are left out of the prompt and the JSON schema — the model cannot call them.
+- If the model asks for a command that is not installed, the result is `[COMMAND UNAVAILABLE] … Do not call it again`, and the command is added to the unavailable list shown in every state line.
+- Repeated identical actions are answered with `[REPEATED]` and an explicit way out ("If the task is complete, reply with finish now"); three repeats in a row, or ten steps without progress, stop the run with a clear message instead of wasting time.

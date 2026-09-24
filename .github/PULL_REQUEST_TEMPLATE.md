@@ -11,8 +11,9 @@ Provide a concise explanation of what this pull request changes and why.
 ## Architectural & Security Verification
 - [ ] All filesystem mutations strictly respect the Electron Main process **Realpath Jail**.
 - [ ] Cryptographic mutation tokens and SHA-256 base hashes remain tamper-proof.
-- [ ] No regression in Anti-Loop Guard or sliding-window context compression.
+- [ ] No regression in the agent loop guards, file checks or context handling.
 - [ ] Clean typecheck: `npx tsc --noEmit` passes with 0 errors.
+- [ ] Regression suites: `npm test` passes (agent fixes come with a check in `test_agent_reliability.ts`).
 - [ ] Clean build: `npm run build:vite` completes successfully.
 
 ## Screenshots (if applicable)

@@ -4,101 +4,125 @@
 
 <img src="build/icon.png" width="128" height="128" alt="Emir Code Logo" />
 
-### **Autonomous, Private, and Secure Local AI Software Engineer**
+### **A private AI coding assistant and agent that runs on your own computer**
 
 [![Platform](https://img.shields.io/badge/Platform-Windows%20x64%20%7C%20Linux%20x64-blue.svg)](https://github.com/daristanapeyvan/emircode/releases)
-[![Engine](https://img.shields.io/badge/Local%20LLM-Ollama-purple.svg)](https://ollama.ai)
+[![Engine](https://img.shields.io/badge/Local%20LLM-Ollama-purple.svg)](https://ollama.com)
 [![Security](https://img.shields.io/badge/Sandbox-Realpath%20Jail-emerald.svg)](./SECURITY.md)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
-[![Zero Telemetry](https://img.shields.io/badge/Telemetry-0%25%20Offline-green.svg)](#privacy-guarantee)
+[![Zero Telemetry](https://img.shields.io/badge/Telemetry-None-green.svg)](#-privacy)
 
-*Develop, debug, and refactor code locally with zero cloud dependencies and ironclad cryptographic sandbox protection.*
+*Chat with local models, let an agent build and fix code in your project folder, and review every change — your code never leaves your machine.*
+
+**🇹🇷 Türkçe kullanım kılavuzu: [docs/KULLANIM.md](./docs/KULLANIM.md)**
 
 </div>
 
 ---
 
-## 🌟 Overview
+## ✨ What can you do with Emir Code?
 
-**Emir Code** is an AI-native desktop coding agent that pairs directly with your locally hosted Ollama models (such as `qwen2.5-coder`, `deepseek-coder-v2`, `llama3.1`). 
+Emir Code has two modes: **Chat** for questions and **Emir Code** (the agent) for work inside a project folder. You can write in Turkish or English — answers follow your language.
 
-Unlike cloud-dependent assistants that send your private proprietary source code over the internet or insecure autonomous agents with unchecked terminal execution, **Emir Code** enforces strict human-in-the-loop governance and operating-system-level sandbox containment.
+### 💬 Chat with a local model
+- Ask coding questions and get explanations and code with syntax highlighting and one-click copy.
+- Attach a text/code file or an image and ask about it (images need a vision-capable model).
+- Switch on **Web** and ask about people, news, prices or the weather — Emir Code searches the web and answers with numbered sources:
+  > `şebnem ferah kimdir?` · `bugün İstanbul'da hava nasıl?` · `What changed in React 19?`
+- Choose a generation preset in Settings → Generation (Balanced, Precise, Creative, Coding) and a system prompt from the chat's system prompt button (General Assistant, Senior Developer, Ultra Concise), or write your own.
+
+### 🤖 Let the agent do the work
+Pick a project folder in the **Emir Code** tab, describe what you want, and follow the agent as it reads files, writes code, runs tests and reports back.
+
+| You want to… | Example request |
+| :--- | :--- |
+| Build a web page | `Bir kahve dükkanı için tek sayfalık modern bir web sitesi oluştur: menü (en az 6 ürün, fiyatlarıyla), hakkımızda ve iletişim bölümleri olsun. Responsive olsun ve iletişim formu JavaScript ile doğrulansın.` |
+| Change it afterwards | `başlıkların rengini koyu mavi yap ve sayfanın en altına telif yazısı olan bir footer ekle` |
+| Write a script or CLI tool | `Python ile komut satırından çalışan bir yapılacaklar listesi yaz: ekle, listele, tamamla ve sil komutları olsun; veriler todos.json dosyasında saklansın.` |
+| Fix a bug and prove it | `indirim uygulanınca sepet toplamı yanlış hesaplanıyor, düzelt ve npm test ile doğrula` |
+| Edit configuration safely | `package.json dosyasına 'start' script'i olarak 'node src/index.js' ekle` |
+| Repair a broken page | `Sitede script ve CSS etiketleri eksik kalmış, düzelt` |
+| Understand a codebase | `src klasöründeki ödeme akışını adım adım açıkla` |
+
+What happens behind the scenes:
+1. The agent looks at your folder and plans; a request with several parts becomes a checklist.
+2. Every file it writes is checked automatically (HTML, CSS, JS/TS, Python, JSON, YAML, Java, C#, Go, Rust…). Problems are sent back to the model with the exact line numbers until they are fixed.
+3. Web pages must pass real acceptance checks before the task can finish: actual CSS rules, working JavaScript, a mobile viewport tag and linked files that exist. Existing tests are protected — a failing test is fixed in the code, never by editing the test.
+4. You see every change as a line-by-line diff; depending on the security profile you approve it or it is applied for you.
+5. The ↺ button undoes everything the agent changed in the session.
+6. The next request in the same session knows what was asked and changed before, so "now add a footer" just works.
+
+### 🧩 Manage your models
+Download models from the built-in catalog or by name, see which models are loaded in memory, unload or delete them — no terminal needed (**Ctrl+Shift+M**).
+
+### 🛡️ Stay in control
+- **Security profiles** — *Strict* (default): you approve every change and command. *Balanced*: file changes are applied automatically; commands and deletions need your approval. *Autonomous*: file changes and test commands (`npm test`, `pytest`, `cargo test`) run automatically and the agent does not stop to ask questions; deleting files always needs your approval.
+- The agent can only touch files inside the folder you picked. Writes go through one-time tokens checked by Electron's main process.
+- Only `npm test`/`npm run <test|build|lint|typecheck|check>`, `node`, `python`, `pytest` and `cargo` can be run — never `npx` or arbitrary shell commands.
+
+**Keyboard shortcuts:** Ctrl+N new chat (new agent task in the Emir Code tab) · Ctrl+K command palette · Ctrl+Shift+M models · Ctrl+, settings.
 
 ---
 
-## ✨ Key Features
+## 🧪 Which model should I use?
 
-### 🔒 1. Cryptographic Realpath Jail & Mutation Tokens
-- **Zero Direct Write Authority**: The agent engine has zero capability to write or delete files directly on disk.
-- **Main Process Realpath Enforcement**: Resolves all symbolic links, junctions, and relative paths in the Electron Main process to guarantee mutations stay strictly jailed inside the project folder.
-- **One-Time 256-Bit Tokens**: Every file edit, creation, or deletion requires a cryptographically random, single-use token tied to the verified file SHA-256 base hash.
-- **Atomic File Swaps**: File writes use temporary files and atomic directory renames (`fs.renameSync`) to eliminate corruption and race conditions.
+Measured with the built-in agent benchmark (`scripts/agent-e2e.ts`) on a CPU-only laptop (AMD Ryzen 5 7530U, 16 GB RAM, no GPU):
 
-### 🧠 2. Session Memory Ledger & Context Sliding Window
-- **Eliminates Local Model Amnesia**: Local models often have constrained context windows (2K to 8K tokens). Large file observations consume tokens quickly, leading to forgotten decisions.
-- **Dynamic Ledger**: Emir Code automatically maintains an updated session memory ledger recording known files, applied changes, and user decisions.
-- **No Repeated Questions**: The agent remembers your architectural decisions across the entire session and never asks the same question twice.
-- **Context Compression**: Older heavy file dumps are compressed into concise ledger pointers, preserving context capacity for deep reasoning.
+| Model | Download | Agent results | Recommendation |
+| :--- | :---: | :--- | :--- |
+| `qwen2.5-coder:7b` | 4.7 GB | Web page ✅ 3.5–10 min · follow-up edit ✅ 9 min · bug fix + `npm test` ✅ 3.3 min · `package.json` edit ✅ 4.7 min · Python CLI tested with real arguments ✅ 9.6 min | **Best balance** — recommended default |
+| `qwen3:8b` | 5.2 GB | Web page ✅ 14.5 min · bug fix ✅ 5.5 min · Python CLI ✅ 28 min | **Most thorough**, 2–3× slower on CPU; reasoning mode in Settings → Generation |
+| `gemma2:2b` | 1.6 GB | Page repair ✅ 2.3 min · new web page ✅ 3.7 min in the latest run, but inconsistent across runs | **Chat and small edits**; too small for reliable multi-step agent work |
 
-### ⏱️ 3. Active-Execution Circuit Breaker
-- **10-Minute Timeout Protection**: Protects against runaway inference loops without penalizing the user.
-- **Smart Pause**: Whenever the agent asks you a question or awaits your changeset review, the circuit breaker timer automatically pauses. You can take as much time as you need to inspect code without fear of session cancellation.
+With a GPU every step is many times faster. **Settings → Generation** controls the context window and the output limit; *Auto* picks values for your hardware.
 
-### 💬 4. Natural Inline Clarification Stream
-- **No Intrusive Pop-up Modals**: Say goodbye to annoying fullscreen modals that hijack your workspace.
-- **Interactive Option Chips**: Questions and multiple-choice architectural chips render smoothly inside the natural timeline stream.
-- **Custom Input**: Type custom feedback directly in line or click an option pill to proceed immediately.
+---
 
-### 🛡️ 5. Configurable Security Profiles
-Customize the autonomous threshold to match your personal workflow while keeping the underlying Realpath jail active:
-- **Strict (Default)**: Every file modification, new file creation, deletion, and command requires explicit manual confirmation.
-- **Balanced**: Auto-approves safe non-conflicting file edits inside the project jail; requires confirmation for deletions and terminal commands.
-- **Autonomous**: Auto-applies edits and executes safe test commands (`npm test`, `pytest`, `cargo test`, `git status`) autonomously; prompts for high-risk deletions and questions.
+## 🚀 Getting Started
 
-### 📊 6. Syntax Highlighting & Line-by-Line Diff Reviewer
-- **Zero-Dependency Token Highlighter**: Fast lexical tokenization for JavaScript, TypeScript, Python, Rust, HTML, CSS, JSON, and Shell.
-- **Myers/LCS Diff Engine**: True line-by-line unified diff viewer showing exact additions (`+`), deletions (`-`), line numbers, and unchanged contextual folding.
+### Prerequisites
+1. **Operating system**: Windows 10/11 (64-bit) or Linux (64-bit: Ubuntu 20.04+, Debian 11+, Fedora 38+, Linux Mint, Pop!_OS, openSUSE, Arch).
+2. **[Ollama](https://ollama.com)** installed with at least one model:
+   ```bash
+   ollama pull qwen2.5-coder:7b
+   ```
+   Emir Code starts the local Ollama service automatically when it is installed but not running.
 
-### 🔍 7. Optional Live Reasoning & Trace Dump
-- **Deep Observability**: Toggle the "Reasoning & Dump" panel anytime to follow the model's chain-of-thought, tool invocation parameters, and live system logs in real-time.
+### Installation
+Pre-built packages for every release are on the [GitHub Releases](https://github.com/daristanapeyvan/emircode/releases) page.
 
-### 📋 8. Multi-Instruction Task Decomposition & Anti-Premature Termination Guard
-- **No Early Dropouts**: Prevents local models from getting distracted by a single instruction and quitting early.
-- **Automated Decomposition**: Automatically identifies compound prompts, numbered steps, bullet points, and sequential phrases (`daha sonra`, `ardından`, `then`, `after that`).
-- **Live Memory Checklist**: Tracks subtasks in real-time (`[TAMAMLANDI]`, `[ŞU ANKİ ODAK]`, `[BEKLEMEDE]`) in the system context.
-- **Interception Safeguard**: Automatically intercepts early `finish` action calls or conversational plain-text exits, steering the model systematically until every subtask is satisfied.
+#### 🪟 Windows
 
-### 💾 9. Workspace & Session Persistence (Oturum ve Klasör Kalıcılığı)
-- **Zero State Loss**: Coding agent sessions persist their complete multi-step execution timeline, logs, applied transaction snapshots, and target folder directory across app restarts.
-- **Smart Directory Memory**: Remembers the last opened workspace directory and restores historical sessions along with their respective project trees on demand.
-- **Startup Clean State**: Launching the app presents a clean, unselected slate without false visual session locks, while maintaining full one-click historical accessibility.
+| Package | File | Description |
+| :--- | :--- | :--- |
+| **Setup (recommended)** | `Emir.Code.Setup.X.Y.Z.exe` | Installer with folder selection, Desktop and Start Menu shortcuts. |
+| **Portable** | `Emir.Code.X.Y.Z.exe` | Single executable, no installation. |
 
-### 🌐 10. Configurable Zero-Trust Web Access & Search Subsystem
-- **User-Controlled & Offline-First**: Web access is completely optional (default: OFF). Master toggle with granular control (`Chat Search: ON/OFF`, `Coding Agent Search: ON/OFF`).
-- **Prompt Schema Omission**: When disabled, web tools (`web_search`, `fetch_url`) are completely excised from prompt schemas to prevent hallucinated calls.
-- **Dual-Layer Runtime Enforcement**: Unauthorized tool invocations are blocked instantly at both ToolDispatcher and AgentEngine boundaries.
-- **Anti-DNS-Rebinding & Multi-IP SSRF Shield**: Resolves all A and AAAA DNS records (`{ all: true }`); blocks IPv4/IPv6 private ranges, loopbacks, link-local, carrier-grade NAT, multicast; validates redirect targets step-by-step up to 3 hops with single network authority in Electron Main process.
-- **Instant In-Flight Abort**: Immediately cancels running searches/fetches via `AbortController` and `web:abortAll` IPC if the user switches Web Access OFF mid-operation.
-- **Zero-Trust Untrusted Boundary Delimiters**: Injected search snippets and fetched pages are strictly quarantined inside `<<<WEB_RESULT_UNTRUSTED>>> ... <<<END_WEB_RESULT_UNTRUSTED>>>` tags to thwart prompt injection and indirect jailbreaks.
-- **Pluggable SearchProvider**: Pluggable provider architecture with default `DuckDuckGoProvider` (Lite POST, no API key required) outputting structured source IDs (`web-001`, `web-002`) for precise document grounding.
+#### 🐧 Linux
 
-### 🎯 11. Evidence-Based Stateful Agent Architecture
-- **Strict AgentStateMachine**: Formal state machine (`PENDING -> PLANNING -> EXECUTING -> VALIDATING -> COMPLETED -> DONE`) preventing illegal transitions and execution loops.
-- **TaskCompiler & Compiler Guard**: Compiles overarching user goals into typed `TaskContract` specifications with enforceable acceptance criteria (`contains_style`, `contains_script`, `html_structure`, etc.) and consolidated subtasks.
-- **Evidence-Based TaskValidator**: Prevents false completion reports by validating disk artifacts against tangible evidence criteria before marking tasks completed.
-- **Coder Model Strict Fallback Hierarchy**: Explicit file path resolution with contract mapping, eliminating blind hallucinated file path guessing.
-- **SLM (Small Language Model) Optimization**: Compact system prompts tailored for efficient 1B-3B parameter models (`qwen2.5-coder:1.5b`, `deepseek-coder:1.3b`, `codegemma:2b`, etc.).
+| Package | Install |
+| :--- | :--- |
+| **Debian / Ubuntu / Mint / Pop!_OS** (`emir-code_X.Y.Z_amd64.deb`) | Double-click it, or `sudo apt install ./emir-code_X.Y.Z_amd64.deb` |
+| **Fedora / RHEL / openSUSE** (`emir-code-X.Y.Z.x86_64.rpm`) | Double-click it, or `sudo dnf install ./emir-code-X.Y.Z.x86_64.rpm` |
+| **AppImage, any distribution** (`Emir.Code-X.Y.Z.AppImage`) | `chmod +x Emir.Code-X.Y.Z.AppImage && ./Emir.Code-X.Y.Z.AppImage` — AppImages need FUSE 2: `sudo apt install libfuse2t64` (Ubuntu 24.04) or `libfuse2` (22.04) |
+| **Setup wizard** (`emir-code-setup-linux.sh`) | `bash emir-code-setup-linux.sh` — installs to `~/.local/share/emir-code` with menu entry, desktop shortcut, `emir-code` command and `uninstall.sh`. Downloads the matching `.tar.gz` automatically if it is not next to the script. |
+| **Archive** (`emir-code-X.Y.Z.tar.gz`) | Extract and run `./emir-code` |
 
-### 💻 12. Hardware & Model-Agnostic Optimization Architecture
-- **Host Resource Auto-Tuning**: Automatically detects CPU core count, system RAM (GB), and discrete GPU/VRAM to recommend optimal token limits and inference parameters.
-- **Configurable Profiles**: Select from `Auto`, `Low` (1400 tokens), `Balanced` (2400 tokens), `High` (3500 tokens), or `Custom` slider (512 - 4096 tokens).
-- **Universal Coding Language Support**: Prompts dynamically adapt to any programming language (Python, TypeScript, Go, Rust, C++, etc.) with clean, non-prescriptive standards.
-- **Smart Code Modification Strategy**: Choose between surgical smart piece injection or full-file atomic overwrite based on model size and file complexity.
+When started from an AppImage or an extracted folder, **Settings → About → "Masaüstü Kısayollarını Oluştur / Güncelle"** adds Emir Code to the application menu and desktop.
 
-### 📁 13. Non-Intrusive Project Explorer Management
-- **Zero Permanent Clutter**: Clean file tree with hover-revealed delete action (`Trash2`) and directory creation buttons (`FolderPlus`).
-- **Inline Creation**: Type new directory names inline with instant `Enter` confirmation and `Esc` dismissal.
-- **Symlink Boundary Protection**: Electron Main process strictly prevents directory transversal and preserves project root integrity.
+On distributions that block Chromium's sandbox for normal users (Ubuntu 23.10+ restricts unprivileged user namespaces with AppArmor), the `emir-code` launcher starts the app without the sandbox automatically instead of failing to start. Every release is launched in CI from each Linux package format (see [ARCHITECTURE.md §13](./ARCHITECTURE.md#13-packaging--release-pipeline)).
+
+### First steps
+1. Open Emir Code, pick a model in the model selector at the top.
+2. **Chat**: type a question. Turn on **Web** for questions about current information.
+3. **Emir Code tab**: choose a project folder (an empty folder is fine for new projects), pick a security profile and describe your task.
+4. Follow the timeline; open the 💡 panel to see the model's reasoning and raw output.
+
+### Troubleshooting
+- **The first agent step is slow** — the model is loaded and the whole task is read once (on CPU this can take 1–3 minutes). Later steps reuse Ollama's cache and are much faster.
+- **The agent stopped with "DÖNGÜ TESPİT EDİLDİ" / "İLERLEME YOK"** — the model repeated itself; rephrase the request more concretely or try a larger model.
+- **The taskbar still shows an old icon after updating** — Windows caches icons; unpin and re-pin the app, or sign out and back in.
+- **No answer from Ollama** — check that `ollama serve` is running and that the endpoint in Settings → Ollama is `http://localhost:11434`.
 
 ---
 
@@ -106,179 +130,97 @@ Customize the autonomous threshold to match your personal workflow while keeping
 
 ```mermaid
 flowchart TD
-    subgraph UI["Renderer (React + Zustand)"]
-        UI_User["Developer Goal / Interaction"]
-        UI_Timeline["Timeline & Inline Clarification"]
-        UI_Diff["Rich LCS Diff Viewer"]
-        UI_Dump["Reasoning & Live Dump"]
-        UI_Ledger["Session Memory Ledger"]
-        UI_Web["Web Access Service & Badges"]
+    subgraph UI["Renderer (React 19 + Zustand)"]
+        UI_Chat["Chat (web search, attachments)"]
+        UI_Agent["Agent workspace: timeline, diffs, approvals"]
+        UI_Models["Model manager"]
     end
 
-    subgraph AgentEngine["Agent Engine"]
-        AE_SM["Strict AgentStateMachine"]
-        AE_Contract["TaskCompiler & Compiler Guard"]
-        AE_Loop["Autonomous Tool Loop"]
-        AE_Validate["Evidence-Based TaskValidator"]
-        AE_Timer["Active-Time Tracker (Paused on Prompts)"]
-        AE_Compress["Sliding-Window Context Compression"]
+    subgraph AgentEngine["Agent Engine (renderer)"]
+        AE_Protocol["AgentProtocol: static prompt + JSON-schema tool calls"]
+        AE_Loop["Tool loop with loop / no-progress guards"]
+        AE_Checks["FileSanity checks + TaskValidator acceptance checks"]
+        AE_Runtime["ModelRuntime: context window, sampling, reasoning mode"]
     end
 
-    subgraph Ollama["Local LLM Server (Ollama)"]
-        OLLAMA_Model["qwen2.5-coder / deepseek-coder"]
+    subgraph Ollama["Local LLM server (Ollama)"]
+        OLLAMA_Model["qwen2.5-coder / qwen3 / gemma …"]
     end
 
-    subgraph MainProcess["Electron Main Process (Privileged Authority)"]
-        MP_Jail["Realpath Path Containment"]
-        MP_Token["256-Bit One-Time Mutation Token Vault"]
-        MP_Hash["Authentic SHA-256 Base Hash Verifier"]
-        MP_Atomic["Atomic Temp-File Rename Engine"]
-        MP_Rollback["Snapshot & Rollback Registry"]
-        MP_Web["Multi-IP Anti-DNS-Rebinding SSRF Shield"]
+    subgraph MainProcess["Electron main process (privileged)"]
+        MP_Jail["Realpath workspace jail"]
+        MP_Token["One-time mutation tokens + SHA-256 base hashes"]
+        MP_Atomic["Atomic temp-file writes + rollback snapshots"]
+        MP_Cmd["Command allowlist runner"]
+        MP_Web["Web search/fetch with SSRF shield"]
     end
 
-    subgraph External["External Network (Optional)"]
-        EXT_Net["DuckDuckGo Lite / Web Fetch"]
-    end
+    Disk["Project folder"]
+    Net["DuckDuckGo / web pages (only when Web is on)"]
 
-    subgraph Disk["Local Project Filesystem"]
-        FS_Files["Project Codebase"]
-    end
-
-    UI_User --> AgentEngine
-    AgentEngine <-->|Chat Stream| Ollama
-    AE_Loop --> UI_Timeline
-    AE_Loop --> UI_Diff
-    AE_Loop --> UI_Dump
-    AE_Loop -->|Request Mutation Token| MP_Token
-    MP_Token --> MP_Jail
-    MP_Token --> MP_Hash
-    MP_Hash -->|Apply Approved Mutation| MP_Atomic
-    MP_Atomic --> FS_Files
-    UI_Web -->|IPC web:search / web:fetchUrl| MP_Web
-    MP_Web -->|SSRF Validated Request| EXT_Net
+    UI_Agent --> AgentEngine
+    UI_Chat <-->|stream| Ollama
+    AgentEngine <-->|/api/chat with format schema| Ollama
+    AE_Loop -->|request token + apply| MP_Token
+    MP_Token --> MP_Jail --> MP_Atomic --> Disk
+    AE_Loop -->|approved commands| MP_Cmd --> Disk
+    UI_Chat -->|web:search / web:fetchUrl| MP_Web --> Net
 ```
+
+The full technical description — reliability layer, security model and release pipeline — is in [ARCHITECTURE.md](./ARCHITECTURE.md).
 
 ---
 
-## 🚀 Getting Started
+## 🛠️ Building from Source
 
-### Prerequisites
-1. **Operating System**:
-   - **Windows 10 / 11 (64-bit)**
-   - **Linux (64-bit)**: Ubuntu 20.04+, Debian 11+, Fedora 38+, Linux Mint 20+, Pop!_OS, openSUSE, Arch Linux
-2. **[Ollama](https://ollama.ai)** installed and running locally:
-   ```bash
-   ollama pull qwen2.5-coder:7b
-   ```
-3. **Node.js (v18+)** and **npm** (if building from source)
-
----
-
-### Installation Options
-
-Pre-built binaries for both Windows and Linux are published automatically on every release under the [GitHub Releases](https://github.com/daristanapeyvan/emircode/releases) section.
-
-#### 🪟 Windows Installation
-
-| Package | Format | Description |
-| :--- | :--- | :--- |
-| **Windows Setup (Recommended)** | `Emir Code Setup 1.5.1.exe` | Multilingual NSIS GUI installer with custom folder selection, Desktop shortcut, and Start Menu registration. |
-| **Windows Portable** | `Emir Code 1.5.1.exe` | Completely self-contained single executable. Zero installation required. |
-
----
-
-#### 🐧 Linux Installation & GUI Setup
-
-Emir Code provides a first-class, native desktop experience across all major Linux distributions:
-
-##### 1. Debian / Ubuntu / Linux Mint / Pop!_OS (.deb GUI Package)
-Download the `.deb` package and install it using your system's native Software Center:
-```bash
-# GUI Installation: Double-click 'emir-code_1.5.1_amd64.deb' in your file manager to open Ubuntu Software / GDebi
-# Or via terminal:
-sudo apt install ./emir-code_1.5.1_amd64.deb
-```
-*Automatically registers the application menu entry, high-DPI desktop icons, and the `/usr/bin/emir-code` command.*
-
-##### 2. Fedora / RHEL / openSUSE (.rpm GUI Package)
-Download the `.rpm` package and double-click to install via GNOME Software / Discover:
-```bash
-# Or via dnf:
-sudo dnf install ./emir-code-1.5.1.x86_64.rpm
-```
-
-##### 3. Universal Portable AppImage
-Download and run directly on any Linux distribution without root privileges:
-```bash
-chmod +x Emir-Code-1.5.1.AppImage
-./Emir-Code-1.5.1.AppImage
-```
-
-##### 4. Standalone Linux GUI Setup Wizard (`emir-code-setup-linux.sh`)
-For users who prefer a Windows-like graphical setup wizard:
-1. Download `emir-code-1.5.1.tar.gz` and extract it, or download `emir-code-setup-linux.sh`.
-2. Run the graphical installer:
-   ```bash
-   chmod +x emir-code-setup-linux.sh
-   ./emir-code-setup-linux.sh
-   ```
-3. A graphical setup wizard (Zenity/KDialog with terminal fallback) will guide you step-by-step:
-   - Target directory selection (`~/.local/share/emir-code` or `/opt/emir-code`)
-   - Desktop and Application Menu shortcuts
-   - Terminal CLI command link (`~/.local/bin/emir-code`)
-   - Automatic uninstaller generation (`uninstall.sh`)
-
-##### 5. In-App Desktop Integration
-If you launch Emir Code from an AppImage or unpacked folder, open **Settings → About Emir Code** and click **"Masaüstü Kısayollarını Oluştur / Güncelle"** to automatically integrate the app into your system menu and desktop anytime!
-
----
-
-### 🛠️ Building from Source
+Requires Node.js 20+ (CI uses Node 22) and npm.
 
 ```bash
-# Clone the repository
 git clone https://github.com/daristanapeyvan/emircode.git
 cd emircode
-
-# Install dependencies
 npm install
 
-# Run Vite + Electron in development mode
+# Development mode (Vite + Electron)
 npm run dev
 
-# Build Windows NSIS Installer & Portable Executable
+# Regression suites: functional, agent reliability, architecture, web access
+npm test
+
+# Windows installer + portable exe (release/)
 npm run build:installer
 
-# Build Linux Packages (deb, rpm, AppImage, tar.gz)
+# Linux packages: deb, rpm, AppImage, tar.gz
 npm run build:linux
 
-# Build for all supported platforms
-npm run build:all
+# Agent benchmark against a local Ollama model (see the file header for scenarios)
+node ./scripts/run-ts-test.mjs scripts/agent-e2e.ts qwen2.5-coder:7b web-new
 ```
 
----
-
-## 🔒 Privacy Guarantee
-
-- **100% Offline**: Emir Code connects only to your local Ollama endpoint (`http://localhost:11434`).
-- **No Cloud Relay**: Zero analytics, zero telemetric pingbacks, and zero data logging.
-- **Your Code Stays Yours**: Your intellectual property never leaves your local hardware.
+Pushing a `vX.Y.Z` tag runs the release workflow, which builds all packages, launches the Linux packages in a virtual display and publishes the GitHub release.
 
 ---
 
-## 📜 Documentation & Guides
+## 🔒 Privacy
 
-- **[System Architecture (ARCHITECTURE.md)](./ARCHITECTURE.md)**: Deep technical architecture, sequence diagrams, process isolation, and token mechanics.
-- **[Practical Workflow Examples (docs/EXAMPLES.md)](./docs/EXAMPLES.md)**: Real-world walkthroughs of autonomous debugging, inline clarification, refactoring, and rollback.
-- **[Security Model (docs/SECURITY_MODEL.md)](./docs/SECURITY_MODEL.md)**: Comprehensive threat analysis, Realpath Jail guarantees, and atomic swap details.
-- **[Security Policy (SECURITY.md)](./SECURITY.md)**: Vulnerability reporting and responsible disclosure.
-- **[Contributing Guidelines (CONTRIBUTING.md)](./CONTRIBUTING.md)**: Development guidelines, coding conventions, and pull request workflow.
-- **[Changelog (CHANGELOG.md)](./CHANGELOG.md)**: Release history and version notes.
-- **[License (LICENSE)](./LICENSE)**: MIT License.
+- **No telemetry**: no analytics, no tracking, no accounts.
+- **Local inference**: prompts and code go only to your Ollama endpoint (`http://localhost:11434` by default).
+- **Web access is the only network feature** besides Ollama. It is switched on by default and can be turned off completely or per mode (chat / agent) in Settings → Web Access. Searches go to DuckDuckGo; with Web access off, nothing leaves your computer.
 
 ---
 
-## 👥 Authors & Acknowledgments
+## 📜 Documentation
 
-Created and maintained by **Agah Emir** and the Emir Code community. Built with Electron, React, TypeScript, Tailwind CSS, and Ollama.
+- **[Kullanım Kılavuzu (docs/KULLANIM.md)](./docs/KULLANIM.md)**: Türkçe kullanım rehberi ve örnek istekler.
+- **[Workflow Examples (docs/EXAMPLES.md)](./docs/EXAMPLES.md)**: step-by-step walkthroughs of typical tasks.
+- **[System Architecture (ARCHITECTURE.md)](./ARCHITECTURE.md)**: processes, agent loop, reliability layer, packaging.
+- **[Security Model (docs/SECURITY_MODEL.md)](./docs/SECURITY_MODEL.md)**: jail, tokens, profiles, web shield.
+- **[Security Policy (SECURITY.md)](./SECURITY.md)**: how to report vulnerabilities.
+- **[Contributing (CONTRIBUTING.md)](./CONTRIBUTING.md)**: development setup, tests and conventions.
+- **[Changelog (CHANGELOG.md)](./CHANGELOG.md)**: release history.
+- **[License (LICENSE)](./LICENSE)**: MIT.
+
+---
+
+## 👥 Authors
+
+Created and maintained by **Agah Emir**. Built with Electron, React, TypeScript, Tailwind CSS and Ollama.
