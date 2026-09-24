@@ -36,6 +36,9 @@ jobs:
       - name: Run Agent Reliability Tests
         run: node ./scripts/run-ts-test.mjs test_agent_reliability.ts
 
+      - name: Run Agent Engine Tests (scripted model)
+        run: node ./scripts/run-ts-test.mjs test_agent_engine.ts
+
       - name: Run Architecture Tests
         run: node ./scripts/run-ts-test.mjs test_production_architecture.ts
 

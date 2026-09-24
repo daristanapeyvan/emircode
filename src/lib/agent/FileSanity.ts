@@ -702,7 +702,7 @@ function checkHtml(content: string): SanityIssue[] {
         severity: 'error',
         message:
           first < at
-            ? `the ${what} starting at line ${first} is outside a <${tag}> block: its closing </${tag}> is at line ${at} but there is no opening <${tag}> — insert a "<${tag}>" line right before line ${first}`
+            ? `the ${what} starting at line ${first} is outside a <${tag}> block: its closing </${tag}> is at line ${at} but there is no opening <${tag}> — insert a "<${tag}>" line right before line ${first} (line ${first} itself stays unchanged)`
             : `</${tag}> at line ${at} has no opening <${tag}> — add "<${tag}>" before the ${what} it closes, or remove this line`,
       });
     } else {
@@ -711,7 +711,7 @@ function checkHtml(content: string): SanityIssue[] {
       while (last > at && !lines[last - 1].trim()) last--;
       issues.push({
         severity: 'error',
-        message: `the <${tag}> block opened at line ${at} is never closed — add a "</${tag}>" line after line ${last}, the end of the ${what}`,
+        message: `the <${tag}> block opened at line ${at} is never closed — add a "</${tag}>" line after line ${last}, the end of the ${what} (line ${last} itself stays unchanged)`,
       });
     }
   }
@@ -925,6 +925,21 @@ export function checkFileSanity(path: string, content: string): SanityIssue[] {
   }
 
   return issues;
+}
+
+/**
+ * The damage a change would do: all errors of the new version when the current version has none,
+ * or when an already broken file would get more errors. Empty when the change keeps the file at
+ * least as healthy as it was. Refusing such changes stops a small model from breaking a working
+ * page and then patching the breakage line by line (a qwen2.5-coder run scattered dozens of
+ * <style>/<script> tags this way).
+ */
+export function damageFromChange(path: string, before: string, after: string): SanityIssue[] {
+  const errorsOf = (content: string) => checkFileSanity(path, content).filter((i) => i.severity === 'error');
+  const afterErrors = errorsOf(after);
+  if (afterErrors.length === 0) return [];
+  const beforeErrors = errorsOf(before);
+  return beforeErrors.length === 0 || afterErrors.length > beforeErrors.length ? afterErrors : [];
 }
 
 /**

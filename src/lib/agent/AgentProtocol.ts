@@ -48,7 +48,7 @@ function toolLines(toolset: AgentToolset, compact: boolean): string[] {
   lines.push(
     '- write_file {path, content}: create a file or replace a whole file. "content" is the COMPLETE file text.',
     '- edit_file {path, find, replace}: replace one snippet. "find" must be copied exactly from the current file and be unique (3-15 lines is best).',
-    '- replace_lines {path, start_line, end_line, content}: replace lines start_line..end_line (1-based, inclusive) with "content". Use it when an error names a line number or when copying exact text for edit_file fails.'
+    '- replace_lines {path, start_line, end_line, content}: replace lines start_line..end_line (1-based, inclusive) with "content". EVERY line in the range is replaced, so "content" must repeat the lines that should stay; keep the range as small as possible. Use it when an error names a line number or when copying exact text for edit_file fails. A change that would break a working file is refused.'
   );
   if (!compact) lines.push('- delete_file {path}: delete a file (the user must approve).');
   if (toolset.commands) lines.push('- run_command {command}: run a test/build command, e.g. "npm test" or "python main.py".');

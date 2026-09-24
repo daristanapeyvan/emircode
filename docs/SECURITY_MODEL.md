@@ -85,7 +85,7 @@ Before any file is modified on disk:
 | **Disallowed Commands Blocked** (`npx`, shells, other binaries) | ✅ Enforced | ✅ Enforced | ✅ Enforced |
 
 ### Automatic content guards (all profiles)
-Before a file is written, the agent engine refuses content that would damage the project: empty files, placeholders instead of code ("rest of the code…"), status sentences written over a file's content, edits to existing tests the user did not ask for, invalid JSON over a valid config, rewrites that would drop most of a file or existing `package.json` keys, and re-applying an edit that was already applied. After every write, per-language checks (JSON, JS/TS, Python, HTML, CSS, YAML, …) report problems back to the model with line numbers. These guards protect the project from model mistakes; they are not a security boundary — the boundary is the main process.
+Before a file is written, the agent engine refuses content that would damage the project: empty files, placeholders instead of code ("rest of the code…"), status sentences written over a file's content, edits to existing tests the user did not ask for, edits that would break a working file or make a broken one worse, invalid JSON over a valid config, rewrites that would drop most of a file or existing `package.json` keys, and re-applying an edit that was already applied. After every write, per-language checks (JSON, JS/TS, Python, HTML, CSS, YAML, …) report problems back to the model with line numbers. These guards protect the project from model mistakes; they are not a security boundary — the boundary is the main process.
 
 ---
 

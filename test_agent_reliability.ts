@@ -43,9 +43,10 @@ import {
   definitionLoss,
   detectDestructiveRewrite,
   mergeJsonPreservingKeys,
+  damageFromChange,
 } from './src/lib/agent/FileSanity';
-import { TaskCompiler } from './src/lib/agent/TaskContract';
-import { TaskValidator, looksJsonEscaped } from './src/lib/agent/TaskValidator';
+import { TaskCompiler, mentionsPhrase } from './src/lib/agent/TaskContract';
+import { TaskValidator, looksJsonEscaped, extractMenuLinks, deadMenuLinks } from './src/lib/agent/TaskValidator';
 import {
   parseParameterSize,
   parameterSizeFromName,
@@ -477,21 +478,47 @@ async function run() {
   const bigPy = Array.from({ length: 30 }, (_, i) => `def f${i}():\n    return ${i}\n`).join('\n');
   check(detectDestructiveRewrite('app.py', bigPy, 'def f0():\n    return 0\n') !== null, 'Replacing a 30-function module with one function is flagged');
   check(detectDestructiveRewrite('index.html', STYLED_PAGE, STYLED_PAGE.replace('Merhaba', 'Selam')) === null, 'A normal full rewrite is not flagged');
+  // "Do no harm": the in-app qwen2.5-coder run replaced 9-line windows, lost the <script> line and
+  // then patched the damage for 30 steps. Such an edit is now refused before it is applied.
+  // Lines 13-15 are the card, "<script>" and the first script line; the model re-typed the window without "<script>".
+  const scriptLost = applyLineRangeEdit(STYLED_PAGE, 13, 15, '  <div class="card"><h1>Merhaba</h1><button id="b">Tıkla</button></div>\n    document.getElementById("b").addEventListener("click", () => {');
+  check(
+    scriptLost.success && damageFromChange('index.html', STYLED_PAGE, scriptLost.newContent).some((i) => /<script>/.test(i.message)),
+    'An edit that drops the <script> line of a working page is refused (would put the JavaScript outside <script>)'
+  );
+  check(damageFromChange('index.html', STYLED_PAGE, STYLED_PAGE.replace('Merhaba', 'Selam')).length === 0, 'A harmless edit of a working page is allowed');
+  const brokenOnce = STYLED_PAGE.replace('</style>', '');
+  check(damageFromChange('index.html', brokenOnce, STYLED_PAGE).length === 0, 'An edit that repairs a broken page is allowed');
+  check(
+    damageFromChange('index.html', brokenOnce, brokenOnce.replace('  <script>\n', '')).length > 0,
+    'An edit that makes an already broken page worse is refused'
+  );
+  check(damageFromChange('app.py', 'def f():\n    return 1\n', 'def f():\nreturn 1\n').length > 0, 'Breaking the indentation of working Python is refused');
+  check(damageFromChange('notes.txt', 'a', 'b').length === 0, 'Files without checks are never refused');
 
   section('5b. Goal decomposition');
   const coffee = decomposeGoalIntoSubtasks('Bir kahve dükkanı için tek sayfalık modern bir web sitesi oluştur: menü (en az 6 ürün, fiyatlarıyla), hakkımızda ve iletişim bölümleri olsun. Responsive olsun ve iletişim formu JavaScript ile doğrulansın.');
   check(coffee.length === 1, 'A single detailed request stays one task (no split at "ürün," or inside parentheses)', coffee.map((t) => t.description));
-  const multi = decomposeGoalIntoSubtasks('README dosyasını güncelle, testleri çalıştır ve commit et');
-  check(multi.length === 3 && multi[2].description === 'commit et', 'Comma-separated imperative instructions are split into a checklist', multi.map((t) => t.description));
+  const navGoal = decomposeGoalIntoSubtasks('Home About Services Contact\n\nGet these working. You can change the page content using JavaScript.');
+  check(navGoal.length === 1, 'Lines and sentences of one request are not split into tasks ("Home About Services Contact" + "Get these working", phi4 in-app report)', navGoal.map((t) => t.description));
+  check(
+    decomposeGoalIntoSubtasks('alışveriş sitesi oluştur\nistediğim özellikler\nsepete ekle butonu\ndetaylı ürün açıklamaları (10 tane süt ürünü)').length === 1,
+    'A request written over several lines stays one task (its lines are not separate tasks)'
+  );
+  check(decomposeGoalIntoSubtasks('README dosyasını güncelle, testleri çalıştır ve commit et').length === 1, 'Commas alone never split a request');
   const seq = decomposeGoalIntoSubtasks('Siteyi oluştur. Sonra README dosyasını yaz');
-  check(seq.length === 2, 'Sentence-level instructions with imperative verbs are split', seq.map((t) => t.description));
+  check(seq.length === 2 && seq[1].description === 'README dosyasını yaz', 'Explicit sequencing ("… . Sonra …") splits a request', seq.map((t) => t.description));
+  const lastly = decomposeGoalIntoSubtasks('README dosyasını güncelle, testleri çalıştır ve en son commit et');
+  check(lastly.length === 2 && lastly[1].description === 'commit et', '"ve en son" marks a separate final step', lastly.map((t) => t.description));
+  check(decomposeGoalIntoSubtasks('Formu oluştur, sonra bunu test et').length === 1, 'A step that points back ("bunu") stays with the previous one');
+  check(decomposeGoalIntoSubtasks('Bildirim 5 saniye sonra kapansın').length === 1, '"5 saniye sonra" inside a clause is not a sequencing word');
+  const listed = decomposeGoalIntoSubtasks('Şunları yap:\n1. footer ekle\n2. başlıkları mavi yap');
+  check(listed.length === 2 && listed[0].description === 'footer ekle', 'A numbered list becomes the checklist (the lead-in line is not an item)', listed.map((t) => t.description));
+  check(decomposeGoalIntoSubtasks('1) footer ekle 2) başlıkları mavi yap').length === 2, 'A one-line numbered list is split');
+  check(decomposeGoalIntoSubtasks('- sepete ekle butonu\n- ürün açıklamaları').length === 2, 'A bulleted list becomes the checklist');
   check(decomposeGoalIntoSubtasks('bu fonksiyonu hızlandırmak için, önbellek kullan').length === 1, '"için," is not treated as an instruction boundary');
   const todo = decomposeGoalIntoSubtasks('Python ile komut satırından çalışan bir yapılacaklar listesi (todo) uygulaması yaz: ekle, listele, tamamla ve sil komutları olsun; veriler todos.json dosyasında saklansın.');
-  check(
-    todo.length === 2 && todo[0].description.includes('ekle, listele, tamamla ve sil'),
-    'Command names listed after a colon ("yaz: ekle, listele, sil") stay in one item',
-    todo.map((t) => t.description)
-  );
+  check(todo.length === 1, 'A requirement after ";" stays part of the same task', todo.map((t) => t.description));
 
   // =====================================================================
   section('6. Task contracts & validation');
@@ -538,6 +565,35 @@ async function run() {
   check(!report.passed && report.missingEvidence.some((m) => m.includes('HTML işaretlemesi')), 'A <script> that only contains HTML does not satisfy the JavaScript requirement');
   report = await TaskValidator.validate(inlineContract[0], async (p) => (p === 'index.html' ? escapedPage : null));
   check(!report.passed && report.missingEvidence.some((m) => m.includes('kaçış')), 'Escaped (corrupted) page fails validation with an explicit message');
+
+  // Menu links ("Home About Services Contact — get these working", phi4 / qwen2.5-coder in-app report)
+  const navPage = (links: string, extra = '') =>
+    `<!DOCTYPE html>\n<html>\n<head><title>x</title></head>\n<body>\n<header>\n<nav>\n${links}\n</nav>\n</header>\n<section id="home">Home</section>\n<section id="about">About</section>\n${extra}\n</body>\n</html>\n`;
+  const deadNav = navPage('<a href="#">Home</a>\n<a href="#">About</a>\n<a href="#">Services</a>\n<a href="#">Contact</a>');
+  const menu = extractMenuLinks(deadNav);
+  check(menu.length === 4 && menu[1].text === 'About' && menu[1].line === 8, 'Menu links are read from <nav> with their line numbers', menu);
+  const noFiles = async () => null;
+  check((await deadMenuLinks('index.html', deadNav, noFiles)).length === 4, 'href="#" menu links are reported as leading nowhere');
+  const anchored = navPage('<a href="#home">Home</a>\n<a href="#about">About</a>\n<a href="#missing">Services</a>\n<a href="contact.html">Contact</a>');
+  const anchoredDead = await deadMenuLinks('index.html', anchored, async (p) => (p === 'contact.html' ? '<html></html>' : null));
+  check(anchoredDead.length === 1 && /#missing/.test(anchoredDead[0]), 'Links to existing ids and files work; a link to a missing id is reported', anchoredDead);
+  const routed = navPage('<a href="#">Home</a>\n<a href="#">About</a>', "<script>document.querySelectorAll('nav a').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); show(a.textContent); }));</script>");
+  check((await deadMenuLinks('index.html', routed, noFiles)).length === 0, 'Menu links handled by a JavaScript click router count as working');
+  check((await deadMenuLinks('index.html', navPage('<a href="https://example.com">Blog</a>\n<a href="mailto:a@b.c">Mail</a>'), noFiles)).length === 0, 'External and mailto links count as working');
+  const navContracts = TaskCompiler.compile('Home About Services Contact\n\nGet these working. You can change the page content using JavaScript.', {
+    projectFiles: ['index.html'],
+    menuTexts: ['Home', 'About', 'Services', 'Contact'],
+  });
+  check(navContracts.length === 1 && navContracts[0].criteria.some((c) => c.type === 'links_work'), 'Naming the menu links in a request adds the "links work" acceptance check');
+  report = await TaskValidator.validate(navContracts[0], async (p) => (p === 'index.html' ? deadNav : null));
+  check(!report.passed && report.missingEvidence.some((m) => /"Services" \(satır 9\)/.test(m)), 'The links check names every dead link with its line', report.missingEvidence);
+  check(
+    TaskCompiler.compile('navbar linkleri çalışsın', { projectFiles: ['index.html'] })[0]?.criteria.some((c) => c.type === 'links_work'),
+    '"navbar linkleri çalışsın" adds the links check'
+  );
+  check(TaskCompiler.compile('menüye 2 yeni ürün ekle', { projectFiles: ['index.html'], menuTexts: ['Menü', 'İletişim'] }).length === 0, 'A restaurant "menü" request does not add a links check');
+  check(TaskCompiler.compile('navbar linklerini kaldır', { projectFiles: ['index.html'] }).length === 0, 'Removing links does not require working links');
+  check(mentionsPhrase('Home About Services', 'Home') && !mentionsPhrase('Homepage tasarımı', 'Home') && mentionsPhrase('İletişim sayfası', 'iletişim'), 'Menu texts are matched as whole words (Unicode, case-insensitive)');
   const unlinkedPage = STYLED_PAGE.replace(/<script>[\s\S]*?<\/script>/, '');
   const unlinkedFiles: Record<string, string> = { 'index.html': unlinkedPage, 'index.js': "document.getElementById('b').addEventListener('click', () => {});" };
   report = await TaskValidator.validate(modularContract[0], async (p) => unlinkedFiles[p] ?? null);

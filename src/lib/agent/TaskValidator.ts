@@ -90,6 +90,73 @@ export function extractLocalScripts(html: string): string[] {
   return refs;
 }
 
+export interface MenuLink {
+  text: string;
+  href: string | null;
+  /** 1-based line of the <a> tag. */
+  line: number;
+  attrs: string;
+}
+
+/** Links of the page's menu: the anchors inside <nav>, or inside <header> when there is no <nav>. */
+export function extractMenuLinks(html: string): MenuLink[] {
+  const regions: Array<{ start: number; text: string }> = [];
+  const collect = (tag: string) => {
+    const re = new RegExp(`<${tag}\\b[\\s\\S]*?</${tag}>`, 'gi');
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(html)) !== null) regions.push({ start: m.index, text: m[0] });
+  };
+  collect('nav');
+  if (regions.length === 0) collect('header');
+  const links: MenuLink[] = [];
+  for (const region of regions) {
+    const re = /<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(region.text)) !== null) {
+      links.push({
+        text: m[2].replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim(),
+        href: m[1].match(/\bhref\s*=\s*["']([^"']*)["']/i)?.[1] ?? null,
+        line: html.slice(0, region.start + m.index).split('\n').length,
+        attrs: m[1],
+      });
+    }
+  }
+  return links;
+}
+
+/**
+ * Menu links that lead nowhere: href="#" (or none), an anchor whose target id does not exist, or a
+ * local page that does not exist. Links handled in JavaScript (onclick / data-* attributes, or a
+ * script that attaches click or hashchange handlers to the menu) count as working.
+ */
+export async function deadMenuLinks(page: string, html: string, fileProvider: FileContentProvider): Promise<string[]> {
+  const links = extractMenuLinks(html);
+  if (links.length === 0) return [];
+  const scripts = [...html.matchAll(/<script\b(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi)].map((m) => m[1]).join('\n');
+  const scriptRoutesMenu =
+    /addEventListener\s*\(\s*['"](?:click|hashchange)['"]/.test(scripts) &&
+    /\bnav\b|header|nav-link|nav-item|data-(?:page|section|target|tab|view)|querySelectorAll\(\s*['"]a\b|getElementsByTagName\(\s*['"]a['"]|hashchange|location\.hash/.test(scripts);
+  if (scriptRoutesMenu) return [];
+  const ids = new Set([...html.matchAll(/\b(?:id|name)\s*=\s*["']([^"']+)["']/gi)].map((m) => m[1]));
+  const problems: string[] = [];
+  for (const link of links) {
+    const label = link.text || link.href || 'bağlantı';
+    if (/\bonclick\s*=|\bdata-(?:page|section|target|tab|view)\s*=/i.test(link.attrs)) continue;
+    const href = (link.href ?? '').trim();
+    if (!href || href === '#' || /^javascript:/i.test(href)) {
+      problems.push(`"${label}" (satır ${link.line}) hiçbir yere gitmiyor (href="${href}")`);
+    } else if (isRemoteRef(href)) {
+      continue;
+    } else if (href.startsWith('#')) {
+      const id = href.slice(1);
+      if (!ids.has(id)) problems.push(`"${label}" (satır ${link.line}) #${id} bölümüne gidiyor ama sayfada id="${id}" olan bir öğe yok`);
+    } else if ((await fileProvider(resolveRelative(page, href))) === null) {
+      problems.push(`"${label}" (satır ${link.line}) "${href}" sayfasına gidiyor ama bu dosya yok`);
+    }
+  }
+  return problems;
+}
+
 /** 1-based line of the last occurrence of `tag` (case-insensitive), or 0. */
 function lineOfTag(content: string, tag: string): number {
   const idx = content.toLowerCase().lastIndexOf(tag);
@@ -325,6 +392,23 @@ export class TaskValidator {
             );
           } else {
             pass(crit);
+          }
+          break;
+        }
+
+        case 'links_work': {
+          if (!content) {
+            fail(crit, 'Dosya içeriği boş.', crit.description);
+            break;
+          }
+          const dead = await deadMenuLinks(target, content, fileProvider);
+          if (dead.length === 0) {
+            pass(crit);
+          } else {
+            fail(
+              crit,
+              `'${target}' menüsünde çalışmayan bağlantılar var: ${dead.slice(0, 6).join('; ')}. Her bağlantıyı sayfadaki bir bölüme bağlayın (ör. href="#hakkimizda" ve o bölümde id="hakkimizda"), var olan bir sayfaya yönlendirin ya da tıklamayı JavaScript ile ele alın.`
+            );
           }
           break;
         }

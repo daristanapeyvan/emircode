@@ -52,10 +52,13 @@ Emir Code sekmesinde bir **proje klasörü** seçin (yeni proje için boş bir k
 ### Ajan arka planda neler yapar?
 1. **Planlar**: Birden fazla iş içeren istekler kontrol listesine bölünür; hepsi bitmeden görev kapanmaz.
 2. **Her dosyayı denetler**: Yazılan her dosya otomatik kontrol edilir (HTML, CSS, JavaScript/TypeScript, Python, JSON, YAML, Java, C#, Go, Rust…). Kapanmamış parantez, bozuk girinti, yarım kalan dosya, "içerik buraya gelecek" gibi yer tutucular bulunursa **satır numarasıyla** modele geri bildirilir ve düzeltilmeden görev bitmez.
-3. **Web sayfalarını doğrular**: Gerçek CSS kuralları, çalışan JavaScript, mobil uyum (viewport) etiketi ve bağlanan dosyaların varlığı kontrol edilmeden "tamamlandı" denmez.
+3. **Web sayfalarını doğrular**: Gerçek CSS kuralları, çalışan JavaScript, mobil uyum (viewport) etiketi ve bağlanan dosyaların varlığı kontrol edilmeden "tamamlandı" denmez. Menü bağlantılarını sorduğunuzda (ör. "Home About Services Contact — bunlar çalışsın" veya "navbar linkleri yönlendirsin") her bağlantının gerçekten bir bölüme, sayfaya ya da JavaScript işlevine gittiği de kontrol edilir.
 4. **Ayarları ve testleri korur**: `package.json` gibi dosyalarda mevcut anahtarlar silinmez; bozuk JSON asla yazılmaz. Siz istemedikçe mevcut testler değiştirilemez; test başarısızsa ajan testi değil kodu düzeltmek zorundadır.
 5. **Döngüye girmez**: Model aynı şeyi tekrarlarsa uyarılır; ilerleme olmazsa görev net bir mesajla durdurulur.
 6. **Önceki isteği hatırlar**: Aynı oturumdaki bir sonraki istek, öncekinde neyin istendiğini ve hangi dosyaların değiştiğini bilir. "şimdi stil ekle" demeniz yeterli.
+7. **Çalışan dosyayı bozmaz**: Bir değişiklik çalışan bir dosyayı bozacaksa uygulanmaz; model bozuk parçayı satır satır yamamak yerine doğru bir sürüm göndermek zorundadır.
+
+> **İpucu:** Birden fazla ayrı iş istiyorsanız bunları numaralı liste (`1. … 2. …`) olarak yazın ya da "sonra" ile bağlayın; ajan bunları eksiksiz tamamlanması gereken bir kontrol listesine alır. Bunun dışındaki her istek, kaç cümle veya satır olursa olsun **tek bir görev** olarak ele alınır.
 
 ### Değişiklikleri siz kontrol edersiniz
 - Her değişiklik satır satır **fark (diff)** olarak gösterilir.

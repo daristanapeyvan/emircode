@@ -17,6 +17,7 @@ export type CriterionType =
   | 'contains_script'
   | 'references_resolve'
   | 'viewport_meta'
+  | 'links_work'
   | 'json_valid'
   | 'syntax_valid';
 
@@ -40,6 +41,8 @@ export interface CompileContext {
   projectFiles?: string[];
   /** Force styles/scripts to live inside the HTML file (single-file synthesis strategy). */
   singleFile?: boolean;
+  /** Texts of the existing page's menu links ("Home", "About", …), to recognise requests about them. */
+  menuTexts?: string[];
 }
 
 const WEB_PATTERN = /web\s*sitesi|web\s*sayfa|website|web\s*page|landing|\bsite(?:si|sine|nin|de|ye)?\b|\bsayfa|\bhtml\b|frontend|arayüz|portfolyo|portfolio/i;
@@ -50,11 +53,33 @@ const RESPONSIVE_PATTERN = /responsive|duyarlı|mobil|mobile|telefon|phone|table
 const NO_STYLE_PATTERN = /stil\s*(?:olmasın|istemiyorum|yok)|stilsiz|css\s*(?:olmasın|istemiyorum|yok)|without\s+(?:css|styles?)|no\s+(?:css|styles?)|unstyled/i;
 const SINGLE_FILE_PATTERN = /başka\s+dosya\s+oluşturma|tek\s+(?:bir\s+)?dosya|single[\s-]+file|sadece\s+(?:bir\s+)?html|yalnızca\s+(?:bir\s+)?html|only\s+(?:one\s+)?html|inline|içinde\s+(?:stil|css|script)|gömülü/i;
 
-function findHtmlTarget(projectFiles: string[]): string | null {
+/** Requests about links / navigation ("menü" alone is not enough: restaurant pages have menus). */
+const LINKS_PATTERN = /\blink(?:s|ler\w*|leri\w*)?\b|bağlantı\w*|\bnav(?:bar|igasyon|igation)?\b|yönlendir\w*|redirect\w*|\banchor/i;
+const LINK_INTENT = /çalış|work|git(?:sin|meli)|yönlendir|redirect|link|bağla|tıkla|click|açıl/i;
+const REMOVE_INTENT = /\bkaldır|\bsil\b|\bsilin|remove|delete/i;
+
+/** The page a web task is about: index.html (or src/index.html), else the only HTML file. */
+export function findHtmlTarget(projectFiles: string[]): string | null {
   const html = projectFiles.filter((f) => /\.html?$/i.test(f));
   const preferred = html.find((f) => /^(?:src\/)?index\.html?$/i.test(f.replace(/\\/g, '/')));
   if (preferred) return preferred.replace(/\\/g, '/');
   return html.length === 1 ? html[0].replace(/\\/g, '/') : null;
+}
+
+/** Case folding that treats Turkish İ/I/ı/i alike (a plain "i" regex flag misses "İletişim"). */
+const fold = (s: string) => s.toLocaleLowerCase('tr').replace(/ı/g, 'i').replace(/̇/g, '');
+
+/** True when `text` contains `phrase` as whole words (case-insensitive, Unicode letters). */
+export function mentionsPhrase(text: string, phrase: string): boolean {
+  const p = fold(phrase.trim());
+  if (p.length < 2) return false;
+  const escaped = p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
+  return new RegExp(`(^|[^\\p{L}\\p{N}])${escaped}(?=$|[^\\p{L}\\p{N}])`, 'u').test(fold(text));
+}
+
+/** Menu link texts the request names — "Home About Services Contact, get these working". */
+export function mentionedMenuTexts(goal: string, menuTexts: string[]): string[] {
+  return Array.from(new Set(menuTexts.filter((t) => mentionsPhrase(goal, t))));
 }
 
 export class TaskCompiler {
@@ -92,10 +117,18 @@ export class TaskCompiler {
     const wantsStyle = STYLE_PATTERN.test(trimmed);
     const wantsScript = SCRIPT_PATTERN.test(trimmed);
 
-    // A web contract is created for new web pages, or for restyling an existing page.
+    // A web contract is created for new web pages, for restyling an existing page, and for
+    // making an existing page's links work (by name: "navbar linkleri", or by naming the links).
     const isNewWebPage = mentionsWeb && (CREATE_PATTERN.test(trimmed) || !existingHtml);
     const isRestyle = !!existingHtml && (wantsStyle || wantsScript) && (mentionsWeb || projectFiles.length <= 12);
-    if (!isNewWebPage && !isRestyle) return [];
+    const namedLinks = mentionedMenuTexts(trimmed, context.menuTexts || []);
+    const isLinkFix =
+      !!existingHtml &&
+      !REMOVE_INTENT.test(trimmed) &&
+      ((LINKS_PATTERN.test(trimmed) && LINK_INTENT.test(trimmed)) ||
+        namedLinks.length >= 3 ||
+        (namedLinks.length >= 2 && LINK_INTENT.test(trimmed)));
+    if (!isNewWebPage && !isRestyle && !isLinkFix) return [];
 
     const target = existingHtml || 'index.html';
     const inlineOnly = !!context.singleFile || SINGLE_FILE_PATTERN.test(trimmed);
@@ -149,6 +182,14 @@ export class TaskCompiler {
       target,
       description: `'${target}' içinde bağlantı verilen tüm yerel CSS/JS dosyaları diskte mevcut olmalıdır.`,
     });
+
+    if (isLinkFix) {
+      criteria.push({
+        type: 'links_work',
+        target,
+        description: `'${target}' menüsündeki her bağlantı çalışmalıdır: sayfadaki bir bölüme (id), var olan bir dosyaya ya da JavaScript ile ele alınan bir işleve gitmelidir.`,
+      });
+    }
 
     // Without the viewport meta tag no page is responsive on phones, whatever the CSS says.
     if (isNewWebPage || RESPONSIVE_PATTERN.test(trimmed)) {

@@ -47,10 +47,13 @@ Pick a project folder in the **Emir Code** tab, describe what you want, and foll
 What happens behind the scenes:
 1. The agent looks at your folder and plans; a request with several parts becomes a checklist.
 2. Every file it writes is checked automatically (HTML, CSS, JS/TS, Python, JSON, YAML, Java, C#, Go, Rust…). Problems are sent back to the model with the exact line numbers until they are fixed.
-3. Web pages must pass real acceptance checks before the task can finish: actual CSS rules, working JavaScript, a mobile viewport tag and linked files that exist. Existing tests are protected — a failing test is fixed in the code, never by editing the test.
+3. Web pages must pass real acceptance checks before the task can finish: actual CSS rules, working JavaScript, a mobile viewport tag, linked files that exist — and working menu links when you ask about links ("Home About Services Contact — get these working"). Existing tests are protected — a failing test is fixed in the code, never by editing the test.
 4. You see every change as a line-by-line diff; depending on the security profile you approve it or it is applied for you.
 5. The ↺ button undoes everything the agent changed in the session.
 6. The next request in the same session knows what was asked and changed before, so "now add a footer" just works.
+7. A change that would break a working file is never applied — the model has to send a correct version instead of patching its own breakage.
+
+**Tip:** if a request has several separate jobs, write them as a numbered list (`1. … 2. …`) or join them with "sonra" / "then" — they become a checklist that must be completed in full. Everything else is treated as one task, however many sentences or lines it has.
 
 ### 🧩 Manage your models
 Download models from the built-in catalog or by name, see which models are loaded in memory, unload or delete them — no terminal needed (**Ctrl+Shift+M**).

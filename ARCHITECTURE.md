@@ -208,7 +208,7 @@ A common defect in autonomous LLM agents is **Instruction Dropout / Premature Te
 Emir Code implements a deterministic, multi-tiered safeguard:
 
 ### 1. Goal Decomposition & Structured Checklist
-When `AgentEngine.runGoal` starts, `decomposeGoalIntoSubtasks` analyzes the prompt across numbered lists, bullet points, sequencing words (Turkish and English: `daha sonra`, `ardından`, `ve son olarak`, `then`, `after that`), semicolons and imperative verbs. Commas inside a list ("menü, hakkımızda ve iletişim") and text in parentheses never split a request. It establishes a typed checklist:
+When `AgentEngine.runGoal` starts, `decomposeGoalIntoSubtasks` turns a request into a checklist only where the user clearly listed separate items: numbered or bulleted lines (or a one-line "1) … 2) …" list), or clauses joined by sequencing words (Turkish and English: `…, sonra …`, `ardından`, `ve en son`, `son olarak`, `then`, `after that`). Line breaks, sentence ends, commas and semicolons alone never split a request — "Home About Services Contact / Get these working." is one task about those menu items. A split of running text is only made when every part is an instruction of its own; a part that points back ("these", "bunları") stays with the previous one. It establishes a typed checklist:
 ```ts
 export interface TaskChecklistItem {
   id: string;
@@ -220,7 +220,7 @@ export interface TaskChecklistItem {
 ```
 
 ### 2. Checklist in the Task Message and the State Line
-The numbered checklist is part of the first task message (the system prompt stays byte-identical for KV-cache reuse), and every tool result ends with a one-line state such as `[STATE] step 6/35 · changed files: index.html · checklist 1/3 done (next: #2) · acceptance checks 5/7 passing`. When a reply completes items, the model adds `"checklist_done": [1]` to its action (an optional schema field that only exists for multi-item goals); the UI checklist updates live.
+The numbered checklist is part of the first task message, introduced as the items of that one task (not separate tasks) (the system prompt stays byte-identical for KV-cache reuse), and every tool result ends with a one-line state such as `[STATE] step 6/35 · changed files: index.html · checklist 1/3 done (next: #2) · acceptance checks 5/7 passing`. When a reply completes items, the model adds `"checklist_done": [1]` to its action (an optional schema field that only exists for multi-item goals); the UI checklist updates live.
 
 ### 3. Anti-Premature Termination Guard
 `finish` is only accepted when:
@@ -296,13 +296,14 @@ FAILED  (terminal): from PLANNING, VALIDATING or RETRYING — the result could n
 Illegal state transitions (e.g. jumping from `BLOCKED` directly to `COMPLETED`) are strictly rejected.
 
 ### 2. TaskCompiler
-Contracts are generated only where completion can be verified from the files themselves: **web pages** (a new page, or a follow-up that restyles / repairs an existing HTML file). Bug fixes, scripts and other tasks get no invented file-name contract; there the file checks, test runs and the model's own verification apply. Web page criteria:
+Contracts are generated only where completion can be verified from the files themselves: **web pages** (a new page, a follow-up that restyles / repairs an existing HTML file, or a request about the page's links). Bug fixes, scripts and other tasks get no invented file-name contract; there the file checks, test runs and the model's own verification apply. Web page criteria:
 - `file_exists`, `min_size`: the page exists and is not a stub.
 - `html_structure`: a real HTML document that is not JSON-escaped.
 - `contains_style`: real CSS rules, inline or in a linked local stylesheet (unless the user asked for no styling).
 - `contains_script`: JavaScript that actually runs — inline or a linked local file; markup inside `<script>` does not count (only when the request needs interactivity).
 - `references_resolve`: every linked local CSS/JS file exists and is not empty.
 - `viewport_meta`: new or responsive pages declare `<meta name="viewport">`.
+- `links_work`: every menu link (inside `<nav>`, else `<header>`) leads to an existing section id, an existing page or a JavaScript handler. Added when the request asks for working links / navbar redirects, or names the page's menu links ("Home About Services Contact — get these working"); in that case the task message also states which elements are meant (`REFERENCED ELEMENTS`).
 
 Live steering ("şimdi stil ekle") merges new requirements into the running contract (`TaskCompiler.mergeDirective`).
 
@@ -325,13 +326,14 @@ Local models on consumer hardware fail in predictable ways: truncated context, b
 | Broken files in any language | After every write: JSON/JSONC parsing, string- and comment-aware bracket balance (JS/TS/JSX, Java, C/C++/C#, Go, Rust, PHP, Kotlin, Swift, CSS/SCSS), Python strings/brackets/tab mix/block indentation, HTML sections and inline scripts, YAML tabs, truncation and markdown-fence detection. Findings are returned to the model with the numbered lines around the problem and block `finish` until fixed; `replace_lines` edits exactly those lines. | `FileSanity.ts`, `AgentEngine.ts` |
 | Destructive rewrites | Invalid JSON never replaces valid JSON; lossy config rewrites are merged additively; rewrites that would delete most of a file (or turn a page into a fragment) are refused with `edit_file` guidance; lazy placeholders ("rest of the code") and status sentences written over a file's content ("… hazırlandı.") are rejected; existing test files cannot be changed unless the user asks for it, so a failing test is fixed in the code, not in the assertion. | `FileSanity.ts`, `AgentEngine.ts` |
 | Follow-ups lose context | Every new task in a session receives the previous request, its outcome and the changed files; live steering merges new requirements into the acceptance checks. Small projects (≤ 6 files) get their current file contents in the task message (≤ 25 % of the window), decoded when an older version corrupted them. | `agentStore.ts`, `TaskCompiler.mergeDirective`, `AgentEngine.ts` |
+| Edits that break working files | Every edit and rewrite is checked before it is applied: a change that would introduce errors into a clean file, or add errors to a broken one, is refused and the model sees the numbered lines of its own version. On a broken file only fewer errors counts as progress; after three non-improving edits the model gets the whole numbered file and is asked to rewrite it in one piece. This stops the "patch the patch" cascades where a small model broke a page with `replace_lines` and scattered `<style>`/`<script>` tags while fixing each new error. | `FileSanity.damageFromChange`, `AgentEngine.ts` |
 | Misread command results | A CLI program started without arguments prints its usage text: this is reported as expected behaviour (not a bug) and a bare re-run is answered without executing. Tracebacks / stack traces that point into the project come with the numbered lines at that location. Python output is forced to UTF-8. Empty `write_file` contents are forbidden by the schema, re-sampled once and otherwise refused. | `AgentEngine.ts`, `electron/main.ts` |
 | Model wanders after finishing | Loops, invented tooling or repeated rejected writes after the work is done end the task as completed (with a note) when every acceptance check passes; unverifiable tasks keep the honest failure status. | `AgentEngine.tryGracefulCompletion` |
 | Chat refuses to search | Entity/fact questions trigger a pre-flight search; if the model still answers "I have no access / search online", the app searches and regenerates the answer. | `WebIntentDetector.ts`, `chatStore.ts` |
 
 Run the regression suite with `npm test` (or only the agent checks with `npm run test:agent`). The file checks are additionally run against real code bases during development (Python standard library, `node_modules` JS/TS/CSS/HTML/JSON — about 12,000 files) and must report no errors on valid code.
 
-`scripts/agent-e2e.ts` benchmarks the whole agent against a local Ollama model with scenarios such as a new web page, a follow-up edit, repairing a corrupted page, a JavaScript bug fix verified by `npm test`, a Python CLI and a `package.json` edit; it verifies the resulting files (only CSS/JS the page actually loads counts).
+`test_agent_engine.ts` runs the whole agent loop against a scripted model (no Ollama needed) to verify cross-cutting behaviour such as refused harmful edits and link verification. `scripts/agent-e2e.ts` benchmarks the whole agent against a local Ollama model with scenarios such as a new web page, a follow-up edit, repairing a corrupted page, a JavaScript bug fix verified by `npm test`, a Python CLI and a `package.json` edit; it verifies the resulting files (only CSS/JS the page actually loads counts).
 
 ---
 

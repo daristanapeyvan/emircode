@@ -21,8 +21,8 @@ import {
   wrapUntrustedWebResult,
 } from './UntrustedData';
 import { AgentStateMachine, AgentState } from './AgentStateMachine';
-import { TaskCompiler, TaskContract } from './TaskContract';
-import { TaskValidator, ValidationReport, looksJsonEscaped } from './TaskValidator';
+import { TaskCompiler, TaskContract, findHtmlTarget, mentionedMenuTexts } from './TaskContract';
+import { TaskValidator, ValidationReport, looksJsonEscaped, extractMenuLinks, MenuLink } from './TaskValidator';
 import { WebAccessService } from '../web/WebAccessService';
 import { useSettingsStore } from '@/stores/settingsStore';
 import {
@@ -54,6 +54,7 @@ import {
   definitionLoss,
   detectDestructiveRewrite,
   mergeJsonPreservingKeys,
+  damageFromChange,
 } from './FileSanity';
 
 export interface AgentEngineCallbacks {
@@ -114,91 +115,88 @@ export function findClosestPath(requestedPath: string, projectFiles: string[]): 
   return null;
 }
 
+/** A clause that asks for something (Turkish or English verb, or a requirement such as "olsun"). */
+const ACTION_WORD = new RegExp(
+  '(?:^|[\\s,(\'"])(?:' +
+    'ekle|yaz|oluştur|güncelle|düzelt|sil|kaldır|çalıştır|yap|derle|kur|gönder|taşı|değiştir|ayarla|tasarla|hazırla|' +
+    'üret|incele|kontrol\\s+et|test\\s+et|bağla|çevir|dönüştür|göster|gizle|getir|kullan|uygula|koy|ayır|birleştir|' +
+    'sırala|listele|hesapla|doğrula|yönlendir|olsun|olmalı|olacak|olmasın|commit|push|' +
+    'add|create|make|build|fix|write|update|change|remove|delete|implement|get|set|move|link|style|test|run|' +
+    'ensure|use|show|hide|replace|rename|refactor|convert|display|include|should|must|need' +
+    ')',
+  'i'
+);
+/** A clause that only makes sense together with the previous one ("Get these working"). */
+const REFERS_BACK = /^(?:ve\s+|and\s+)?(?:these|those|them|it|this|that|bunlar|bunları|bunu|bunun|onlar|onları|onu|şunları|şunu|hepsi|hepsini|tümünü)\b/i;
+
+/**
+ * Splits a request into a checklist only where the user clearly listed separate items: numbered
+ * or bulleted lines, or clauses joined by sequencing words ("…, sonra …", "then"). Sentences,
+ * commas, semicolons and line breaks alone never split a request — "Home About Services
+ * Contact\n\nGet these working." is ONE task about those menu items. A split that would leave a
+ * fragment without an action or a clause that points back ("these", "bunları") is not made.
+ */
 export function decomposeGoalIntoSubtasks(goal: string): TaskChecklistItem[] {
   const trimmed = goal.trim();
   if (!trimmed) return [];
-  const rawTasks: string[] = [];
+  const single = (): TaskChecklistItem[] => [{ id: 'task_1', description: trimmed, status: 'in_progress' }];
 
-  // 1. Numbered lists (1. ... 2. ...)
-  if (/\b(?:1\.|1\))\s+/.test(trimmed)) {
-    const parts = trimmed.split(/(?=(?:^|\n|\s)\d+[\.\)]\s+)/);
-    for (const part of parts) {
-      const clean = part.replace(/^[\s\n]*\d+[\.\)]\s*/, '').trim();
-      if (clean.length > 0) rawTasks.push(clean);
-    }
-  }
-  // 2. Bullet points
-  else if (/(?:^|\n)\s*[-*•]\s+/.test(trimmed)) {
-    const lines = trimmed.split(/\n+/);
-    for (const line of lines) {
-      const clean = line.replace(/^\s*[-*•]\s+/, '').trim();
-      if (clean.length > 0) rawTasks.push(clean);
-    }
-  }
-  // 3. Explicit sequencing words and imperative verbs followed by "," or "." (with constraint separation).
-  // Generic suffixes are not used as split points: "ürün," / "için," are not instructions, and
-  // commas inside parentheses belong to the same item ("menü (en az 6 ürün, fiyatlarıyla)").
-  else {
-    const IMPERATIVE =
-      '(?:ekle|yaz|oluştur|güncelle|düzelt|sil|kaldır|çalıştır|yap|derle|kur|gönder|taşı|değiştir|ayarla|tasarla|hazırla|üret|incele|kontrol\\s+et|test\\s+et|commit\\s+et|push\\s+et)(?:y?[iıuü]n(?:iz|ız|uz|üz)?|y?elim|y?alım)?';
-    const masked = trimmed.replace(/\([^()]*\)/g, (m) => m.replace(/,/g, '\u0001').replace(/\./g, '\u0002'));
-    let normalized = masked
-      .replace(/,\s*(?:daha\s+sonra|ardından|sonrasında|ve\s+son\s+olarak|ve\s+sonra|sonra|then|after\s+that|and\s+then|finally)\s+/gi, ' <__SPLIT__> ')
-      .replace(/;\s*/g, ' <__SPLIT__> ')
-      .replace(/\n+/g, ' <__SPLIT__> ')
-      .replace(/\.\s+(?=(?:daha\s+sonra|ardından|sonrasında|sonra|son\s+olarak|ayrıca|bir\s+de|then|after\s+that|finally|also)[\s,])/gi, ' <__SPLIT__> ')
-      .replace(new RegExp(`(^|\\s)(${IMPERATIVE})([,.])\\s+`, 'gi'), (m, pre: string, verb: string, punct: string, offset: number, full: string) => {
-        // "uygulaması yaz: ekle, listele, sil" — words listed after a colon are items, not instructions
-        const before = full.slice(Math.max(0, offset - 80), offset);
-        if (punct === ',' && before.lastIndexOf(':') > before.lastIndexOf('<__SPLIT__>')) return m;
-        return `${pre}${verb} <__SPLIT__> `;
-      })
-      .replace(/\s+(?:ve\s+commit|and\s+commit|ve\s+test\s+et|and\s+test)\b/gi, (m) => ' <__SPLIT__> ' + m.trim())
-      .replace(/,\s*and\s+(?:finally|then)\s+/gi, ' <__SPLIT__> ');
+  const clean = (text: string) => text.replace(/^[,;.:\s]+|[,;.\s]+$/g, '').trim();
+  let items: string[] = [];
+  let explicitList = false;
 
-    const segments = normalized.split(' <__SPLIT__> ').map((s) => s.replace(/\u0001/g, ',').replace(/\u0002/g, '.'));
-    const isConstraint = (text: string) => {
-      const lower = text.toLowerCase();
-      return (
-        /^(?:sadece|yalnızca|only|just)\b/i.test(lower) ||
-        /^(?:bu|şu|o)\s+(?:html|dosya|kod|bileşen)/i.test(lower) ||
-        /\b(?:tanımlı\s+olacak|dahil\s+olacak|bulunacak|içerecek|içinde\s+olacak|olmasın|oluşturulmasın|yapılmasın)\b/i.test(lower) ||
-        /\b(?:tek\s+(?:bir\s+)?dosya|başka\s+dosya\s+oluşturma)\b/i.test(lower)
+  const numbered = trimmed.split(/\n(?=\s*\d+[.)]\s+)/);
+  const bulleted = trimmed.split(/\n(?=\s*[-*•]\s+)/);
+  if (numbered.filter((p) => /^\s*\d+[.)]\s+/.test(p)).length >= 2) {
+    // "Şunları yap:\n1. …\n2. …" — the lead-in line stays context, the numbered lines are the items
+    items = numbered.filter((p) => /^\s*\d+[.)]\s+/.test(p)).map((p) => clean(p.replace(/^\s*\d+[.)]\s+/, '')));
+    explicitList = true;
+  } else if (bulleted.filter((p) => /^\s*[-*•]\s+/.test(p)).length >= 2) {
+    items = bulleted.filter((p) => /^\s*[-*•]\s+/.test(p)).map((p) => clean(p.replace(/^\s*[-*•]\s+/, '')));
+    explicitList = true;
+  } else if (/^(?:[^\n]*:\s*)?1[.)]\s+\S/.test(trimmed) && /\s2[.)]\s+\S/.test(trimmed)) {
+    // One-line list: "1) footer ekle 2) başlıkları mavi yap"
+    items = trimmed
+      .split(/\s(?=\d+[.)]\s+\S)/)
+      .filter((p) => /^\d+[.)]\s+/.test(p))
+      .map((p) => clean(p.replace(/^\d+[.)]\s+/, '')));
+    explicitList = true;
+  } else {
+    // Only explicit sequencing words split running text; parentheses are never split.
+    const masked = trimmed.replace(/\([^()]*\)/g, (m) => m.replace(/[,.]/g, (c) => (c === ',' ? '\u0001' : '\u0002')));
+    // A comma or sentence end is required before "sonra": "5 saniye sonra kapansın" is one clause.
+    const marked = masked
+      .replace(/,\s*(?:ve\s+)?(?:daha\s+sonra|ardından|sonrasında|en\s+son(?:unda)?|son\s+olarak|sonra|and\s+then|then|after\s+that|finally)\s+/gi, '\u0000')
+      .replace(/\s+(?:ve\s+(?:daha\s+sonra|sonra|en\s+son(?:unda)?|son\s+olarak)|and\s+then|and\s+finally)\s+/gi, '\u0000')
+      .replace(/[.!]\s+(?=(?:daha\s+sonra|ardından|sonrasında|en\s+son(?:unda)?|son\s+olarak|sonra|then|after\s+that|afterwards|finally)[\s,])/gi, '\u0000');
+    items = marked
+      .split('\u0000')
+      .map((s) =>
+        clean(
+          s
+            .replace(/\u0001/g, ',')
+            .replace(/\u0002/g, '.')
+            .replace(/^(?:daha\s+sonra|ardından|sonrasında|en\s+son(?:unda)?|son\s+olarak|sonra|then|after\s+that|afterwards|finally),?\s+/i, '')
+        )
       );
-    };
-
-    const filteredTasks: string[] = [];
-    for (const seg of segments) {
-      let clean = seg.trim().replace(/^(?:ve\s+|and\s+|daha\s+sonra\s+|ardından\s+|sonrasında\s+|then\s+)/i, '').trim();
-      if (!clean) continue;
-      if (isConstraint(clean)) {
-        if (filteredTasks.length > 0) {
-          filteredTasks[filteredTasks.length - 1] += ` [Kural: ${clean}]`;
-        }
-      } else {
-        filteredTasks.push(clean);
-      }
-    }
-    if (filteredTasks.length > 0) {
-      rawTasks.push(...filteredTasks);
-    } else {
-      rawTasks.push(trimmed);
-    }
   }
+  items = items.filter((s) => s.length >= 2);
 
-  const tasks: TaskChecklistItem[] = [];
-  const list = rawTasks.length > 1 ? rawTasks : [trimmed];
-  list.forEach((desc, idx) => {
-    const cleanDesc = desc.replace(/^[,;.\s]+|[,;.\s]+$/g, '').trim();
-    if (cleanDesc.length >= 2) {
-      tasks.push({
-        id: `task_${idx + 1}`,
-        description: cleanDesc,
-        status: idx === 0 ? 'in_progress' : 'pending',
-      });
-    }
-  });
-  return tasks;
+  // A clause that points back belongs to the previous one.
+  const merged: string[] = [];
+  for (const item of items) {
+    if (merged.length > 0 && REFERS_BACK.test(item)) merged[merged.length - 1] += `. ${item}`;
+    else merged.push(item);
+  }
+  if (merged.length < 2) return single();
+  // Split running text only when every part is an instruction of its own.
+  if (!explicitList && !merged.every((item) => ACTION_WORD.test(item))) return single();
+
+  return merged.map((description, idx) => ({
+    id: `task_${idx + 1}`,
+    description,
+    status: idx === 0 ? 'in_progress' : 'pending',
+  }));
 }
 
 /**
@@ -915,9 +913,23 @@ export class AgentEngine {
     const modStrategy = agentOpt?.modificationStrategy || 'smart_injection';
 
     stateMachine.transition('PLANNING', 'Hedef analiz ediliyor ve sözleşmeler derleniyor');
+    // The page's menu links: "Home About Services Contact — get these working" names them, and a
+    // 7B model otherwise did not connect "these" to the menu (it built a modal instead).
+    const menuPage = findHtmlTarget(projectFiles);
+    let menuLinks: MenuLink[] = [];
+    if (menuPage) {
+      try {
+        const pageRes = await window.electronAPI?.readWorkspaceFile(menuPage);
+        if (pageRes?.success && pageRes.content) menuLinks = extractMenuLinks(pageRes.content);
+      } catch {
+        menuLinks = [];
+      }
+    }
+    const namedMenuLinks = menuLinks.filter((l) => l.text && mentionedMenuTexts(goal, [l.text]).length > 0);
     let contracts: TaskContract[] = TaskCompiler.compile(goal, {
       projectFiles,
       singleFile: synthesisStrategy === 'single_file',
+      menuTexts: menuLinks.map((l) => l.text).filter(Boolean),
     });
     const subtasks = decomposeGoalIntoSubtasks(goal);
     const ledger: AgentMemoryLedger = {
@@ -960,8 +972,8 @@ export class AgentEngine {
         id: `step_tasks_init_${Date.now()}`,
         timestamp: Date.now(),
         type: 'system_notice',
-        content: `📋 Çoklu Görev Ayrıştırıldı (${subtasks.length} Alt Görev):\n${subtasks
-          .map((s, i) => `  ${i + 1}. [${s.status === 'in_progress' ? 'Aktif Odak' : 'Beklemede'}] ${s.description}`)
+        content: `📋 İstekteki liste kontrol listesine alındı (${subtasks.length} madde):\n${subtasks
+          .map((s, i) => `  ${i + 1}. ${s.description}`)
           .join('\n')}`,
         status: 'success',
       });
@@ -983,8 +995,8 @@ export class AgentEngine {
     const latestContent = new Map<string, string>();
     /** Edits applied in this run (path:target:replacement hash -> step), to refuse identical re-applies. */
     const appliedEdits = new Map<string, number>();
-    /** Per file: the check errors after the last change, and how many changes in a row left them as they were. */
-    const errorSignatures = new Map<string, string>();
+    /** Per file: the number of check errors after the last change, and how many changes in a row did not reduce it. */
+    const errorCounts = new Map<string, number>();
     const unchangedErrorStreak = new Map<string, number>();
     let treeVersion = 0;
     let lastAcceptance: { passed: number; total: number } | null = null;
@@ -1046,11 +1058,21 @@ export class AgentEngine {
       return `\nLines ${from}-${Math.min(to, lineCount(content))} of "${filePath}":\n${numberedLines(content, from, to)}`;
     };
 
+    /** Numbered lines of `content` around the first line an issue names (for refused changes). */
+    const issueExcerpt = (content: string, issues: SanityIssue[], label: string) => {
+      const lineMatch = issues.map((i) => i.message.match(/line (\d+)/)).find(Boolean);
+      if (!lineMatch) return '';
+      const line = parseInt(lineMatch[1], 10);
+      const from = Math.max(1, line - 3);
+      const to = Math.min(line + 5, lineCount(content));
+      return `\n${label} lines ${from}-${to}:\n${numberedLines(content, from, to)}`;
+    };
+
     /** Restates a file's unresolved check failures where the model looks last (end of the context). */
     const openProblemsFor = (filePath: string) => {
       const issues = (openSanityIssues.get(filePath) || []).filter((i) => i.severity === 'error');
       if (issues.length === 0) return '';
-      return `\nStill wrong in "${filePath}" — fix exactly this with replace_lines (use the line numbers below) or edit_file:\n${formatSanityIssues(issues)}${problemExcerpt(filePath)}\n`;
+      return `\nStill wrong in "${filePath}" — fix exactly this and change only the line(s) that are wrong (replace_lines with the line numbers below, or edit_file):\n${formatSanityIssues(issues)}${problemExcerpt(filePath)}\n`;
     };
 
     /** Firmer wording once the model starts repeating itself (small models need the explicit way out). */
@@ -1129,29 +1151,27 @@ export class AgentEngine {
       }
       latestContent.set(filePath, finalContent);
 
-      // A change that leaves the same check errors in place is not progress (line numbers are
-      // ignored because every edit shifts them); otherwise small models could "edit" forever.
-      const errorSig = issues
-        .filter((i) => i.severity === 'error')
-        .map((i) => i.message.replace(/\d+/g, '#'))
-        .join('|');
-      const unchanged = errorSig !== '' && errorSignatures.get(filePath) === errorSig;
-      const errorStreak = unchanged ? (unchangedErrorStreak.get(filePath) || 0) + 1 : 0;
-      errorSignatures.set(filePath, errorSig);
+      // On a broken file only fewer errors is progress: swapping one error for another (a
+      // qwen2.5-coder run patched a page for 30 steps this way) must reach the no-progress brake.
+      const errorCount = issues.filter((i) => i.severity === 'error').length;
+      const previousCount = errorCounts.get(filePath);
+      const stuck = errorCount > 0 && previousCount !== undefined && errorCount >= previousCount;
+      const errorStreak = stuck ? (unchangedErrorStreak.get(filePath) || 0) + 1 : 0;
+      errorCounts.set(filePath, errorCount);
       unchangedErrorStreak.set(filePath, errorStreak);
-      if (unchanged) stepsWithoutProgress++;
+      if (stuck) stepsWithoutProgress++;
       else stepsWithoutProgress = 0;
 
       if (issues.length > 0) {
         parts.push(
-          `Automatic check of ${filePath} found problems:\n${formatSanityIssues(issues)}${problemExcerpt(filePath)}\nFix them before finishing (replace_lines with the line numbers shown is the easiest way).`
+          `Automatic check of ${filePath} found problems:\n${formatSanityIssues(issues)}${problemExcerpt(filePath)}\nFix them before finishing: change only the wrong line(s) with replace_lines (repeat the lines of the range that must stay), or rewrite the whole file with write_file.`
         );
         if (errorStreak >= 2) {
           parts.push(
-            `This problem is unchanged after your last ${errorStreak + 1} changes of "${filePath}" — they did not fix it. ${
+            `"${filePath}" still has errors after your last ${errorStreak + 1} changes — patching single lines is not fixing it. ${
               finalContent.length <= 6000
-                ? `Here is the complete current file with line numbers; find the exact line the message names and fix only that:\n${wrapUntrustedFileContent(filePath, numberedLines(finalContent))}`
-                : 'Read the lines around the reported line again and fix exactly that place.'
+                ? `Here is the complete current file with line numbers. Rewrite the WHOLE file correctly with write_file (for a web page: one <style> block inside <head>, the content in <body>, one <script> block right before </body>):\n${wrapUntrustedFileContent(filePath, numberedLines(finalContent))}`
+                : 'Read the reported part of the file again and rewrite that whole section correctly in one edit.'
             }`
           );
         }
@@ -1271,9 +1291,20 @@ export class AgentEngine {
         `CONTEXT FROM THE PREVIOUS TASK IN THIS SESSION (for reference only — the new TASK above may refer to it; do exactly what the new TASK asks and do not resume unrelated work from before):\n${runOptions.previousContext.trim().slice(0, 2000)}`
       );
     }
+    if (menuPage && namedMenuLinks.length >= 2) {
+      const lines = namedMenuLinks.map((l) => l.line);
+      taskParts.push(
+        `REFERENCED ELEMENTS: ${namedMenuLinks.map((l) => `"${l.text}"`).join(', ')} in the TASK are the menu links of "${menuPage}" (lines ${Math.min(...lines)}-${Math.max(...lines)}, currently ${namedMenuLinks
+          .map((l) => `href="${l.href ?? ''}"`)
+          .filter((v, i, a) => a.indexOf(v) === i)
+          .join(', ')}). The request is about these links.`
+      );
+    }
     if (subtasks.length > 1) {
       taskParts.push(
-        `CHECKLIST (complete every item, in order):\n${subtasks.map((s, i) => `${i + 1}. ${s.description}`).join('\n')}`
+        `CHECKLIST (the items the user listed in the TASK above — parts of that one task, not separate tasks; complete every item):\n${subtasks
+          .map((s, i) => `${i + 1}. ${s.description}`)
+          .join('\n')}`
       );
     }
     if (contracts.length > 0) {
@@ -1348,6 +1379,7 @@ export class AgentEngine {
       contracts = TaskCompiler.mergeDirective(contracts, directive, {
         projectFiles: ledger.projectTree,
         singleFile: synthesisStrategy === 'single_file',
+        menuTexts: menuLinks.map((l) => l.text).filter(Boolean),
       });
       ledger.subtasks.push({
         id: `task_steer_${Date.now()}`,
@@ -2277,6 +2309,17 @@ export class AgentEngine {
             }
           }
 
+          if (exists && currentContent !== null && currentContent !== content) {
+            const damage = damageFromChange(filePath, currentContent, content);
+            if (damage.length > 0) {
+              rejectWrite(
+                `"${filePath}" yazılmadı: yeni içerik dosyayı bozacaktı (${damage[0].message.slice(0, 160)}).`,
+                `[NOT WRITTEN]: the new content would break "${filePath}", so the file is unchanged. The automatic check would report:\n${formatSanityIssues(damage)}${issueExcerpt(content, damage, 'Your version would read at')}\nSend the complete file again with these problems fixed.`
+              );
+              continue;
+            }
+          }
+
           if (exists && currentContent === content) {
             repeatStreak++;
             stepsWithoutProgress++;
@@ -2511,6 +2554,24 @@ export class AgentEngine {
             stepsWithoutProgress++;
             notice(`"${filePath}" düzenlemesi reddedildi: yer tutucu içeriyor ("${lazy}").`, 'rejected');
             pushExchange(assistantText, parsed.rawJson, `[NOT APPLIED]: "replace" contains the placeholder "${lazy}" instead of real code. Write the actual code.`);
+            continue;
+          }
+
+          // Do no harm: an edit that breaks a working file (or makes a broken one worse) is not
+          // applied, so the model never has to patch its own breakage line by line.
+          const damage = damageFromChange(filePath, currentContent, newFullContent);
+          if (damage.length > 0) {
+            consecutiveErrors++;
+            stepsWithoutProgress++;
+            notice(`"${filePath}" düzenlemesi uygulanmadı: dosyayı bozacaktı (${damage[0].message.slice(0, 160)}).`, 'rejected', 'Dosya Denetimi');
+            const rangeHint = payload.lineRange
+              ? 'replace_lines replaces EVERY line from start_line to end_line with "content": include each line of that range that must stay (to insert a line, repeat the original line in content) and keep the range as small as possible.'
+              : '"replace" must keep every tag, bracket and quote of the text it replaces that is still needed.';
+            pushExchange(
+              assistantText,
+              parsed.rawJson,
+              `[NOT APPLIED]: this edit would break "${filePath}", so the file is unchanged. With your edit the automatic check would report:\n${formatSanityIssues(damage)}${issueExcerpt(newFullContent, damage, 'Your version would read at')}\n${rangeHint} Send a corrected edit.`
+            );
             continue;
           }
 

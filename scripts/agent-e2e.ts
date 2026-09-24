@@ -11,18 +11,19 @@
  * Usage:
  *   node scripts/run-ts-test.mjs scripts/agent-e2e.ts <model> [scenario,scenario,...] [outDir]
  *   e.g. node scripts/run-ts-test.mjs scripts/agent-e2e.ts qwen2.5-coder:7b web-new,web-followup,js-bugfix
- * Scenarios: web-new, web-followup, repair-corrupted, js-bugfix, python-cli, json-config
+ * Scenarios: web-new, web-followup, repair-corrupted, js-bugfix, python-cli, json-config,
+ *            nav-links, six-products (both replay requests from the in-app reports)
  */
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import * as crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { agentEngine } from '../src/lib/agent/AgentEngine';
 import { useSettingsStore } from '../src/stores/settingsStore';
 import { DEFAULT_SETTINGS } from '../src/types/settings';
 import { checkFileSanity } from '../src/lib/agent/FileSanity';
 import { looksJsonEscaped, extractLocalScripts, extractLocalStylesheets } from '../src/lib/agent/TaskValidator';
+import { makeElectronApi, runNpm, IGNORED } from './electron-api-mock';
 
 const [model, scenarioArg, outDirArg] = process.argv.slice(2);
 if (!model) {
@@ -32,138 +33,108 @@ if (!model) {
 const outDir = path.resolve(outDirArg || path.join(os.tmpdir(), 'emir-code-agent-e2e'));
 fs.mkdirSync(outDir, { recursive: true });
 
-const IS_WIN = process.platform === 'win32';
-/** npm is a .cmd shim on Windows and needs a shell there. */
-function runNpm(args: string[], cwd: string, timeout = 60000) {
-  return IS_WIN
-    ? spawnSync(['npm.cmd', ...args].join(' '), { cwd, encoding: 'utf8', timeout, shell: true })
-    : spawnSync('npm', args, { cwd, encoding: 'utf8', timeout });
-}
-
 /** A page damaged the way v1.5.x wrote it to disk: one line, literal \n and \" sequences. */
 const CORRUPTED_PAGE =
   '<!DOCTYPE html>\\n<html lang=\\"tr\\">\\n<head>\\n  <meta charset=\\"UTF-8\\">\\n  <title>Arkadaşım İçin</title>\\n  <style>\\n    .container { max-width: 640px; margin: 0 auto; padding: 2rem; background: #fff; }\\n    h1 { color: #b91c1c; }\\n  </style>\\n</head>\\n<body>\\n  <div class=\\"container\\">\\n    <h1>Sevgili Dostum</h1>\\n    <p>Seninle geçen her gün bir hediye.</p>\\n    <button id=\\"hello\\">Merhaba de</button>\\n  </div>\\n  <script>\\n    document.getElementById(\\"hello\\").addEventListener(\\"click\\", () => alert(\\"Merhaba!\\"));\\n  </script>\\n</body>\\n</html>';
 
-const sha = (s: string) => crypto.createHash('sha256').update(s, 'utf8').digest('hex');
-const IGNORED = new Set(['node_modules', '.git', 'dist', 'build', '__pycache__', '.venv']);
+/** A landing page whose menu links all point to "#" (in-app report: "Get these working"). */
+const NAV_PAGE = `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nova Technology</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 0; }
+        header { background-color: #333; color: white; padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; }
+        nav a { color: white; text-decoration: none; margin: 0 15px; }
+        .hero { background-color: #f4f4f4; padding: 50px 20px; text-align: center; }
+        .features { display: flex; flex-wrap: wrap; justify-content: center; padding: 20px; }
+        .feature-card { background-color: white; border: 1px solid #ddd; margin: 10px; padding: 20px; width: calc(33% - 40px); }
+        footer { background-color: #333; color: white; text-align: center; padding: 10px 20px; }
+        @media (max-width: 768px) {
+            .feature-card { width: calc(100% - 40px); }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <strong>Nova</strong>
+        <nav>
+            <a href="#">Home</a>
+            <a href="#">About</a>
+            <a href="#">Services</a>
+            <a href="#">Contact</a>
+        </nav>
+    </header>
+    <section class="hero">
+        <h1>Welcome to Nova Technology</h1>
+        <p>Innovating the future with cutting-edge solutions.</p>
+        <button onclick="showAlert()">Learn More</button>
+    </section>
+    <section class="features">
+        <div class="feature-card"><h3>AI Solutions</h3><p>Empowering businesses with artificial intelligence.</p></div>
+        <div class="feature-card"><h3>Cloud Services</h3><p>Scalable and secure cloud infrastructure.</p></div>
+        <div class="feature-card"><h3>Data Analytics</h3><p>Insights that drive better decisions.</p></div>
+    </section>
+    <footer>
+        <p>&copy; 2026 Nova Technology. All rights reserved.</p>
+    </footer>
+    <script>
+        function showAlert() {
+            alert('Thank you for your interest!');
+        }
+    </script>
+</body>
+</html>
+`;
 
-function makeElectronApi(root: string) {
-  const rootAbs = path.resolve(root);
-  const resolve = (rel: string) => {
-    const p = path.resolve(rootAbs, rel || '.');
-    if (p !== rootAbs && !p.startsWith(rootAbs + path.sep)) throw new Error('Yol çalışma alanı dışında');
-    return p;
-  };
-  const tokens = new Map<string, any>();
-  const scan = (dir: string, depth: number, max: number): any[] => {
-    if (depth > max) return [];
-    const out: any[] = [];
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      if (IGNORED.has(entry.name)) continue;
-      const full = path.join(dir, entry.name);
-      const rel = path.relative(rootAbs, full).replace(/\\/g, '/');
-      if (entry.isDirectory()) out.push({ name: entry.name, path: full, relativePath: rel, isDirectory: true, children: scan(full, depth + 1, max) });
-      else out.push({ name: entry.name, path: full, relativePath: rel, isDirectory: false, size: fs.statSync(full).size });
-    }
-    return out.sort((a, b) => (a.isDirectory === b.isDirectory ? a.name.localeCompare(b.name) : a.isDirectory ? -1 : 1));
-  };
-  const walkFiles = (dir: string, acc: string[] = []) => {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      if (IGNORED.has(entry.name)) continue;
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) walkFiles(full, acc);
-      else acc.push(full);
-    }
-    return acc;
-  };
-  return {
-    readGit: async () => ({ success: false, output: '', error: 'fatal: not a git repository' }),
-    listWorkspaceFiles: async (opts?: { subPath?: string; maxDepth?: number }) => {
-      try {
-        return { success: true, files: scan(resolve(opts?.subPath || ''), 1, opts?.maxDepth || 5) };
-      } catch (e: any) {
-        return { success: false, error: e.message };
-      }
-    },
-    readWorkspaceFile: async (rel: string) => {
-      try {
-        const content = fs.readFileSync(resolve(rel), 'utf8');
-        return { success: true, content, hash: sha(content) };
-      } catch (e: any) {
-        return { success: false, error: e.message };
-      }
-    },
-    searchWorkspaceCode: async (query: string) => {
-      const matches: any[] = [];
-      for (const file of walkFiles(rootAbs)) {
-        const lines = fs.readFileSync(file, 'utf8').split('\n');
-        lines.forEach((line, i) => {
-          if (line.toLowerCase().includes(query.toLowerCase())) {
-            matches.push({ relativePath: path.relative(rootAbs, file).replace(/\\/g, '/'), lineNumber: i + 1, lineContent: line });
-          }
-        });
-      }
-      return { success: true, matches: matches.slice(0, 200) };
-    },
-    requestMutationToken: async ({ relativePath, operation, expectedBaseHash, allowOverwrite }: any) => {
-      const p = resolve(relativePath);
-      let diskHash = '';
-      if (fs.existsSync(p)) {
-        diskHash = sha(fs.readFileSync(p, 'utf8'));
-        if ((operation === 'edit' || operation === 'delete') && expectedBaseHash && diskHash !== expectedBaseHash) {
-          return { success: false, conflict: true, error: 'Çakışma Tespiti: Dosya dışarıdan değiştirilmiş.' };
-        }
-        if (operation === 'create' && !allowOverwrite) {
-          return { success: false, conflict: true, error: `Oluşturulmak istenen "${relativePath}" dosyası diskte zaten mevcut.` };
-        }
-      } else if (operation === 'edit' || operation === 'delete') {
-        return { success: false, error: `Hedef dosya (${relativePath}) diskte bulunamadı.` };
-      }
-      const token = crypto.randomBytes(16).toString('hex');
-      tokens.set(token, { relativePath, operation });
-      return { success: true, token, baseHash: diskHash };
-    },
-    applyApprovedMutation: async ({ token, relativePath, operation, newContent }: any) => {
-      const rec = tokens.get(token);
-      if (!rec || rec.relativePath !== relativePath || rec.operation !== operation) return { success: false, error: 'token mismatch' };
-      tokens.delete(token);
-      try {
-        const p = resolve(relativePath);
-        if (operation === 'delete') fs.unlinkSync(p);
-        else {
-          fs.mkdirSync(path.dirname(p), { recursive: true });
-          fs.writeFileSync(p, newContent || '', 'utf8');
-        }
-        return { success: true, approvedHash: sha(newContent || '') };
-      } catch (err: any) {
-        // electron/main.ts returns failures instead of throwing
-        return { success: false, error: err.message };
-      }
-    },
-    runApprovedCommand: async ({ binary, args, timeoutMs }: any) => {
-      // Mirrors electron/main.ts workspace:runApprovedCommand policy
-      const allowed = ['npm', 'node', 'cargo', 'pytest', 'python'];
-      if (!allowed.includes(binary)) return { success: false, exitCode: 1, output: '', error: `Güvenlik Politikası: "${binary}" yürütülebilir dosyasına izin verilmiyor.` };
-      if (args.some((a: string) => /[;&|`$<>\r\n]/.test(a))) return { success: false, exitCode: 1, output: '', error: 'Güvenlik Koruması: yasaklı karakter' };
-      if (binary === 'npm') {
-        const sub = (args[0] || '').toLowerCase();
-        if (!['test', 'run'].includes(sub)) return { success: false, exitCode: 1, output: '', error: `Güvenlik Politikası: npm altında sadece test ve tanımlı betikler çalıştırılabilir. Verilen: "${sub}"` };
-        if (!fs.existsSync(path.join(rootAbs, 'package.json'))) return { success: false, exitCode: 1, output: '', error: 'Proje klasöründe "package.json" dosyası mevcut değil. npm komutları çalıştırılamaz.' };
-        if (sub === 'run' && !['test', 'build', 'lint', 'typecheck', 'check'].includes((args[1] || '').toLowerCase())) {
-          return { success: false, exitCode: 1, output: '', error: `Güvenlik Politikası: "npm run ${args[1]}" izin verilen betikler (test, build, lint, typecheck) arasında değil.` };
-        }
-      }
-      const res =
-        binary === 'npm'
-          ? runNpm(args, rootAbs, timeoutMs || 60000)
-          : spawnSync(binary, args, { cwd: rootAbs, encoding: 'utf8', timeout: timeoutMs || 60000, env: { ...process.env, PYTHONIOENCODING: 'utf-8' } });
-      const output = `${res.stdout || ''}${res.stderr || ''}`;
-      return { success: res.status === 0, exitCode: res.status, output, error: res.error ? String(res.error.message) : undefined };
-    },
-    webSearch: async () => { throw new Error('web disabled in harness'); },
-    webFetch: async () => { throw new Error('web disabled in harness'); },
-  };
-}
+/** A shop page with two products and a cart counter (in-app report: "6 products" run that fell apart). */
+const SHOP_PAGE = `<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Süt Dükkanı</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; background: #f7f7f7; }
+    header { background: #2b6cb0; color: #fff; padding: 16px; display: flex; justify-content: space-between; }
+    .products { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; padding: 24px; }
+    .product { background: #fff; border-radius: 8px; padding: 16px; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1); }
+    .product h3 { margin: 0 0 8px; }
+    .product button { background: #2b6cb0; color: #fff; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <header><h1>Süt Dükkanı</h1><span>Sepet: <strong id="cart-count">0</strong></span></header>
+  <main class="products">
+    <div class="product">
+      <h3>Tam Yağlı Süt</h3>
+      <p>Günlük taze, 1 litre cam şişede.</p>
+      <p class="price">35 TL</p>
+      <button class="add-to-cart">Sepete Ekle</button>
+    </div>
+    <div class="product">
+      <h3>Süzme Yoğurt</h3>
+      <p>Kıvamlı, 500 gram.</p>
+      <p class="price">55 TL</p>
+      <button class="add-to-cart">Sepete Ekle</button>
+    </div>
+  </main>
+  <script>
+    let count = 0;
+    document.querySelectorAll('.add-to-cart').forEach((button) => {
+      button.addEventListener('click', () => {
+        count += 1;
+        document.getElementById('cart-count').textContent = String(count);
+      });
+    });
+  </script>
+</body>
+</html>
+`;
+
+
 
 // ---------------------------------------------------------------------------
 // Scenarios
@@ -342,6 +313,50 @@ const SCENARIOS: Scenario[] = [
       const run = spawnSync('node', ['src/index.js'], { cwd: dir, encoding: 'utf8' });
       notes.push(`start=${start} keptTest=${keptTest} output=${JSON.stringify((run.stdout || '').trim())}`);
       return { ok: !!pkg && /node\s+src\/index\.js/.test(start || '') && keptTest && /merhaba/i.test(run.stdout || ''), notes };
+    },
+  },
+  {
+    // In-app report: the request was split into "Home About Services Contact" + "Get these working".
+    id: 'nav-links',
+    goal: 'Home About Services Contact\n\nGet these working. You can change the page content using JavaScript.',
+    seed: (dir) => {
+      fs.writeFileSync(path.join(dir, 'index.html'), NAV_PAGE, 'utf8');
+    },
+    verify: (dir) => {
+      const page = fs.readFileSync(path.join(dir, 'index.html'), 'utf8');
+      const nav = page.match(/<nav\b[\s\S]*?<\/nav>/i)?.[0] || '';
+      const hrefs = [...nav.matchAll(/href\s*=\s*["']#([\w-]+)["']/gi)].map((m) => m[1]);
+      const ids = new Set([...page.matchAll(/\bid\s*=\s*["']([\w-]+)["']/gi)].map((m) => m[1]));
+      const anchored = hrefs.filter((h) => ids.has(h)).length;
+      const scripts = [...page.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)].map((m) => m[1]).join('\n');
+      const scripted = /addEventListener|onclick/.test(scripts) && /nav|data-(?:page|section|target)|nav-link|href|hash/.test(scripts);
+      const styleTags = (page.match(/<style\b/gi) || []).length;
+      const scriptTags = (page.match(/<script\b/gi) || []).length;
+      const sanity = sanityErrorsIn(dir);
+      return {
+        ok: (anchored >= 3 || scripted) && styleTags === 1 && scriptTags <= 2 && sanity.length === 0,
+        notes: [`navAnchorsToIds=${anchored} scriptedNav=${scripted} styleTags=${styleTags} scriptTags=${scriptTags}`, ...sanity],
+      };
+    },
+  },
+  {
+    // In-app report: this request turned a working page into dozens of scattered <style>/<script> tags.
+    id: 'six-products',
+    goal: '2 tane değil 6 tane ürün listelenecek html de',
+    seed: (dir) => {
+      fs.writeFileSync(path.join(dir, 'index.html'), SHOP_PAGE, 'utf8');
+    },
+    verify: (dir) => {
+      const page = fs.readFileSync(path.join(dir, 'index.html'), 'utf8');
+      const products = (page.match(/class\s*=\s*["']product["']/g) || []).length;
+      const styleTags = (page.match(/<style\b/gi) || []).length;
+      const scriptTags = (page.match(/<script\b/gi) || []).length;
+      const cartScript = /addEventListener/.test(page) && /add-to-cart/.test(page) && /cart-count/.test(page);
+      const sanity = sanityErrorsIn(dir);
+      return {
+        ok: products === 6 && styleTags === 1 && scriptTags === 1 && cartScript && sanity.length === 0,
+        notes: [`products=${products} styleTags=${styleTags} scriptTags=${scriptTags} cartScript=${cartScript}`, ...sanity],
+      };
     },
   },
 ];

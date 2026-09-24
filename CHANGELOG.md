@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.1] - 2026-09-25
+
+### Fixed
+- **Requests split into broken "tasks"**: the goal decomposition cut a request at every line break, semicolon, sentence end and imperative verb, so "Home About Services Contact / Get these working. You can change the page content using JavaScript." became two tasks, the first of them just the menu names (phi4:14b in-app report). A request is now split into a checklist only where the user wrote an explicit list (numbered or bulleted lines, or "1) … 2) …") or joined steps with sequencing words ("…, sonra …", "ve en son …", "then"); a part without an action or one that points back ("these", "bunları") keeps the request whole. The checklist is presented to the model as parts of one task.
+- **Edits that took a working page apart**: a qwen2.5-coder run replaced 9-line windows with `replace_lines`, lost the `<script>` line, and then "fixed" each new check error with another window edit — 30 steps later the page was a pile of scattered `<style>`/`<script>` tags. Now:
+  - an edit or rewrite that would introduce errors into a working file is not applied; the model sees what its version would have broken (numbered lines of its own version) and how `replace_lines` must be used,
+  - an edit may not add errors to an already broken file,
+  - on a broken file only fewer errors counts as progress, so swapping one error for another reaches the no-progress stop; after three such edits the model gets the whole numbered file and is told to rewrite it in one go,
+  - line-level hints say which line stays unchanged, and the `replace_lines` description says that every line of the range is replaced.
+
+- **Menu requests misunderstood**: for "Home About Services Contact — get these working" qwen2.5-coder built a pop-up for another button and finished. When a request names the page's menu links (or asks for working links / navbar redirects), the task message now says which elements are meant (`REFERENCED ELEMENTS: "Home", "About", … are the menu links of index.html, lines 24-27`) and a new acceptance check keeps the task open until every menu link leads to an existing section, an existing page or a JavaScript handler; dead links are listed with their line numbers.
+
+### Added
+- Agent benchmark scenarios `nav-links` and `six-products`, replaying the two reported requests and checking that the page stays valid with a single `<style>` and `<script>` block.
+- `test_agent_engine.ts`: integration tests of the whole agent loop with a scripted model (harmful edit refused, menu request grounded and verified, explicit list becomes a checklist), part of `npm test` and CI.
+- Tests: `test_agent_reliability.ts` (220 checks), `test_agent_engine.ts` (12 checks).
+
 ## [1.6.0] - 2026-09-24
 
 ### Fixed
