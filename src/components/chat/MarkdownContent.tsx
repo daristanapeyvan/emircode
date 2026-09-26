@@ -236,7 +236,7 @@ function renderInline(text: string): React.ReactNode {
           href={linkMatch[2]}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-blue-400 hover:text-blue-300 underline underline-offset-2"
+          className="text-zinc-100 underline decoration-zinc-500 underline-offset-2 hover:decoration-zinc-200"
         >
           {linkMatch[1]}
         </a>

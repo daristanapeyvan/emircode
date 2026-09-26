@@ -1,3 +1,4 @@
+import { confirmDialog, noticeDialog } from '@/lib/ui/dialogs';
 import { create } from 'zustand';
 import {
   AgentStatus,
@@ -8,16 +9,46 @@ import {
   AppliedTransaction,
   TaskChecklistItem,
 } from '@/types/agent';
-import { WorkspaceFileInfo } from '../../electron/preload';
+import { WorkspaceFileInfo, ProjectErrorCode } from '../../electron/preload';
 import { agentEngine } from '@/lib/agent/AgentEngine';
 import type { WizardDraft, WizardRunOptions } from '@/lib/wizard/composer';
 import { storageService } from '@/lib/storage/StorageService';
+import { getTranslations } from '@/lib/localization/i18n';
+import { describeProjectError, folderNameOf, projectKey } from '@/lib/utils/projects';
 import { useModelStore } from './modelStore';
 import { useChatStore } from './chatStore';
 import { useSettingsStore } from './settingsStore';
 
 /** Extras of a run started from a wizard (a request typed by hand sends none). */
 export type StartGoalOptions = WizardRunOptions;
+
+/** A project the New Project dialog creates once the chosen wizard is confirmed. */
+export interface PendingProject {
+  parentDir: string;
+  name: string;
+  /** Full path of the folder to be created (shown in the wizards). */
+  target: string;
+}
+
+/** A run is going on or waits for the user (approval, question). */
+export const isAgentBusy = (status: AgentStatus) => status !== 'idle' && status !== 'finished' && status !== 'error';
+
+/**
+ * The run whose callbacks may still change the state. Leaving a session (new task, another
+ * task, another folder) stops its run; whatever the stopped run reports afterwards is dropped.
+ */
+let liveRunId = 0;
+
+const projectTexts = () => getTranslations(useSettingsStore.getState().settings.language).projects;
+
+/** Answers the approvals of a stopped run with "no" so it does not wait forever. */
+function dropPendingApprovals(get: () => AgentState) {
+  const { changesetResolver, deleteResolver, commandResolver, questionResolver } = get();
+  changesetResolver?.(false);
+  deleteResolver?.(false);
+  commandResolver?.(false);
+  questionResolver?.('');
+}
 
 interface AgentState {
   workspaceRoot: string | null;
@@ -39,6 +70,9 @@ interface AgentState {
   inlineTranscriptOpen: boolean;
   /** A wizard's request waiting in the composer for the user to send (with its run options). */
   wizardDraft: WizardDraft | null;
+  /** The saved task the session above belongs to (null for a new session not sent yet). */
+  sessionChatId: string | null;
+  pendingProject: PendingProject | null;
 
   // Pending user approvals
   pendingChangeset: ChangesetItem[];
@@ -73,7 +107,23 @@ interface AgentState {
   clearWizardDraft: () => void;
   stopGoal: () => void;
   interruptGoal: (directive: string) => void;
+  /** Starts an empty session (in the open folder); a running task is stopped. */
   clearSession: () => void;
+
+  // Projects (the sidebar groups tasks by folder)
+  /** Asks before leaving a running task and stops it when the user agrees. */
+  confirmLeaveRunningTask: () => Promise<boolean>;
+  /** Makes the folder the open workspace (the main process has already switched to it). */
+  activateWorkspace: (rootPath: string, folderName?: string) => Promise<void>;
+  /** An empty session in the given folder (the "+" of a project in the sidebar, Ctrl+N). */
+  startTaskInFolder: (root: string) => Promise<boolean>;
+  /** Creates the project folder, opens it and starts an empty session there. */
+  createProject: (parentDir: string, name: string) => Promise<{ success: boolean; code?: ProjectErrorCode; error?: string }>;
+  setPendingProject: (project: PendingProject | null) => void;
+  /** Creates the pending project; the wizards call it on confirm. False when it failed. */
+  createPendingProject: () => Promise<boolean>;
+  /** The native folder picker; the chosen folder opens with an empty session. */
+  openExistingProject: () => Promise<boolean>;
 
   // Changeset Actions
   setPendingChangeset: (items: ChangesetItem[], resolver: (value: boolean) => void) => void;
@@ -120,6 +170,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   isStreamingResponse: false,
   inlineTranscriptOpen: false,
   wizardDraft: null,
+  sessionChatId: null,
+  pendingProject: null,
 
   toggleReasoningDump: () => set((state) => ({ showReasoningDump: !state.showReasoningDump })),
   toggleInlineTranscript: () => set((state) => ({ inlineTranscriptOpen: !state.inlineTranscriptOpen })),
@@ -136,9 +188,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   questionResolver: null,
 
   persistCurrentSession: () => {
-    const activeChatId = useChatStore.getState().activeChatId;
-    if (!activeChatId) return;
-    const chat = storageService.getChat(activeChatId);
+    // The session's own task, not the selected conversation: opening a chat in the Chat mode
+    // while a task runs must not stop the task from being saved.
+    const sessionChatId = get().sessionChatId;
+    if (!sessionChatId) return;
+    const chat = storageService.getChat(sessionChatId);
     if (!chat || chat.mode !== 'agent') return;
 
     chat.workspaceRoot = get().workspaceRoot || undefined;
@@ -149,11 +203,29 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     chat.executionLogs = get().executionLogs;
     chat.appliedTransactions = get().appliedTransactions;
     storageService.saveChat(chat);
+    // The sidebar groups tasks by folder and orders them by activity.
+    useChatStore.setState({ chats: storageService.getChats() });
   },
 
   loadSession: async (chatId: string) => {
     const chat = storageService.getChat(chatId);
     if (!chat) return;
+
+    // One session at a time: the task shown before stops (the sidebar asked the user first).
+    if (isAgentBusy(get().agentStatus)) get().stopGoal();
+    liveRunId++;
+    dropPendingApprovals(get);
+    set({
+      sessionChatId: chatId,
+      pendingChangeset: [],
+      pendingDelete: null,
+      pendingCommand: null,
+      pendingQuestion: null,
+      changesetResolver: null,
+      deleteResolver: null,
+      commandResolver: null,
+      questionResolver: null,
+    });
 
     // 1. Restore workspace directory if stored
     if (chat.workspaceRoot && window.electronAPI?.setWorkspacePath) {
@@ -315,7 +387,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
     // Synchronize agent session with unified chat store
     const chatStore = useChatStore.getState();
-    const activeChatId = chatStore.activeChatId;
+    const activeChatId = get().sessionChatId;
     const activeChat = chatStore.chats.find((c) => c.id === activeChatId);
     const isFollowUp = !!activeChat && activeChat.mode === 'agent' && get().steps.length > 0 && !!get().currentGoal;
 
@@ -335,10 +407,15 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
 
     if (!activeChat || activeChat.mode !== 'agent') {
-      chatStore.createNewChat(selectedModel, 'agent', label.slice(0, 32));
-    } else if (!isFollowUp) {
-      chatStore.updateChatTitle(activeChatId!, label.slice(0, 32));
+      set({ sessionChatId: chatStore.createNewChat(selectedModel, 'agent', label.slice(0, 32)) });
+    } else {
+      if (!isFollowUp) chatStore.updateChatTitle(activeChatId!, label.slice(0, 32));
+      // The sidebar highlights the task that runs.
+      useChatStore.setState({ activeChatId });
     }
+
+    const runId = ++liveRunId;
+    const live = () => runId === liveRunId;
 
     const startTime = Date.now();
     const initialSteps: AgentStep[] = [
@@ -381,10 +458,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       selectedModel,
       {
         onSubtasksUpdated: (subtasks: TaskChecklistItem[]) => {
+          if (!live()) return;
           set({ subtasks: [...subtasks] });
           get().persistCurrentSession();
         },
         onStep: (step: AgentStep) => {
+          if (!live()) return;
           set((state) => ({
             steps: [...state.steps, step],
             activeStreamText: '',
@@ -393,6 +472,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           get().persistCurrentSession();
         },
         onStatusChange: (status: AgentStatus) => {
+          if (!live()) return;
           set({ agentStatus: status });
           if (status === 'finished') {
             const start = get().taskStartTime;
@@ -422,14 +502,17 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           }
         },
         onLog: (msg: string) => {
+          if (!live()) return;
           set((state) => ({
             executionLogs: [...state.executionLogs, `[${new Date().toLocaleTimeString()}] ${msg}`],
           }));
         },
         onStreamChunk: (_chunk: string, fullResponseSoFar: string) => {
+          if (!live()) return;
           set({ activeStreamText: fullResponseSoFar, isStreamingResponse: true });
         },
         onRequestChangesetApproval: (items: ChangesetItem[]) => {
+          if (!live()) return Promise.resolve(false);
           window.electronAPI?.notifyUser?.({
             title: 'Emir Code - Kod Değişikliği Onayı',
             body: `${items.length} dosya için değişiklik onayı bekleniyor.`,
@@ -440,6 +523,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           });
         },
         onRequestDeleteApproval: (item: ChangesetItem) => {
+          if (!live()) return Promise.resolve(false);
           window.electronAPI?.notifyUser?.({
             title: 'Emir Code - Dosya Silme Onayı',
             body: `"${item.relativePath}" dosyasını silmek için onay bekleniyor.`,
@@ -450,6 +534,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           });
         },
         onRequestCommandApproval: (item: CommandApprovalItem) => {
+          if (!live()) return Promise.resolve(false);
           window.electronAPI?.notifyUser?.({
             title: 'Emir Code - Komut Onayı',
             body: `"${item.binary} ${item.args.join(' ')}" komutunu çalıştırmak için onay bekleniyor.`,
@@ -460,6 +545,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           });
         },
         onRequestClarification: (item: ClarificationItem) => {
+          if (!live()) return Promise.resolve('');
           window.electronAPI?.notifyUser?.({
             title: 'Emir Code - Soru Soruldu',
             body: item.question || 'Ajan yanıtınızı bekliyor.',
@@ -470,6 +556,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           });
         },
         onTransactionApplied: (tx: AppliedTransaction) => {
+          if (!live()) return;
           set((state) => ({ appliedTransactions: [tx, ...state.appliedTransactions] }));
           get().persistCurrentSession();
           get().refreshFiles();
@@ -538,14 +625,21 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
 
   clearSession: () => {
+    // A cleared session cannot keep a run going in the background: its steps would land here.
+    if (isAgentBusy(get().agentStatus)) get().stopGoal();
+    liveRunId++;
+    dropPendingApprovals(get);
     useChatStore.setState({ activeChatId: null, messages: [] });
     set({
+      sessionChatId: null,
       currentGoal: '',
       subtasks: [],
       agentStatus: 'idle',
       taskStartTime: null,
       steps: [],
       executionLogs: [],
+      // The rollback button must not undo the previous task's changes (maybe in another folder).
+      appliedTransactions: [],
       activeStreamText: '',
       isStreamingResponse: false,
       inlineTranscriptOpen: false,
@@ -553,10 +647,89 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       pendingDelete: null,
       pendingCommand: null,
       pendingQuestion: null,
+      changesetResolver: null,
+      deleteResolver: null,
+      commandResolver: null,
+      questionResolver: null,
       openFiles: [],
       activeTabId: 'timeline',
       activeFile: null,
     });
+  },
+
+  confirmLeaveRunningTask: async () => {
+    if (!isAgentBusy(get().agentStatus)) return true;
+    const p = projectTexts();
+    const stop = await confirmDialog({ title: p.leaveRunningTitle, message: p.leaveRunning, confirmLabel: p.stopTask, danger: true });
+    if (!stop) return false;
+    get().stopGoal();
+    return true;
+  },
+
+  activateWorkspace: async (rootPath: string, folderName?: string) => {
+    const name = folderName || folderNameOf(rootPath);
+    set({
+      workspaceRoot: rootPath,
+      workspaceName: name,
+      workspaceFiles: [],
+      activeFile: null,
+      openFiles: [],
+      activeTabId: 'timeline',
+    });
+    storageService.setLastWorkspace(rootPath, name);
+    await get().refreshFiles();
+  },
+
+  startTaskInFolder: async (root: string) => {
+    if (!(await get().confirmLeaveRunningTask())) return false;
+    const current = get().workspaceRoot;
+    if (current && projectKey(current) === projectKey(root)) {
+      get().clearSession();
+      await get().refreshFiles();
+      return true;
+    }
+    if (!window.electronAPI?.setWorkspacePath) return false;
+    const res = await window.electronAPI.setWorkspacePath(root);
+    if (!res.success || !res.rootPath) {
+      void noticeDialog({ title: projectTexts().folderMissingTitle, message: projectTexts().folderMissingAlert.replace('{path}', root) });
+      return false;
+    }
+    get().clearSession();
+    await get().activateWorkspace(res.rootPath, res.folderName);
+    return true;
+  },
+
+  createProject: async (parentDir: string, name: string) => {
+    if (!window.electronAPI?.createProject) return { success: false, code: 'error' as const };
+    const res = await window.electronAPI.createProject(parentDir, name);
+    if (!res.success || !res.rootPath) return { success: false, code: res.code || 'error', error: res.error };
+    get().clearSession();
+    await get().activateWorkspace(res.rootPath, res.folderName);
+    return { success: true };
+  },
+
+  setPendingProject: (project) => set({ pendingProject: project }),
+
+  createPendingProject: async () => {
+    const pending = get().pendingProject;
+    if (!pending) return true;
+    const res = await get().createProject(pending.parentDir, pending.name);
+    if (!res.success) {
+      void noticeDialog({ title: projectTexts().createFailedTitle, message: describeProjectError(projectTexts(), res.code, res.error) });
+      return false;
+    }
+    set({ pendingProject: null });
+    return true;
+  },
+
+  openExistingProject: async () => {
+    if (!window.electronAPI) return false;
+    if (!(await get().confirmLeaveRunningTask())) return false;
+    const res = await window.electronAPI.openWorkspaceDialog();
+    if (!res.success || !res.rootPath) return false;
+    get().clearSession();
+    await get().activateWorkspace(res.rootPath, res.folderName);
+    return true;
   },
 
   // Changeset Handlers

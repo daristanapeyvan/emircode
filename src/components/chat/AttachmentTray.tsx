@@ -1,19 +1,22 @@
 import React from 'react';
-import { X, FileText, Image as ImageIcon } from 'lucide-react';
+import { X, FileText } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
 import { formatBytes } from '@/lib/utils/formatters';
+import { useSettingsStore } from '@/stores/settingsStore';
+import { getTranslations } from '@/lib/localization/i18n';
 
 export const AttachmentTray: React.FC = () => {
   const { attachments, removeAttachment } = useChatStore();
+  const t = getTranslations(useSettingsStore((s) => s.settings.language));
 
   if (attachments.length === 0) return null;
 
   return (
-    <div className="flex flex-wrap gap-2 px-3 pt-2 pb-1 bg-zinc-900/60 border-b border-zinc-800/80">
+    <div className="flex flex-wrap gap-1.5 p-2 border-b border-zinc-800">
       {attachments.map((att) => (
         <div
           key={att.id}
-          className="flex items-center gap-1.5 px-2 py-1 rounded bg-zinc-800 border border-zinc-700/60 text-xs text-zinc-300 group"
+          className="flex items-center gap-1.5 px-2 py-1 rounded bg-zinc-800 text-xs text-zinc-300 group"
         >
           {att.isImage ? (
             <div className="w-4 h-4 rounded overflow-hidden flex items-center justify-center bg-zinc-900">
@@ -27,14 +30,15 @@ export const AttachmentTray: React.FC = () => {
             <FileText size={12} className="text-zinc-400" strokeWidth={1.5} />
           )}
 
-          <span className="font-mono text-[11px] truncate max-w-[120px]">{att.name}</span>
-          <span className="text-[10px] text-zinc-500 font-mono">({formatBytes(att.size)})</span>
+          <span className="truncate max-w-[140px]">{att.name}</span>
+          <span className="text-[11px] text-zinc-500">{formatBytes(att.size)}</span>
 
           <button
             type="button"
             onClick={() => removeAttachment(att.id)}
             className="p-0.5 text-zinc-500 hover:text-zinc-200 rounded transition-colors cursor-pointer ml-0.5"
-            title="Remove attachment"
+            title={t.chat.removeAttachment}
+            aria-label={t.chat.removeAttachment}
           >
             <X size={12} strokeWidth={1.5} />
           </button>

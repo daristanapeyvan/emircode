@@ -180,7 +180,7 @@ export const RichTextArea: React.FC<RichTextAreaProps> = ({ value, onChange, lab
           className="block w-full resize-none bg-transparent px-3.5 py-2.5 text-sm leading-[22px] text-zinc-100 placeholder-zinc-600 focus:outline-none selectable-text"
         />
       )}
-      <div className="flex items-center justify-end px-3 py-1 border-t border-zinc-800/60 text-[10.5px] text-zinc-600 font-mono">
+      <div className="flex items-center justify-end px-3 py-1 border-t border-zinc-800/60 text-[11px] text-zinc-600 font-mono">
         {labels.count.replace('{words}', String(words)).replace('{chars}', String(value.length))}
       </div>
     </div>

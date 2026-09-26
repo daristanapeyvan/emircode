@@ -27,5 +27,7 @@ export function formatParameterSize(size?: string): string {
   const match = size.match(/([0-9.]+)([a-zA-Z]+)?/);
   if (!match) return size;
   const val = parseFloat(match[1]);
-  return `${val.toFixed(val % 1 === 0 ? 0 : 1)}B`;
+  // Keep the unit Ollama reports: "33M" is 33 million parameters, not 33 billion.
+  const unit = (match[2] || 'B').charAt(0).toUpperCase();
+  return `${val.toFixed(val % 1 === 0 ? 0 : 1)}${unit}`;
 }

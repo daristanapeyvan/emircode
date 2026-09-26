@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Select } from '@/components/common/Select';
 import { X, Search, ChevronLeft, RotateCcw, ShieldCheck } from 'lucide-react';
 import { useToolWizardStore, ToolKind } from '@/stores/toolWizardStore';
 import { useAgentStore } from '@/stores/agentStore';
@@ -11,10 +12,12 @@ import { DESIGN_CATEGORIES, THEMES, getTheme } from '@/lib/design/themes';
 import { Toggle } from '@/components/common/Toggle';
 import { Button } from '@/components/common/Button';
 import { IconButton } from '@/components/common/IconButton';
+import { DialogFrame } from '@/components/common/Modal';
 import { ParamRows } from './ParamFields';
 import { ToolIcon } from './ToolIcons';
 import { Segmented, SettingRow, SectionTitle, inputClass, fill } from './wizardUi';
 import { cn } from '@/lib/utils/cn';
+import { compactPath } from '@/lib/utils/projects';
 
 type AnyTool = MiniAppDef | ScriptDef;
 type ToolText = ReturnType<typeof getTranslations>['toolWizard'];
@@ -28,6 +31,12 @@ const fold = (s: string) => s.toLocaleLowerCase('tr').replace(/ı/g, 'i').normal
  */
 export const ToolWizard: React.FC = () => {
   const open = useToolWizardStore((s) => s.open);
+  const wasOpen = useRef(false);
+  useEffect(() => {
+    // Closed without confirming: the New Project folder is not created.
+    if (wasOpen.current && !open) useAgentStore.getState().setPendingProject(null);
+    wasOpen.current = !!open;
+  }, [open]);
   if (!open) return null;
   return <ToolWizardDialog kind={open} />;
 };
@@ -50,18 +59,9 @@ const ToolWizardDialog: React.FC<{ kind: ToolKind }> = ({ kind }) => {
   }, [closeWizard]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="fixed inset-0 bg-black/60 backdrop-blur-[2px]" onClick={closeWizard} />
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="tool-wizard-title"
-        lang={lang}
-        className="relative z-10 w-full max-w-4xl h-[min(85vh,680px)] bg-zinc-900 border border-zinc-800 rounded-lg shadow-2xl flex flex-col overflow-hidden"
-      >
-        {tool ? <ToolPage kind={kind} tool={tool} t={t} lang={lang} /> : <CatalogPage kind={kind} t={t} lang={lang} />}
-      </div>
-    </div>
+    <DialogFrame onBackdropClick={closeWizard} labelledBy="tool-wizard-title" lang={lang} className="max-w-4xl h-[min(85vh,680px)]">
+      {tool ? <ToolPage kind={kind} tool={tool} t={t} lang={lang} /> : <CatalogPage kind={kind} t={t} lang={lang} />}
+    </DialogFrame>
   );
 };
 
@@ -118,7 +118,7 @@ const CatalogPage: React.FC<{ kind: ToolKind; t: ToolText; lang: Lang }> = ({ ki
                   active ? 'bg-zinc-800 text-zinc-100 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/40'
                 )}
               >
-                <span className={active ? 'text-blue-400' : 'text-zinc-500'}>
+                <span className={active ? 'text-zinc-200' : 'text-zinc-500'}>
                   <ToolIcon id={c.icon} size={14} />
                 </span>
                 <span>{tx(c.title, lang)}</span>
@@ -157,7 +157,8 @@ const ToolPage: React.FC<{ kind: ToolKind; tool: AnyTool; t: ToolText; lang: Lan
   const { closeWizard, showCatalog, setValue, resetValues, setName } = useToolWizardStore();
   const mini = useToolWizardStore((s) => s.mini);
   const script = useToolWizardStore((s) => s.script);
-  const { agentStatus, workspaceRoot, openWorkspaceDialog, setWizardDraft } = useAgentStore();
+  const { agentStatus, workspaceRoot, openWorkspaceDialog, setWizardDraft, pendingProject } = useAgentStore();
+  const projectTexts = getTranslations(lang).projects;
   const draft = kind === 'mini' ? mini : script;
   // A mini app's defaults (sample lists, texts) follow the app's own language.
   const appLang: Lang = mini.language ?? lang;
@@ -174,7 +175,9 @@ const ToolPage: React.FC<{ kind: ToolKind; tool: AnyTool; t: ToolText; lang: Lan
 
   const confirm = async () => {
     if (busy) return;
-    if (!useAgentStore.getState().workspaceRoot) {
+    if (useAgentStore.getState().pendingProject) {
+      if (!(await useAgentStore.getState().createPendingProject())) return;
+    } else if (!useAgentStore.getState().workspaceRoot) {
       await openWorkspaceDialog();
       if (!useAgentStore.getState().workspaceRoot) return;
     }
@@ -245,8 +248,8 @@ const ToolPage: React.FC<{ kind: ToolKind; tool: AnyTool; t: ToolText; lang: Lan
       </div>
 
       <div className="flex items-center gap-2 px-5 py-3 border-t border-zinc-800/80">
-        <p className={cn('flex-1 min-w-0 text-[11px] truncate', busy ? 'text-amber-300' : 'text-zinc-500')}>
-          {busy ? t.agentBusy : !workspaceRoot ? t.needFolder : t.confirmHint}
+        <p className={cn('flex-1 min-w-0 text-[11px] truncate', busy ? 'text-amber-400/90' : 'text-zinc-500')} title={pendingProject?.target}>
+          {busy ? t.agentBusy : pendingProject ? fill(projectTexts.newFolderHint, { path: compactPath(pendingProject.target, 3) }) : !workspaceRoot ? t.needFolder : t.confirmHint}
         </p>
         <Button variant="secondary" size="md" onClick={showCatalog}>
           {t.back}
@@ -304,20 +307,24 @@ const MiniOutput: React.FC<{ app: MiniAppDef; name: string; t: ToolText; lang: L
             ))}
           </span>
         )}
-        <select id="tool-app-theme" value={chosen ? chosen.id : mini.theme === 'none' ? 'none' : 'auto'} onChange={(e) => updateMini({ theme: e.target.value })} className={cn(inputClass, 'w-56 cursor-pointer')}>
-          <option value="auto">{fill(t.themeAuto, { category: categoryNames[app.designCategory] || app.designCategory })}</option>
-          <option value="none">{t.themeNone}</option>
-          {DESIGN_CATEGORIES.map((c) => (
-            <optgroup key={c.id} label={categoryNames[c.id] || c.label}>
-              {THEMES.filter((theme) => theme.category === c.id).map((theme) => (
-                <option key={theme.id} value={theme.id}>
-                  {theme.name}
-                  {theme.mode === 'dark' ? ` (${t.dark})` : ''}
-                </option>
-              ))}
-            </optgroup>
-          ))}
-        </select>
+        <Select
+          id="tool-app-theme"
+          ariaLabel={t.theme}
+          className="w-56"
+          value={chosen ? chosen.id : mini.theme === 'none' ? 'none' : 'auto'}
+          onChange={(theme) => updateMini({ theme })}
+          options={[
+            { value: 'auto', label: fill(t.themeAuto, { category: categoryNames[app.designCategory] || app.designCategory }) },
+            { value: 'none', label: t.themeNone },
+            ...DESIGN_CATEGORIES.map((c) => ({
+              label: categoryNames[c.id] || c.label,
+              options: THEMES.filter((theme) => theme.category === c.id).map((theme) => ({
+                value: theme.id,
+                label: `${theme.name}${theme.mode === 'dark' ? ` (${t.dark})` : ''}`,
+              })),
+            })),
+          ]}
+        />
       </SettingRow>
     </div>
   );
@@ -382,7 +389,7 @@ const RenameResult: React.FC<{ values: ParamValues; t: ToolText; lang: Lang }> =
                 {row.note === 'filtered' ? (
                   <span className="font-sans text-zinc-600">{t.previewFiltered}</span>
                 ) : row.note === 'conflict' ? (
-                  <span className="font-sans text-amber-300/90">{t.previewConflict}</span>
+                  <span className="font-sans text-amber-400/90">{t.previewConflict}</span>
                 ) : row.note === 'same' ? (
                   <span className="font-sans text-zinc-600">{t.previewSame}</span>
                 ) : (

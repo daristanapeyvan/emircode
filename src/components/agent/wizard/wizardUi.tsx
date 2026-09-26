@@ -37,7 +37,7 @@ export const Field: React.FC<{
 
 export const StepHeader: React.FC<{ title: string; description?: string }> = ({ title, description }) => (
   <div className="mb-5">
-    <h3 className="text-[15px] font-semibold text-zinc-100 tracking-tight">{title}</h3>
+    <h3 className="text-sm font-semibold text-zinc-100">{title}</h3>
     {description && <p className="text-xs text-zinc-400 mt-1 leading-relaxed max-w-2xl">{description}</p>}
   </div>
 );
@@ -56,7 +56,7 @@ export function Segmented<T extends string>({
   size?: 'sm' | 'md';
 }) {
   return (
-    <div role="radiogroup" aria-label={ariaLabel} className="inline-flex items-center rounded-lg bg-zinc-950/70 border border-zinc-800 p-0.5">
+    <div role="radiogroup" aria-label={ariaLabel} className="inline-flex items-center gap-0.5 rounded bg-zinc-900 border border-zinc-800 p-0.5">
       {options.map((opt) => {
         const active = opt.value === value;
         return (
@@ -68,9 +68,9 @@ export function Segmented<T extends string>({
             title={opt.title}
             onClick={() => onChange(opt.value)}
             className={cn(
-              'rounded-md font-medium transition-colors cursor-pointer',
-              size === 'sm' ? 'px-2.5 py-1 text-[11px]' : 'px-3 py-1.5 text-xs',
-              active ? 'bg-zinc-100 text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-200'
+              'rounded-sm font-medium transition-colors cursor-pointer',
+              size === 'sm' ? 'px-2.5 py-1 text-[11px]' : 'px-3 py-1 text-xs',
+              active ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:text-zinc-200'
             )}
           >
             {opt.label}
@@ -138,7 +138,7 @@ export const MenuButton: React.FC<{
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-dashed border-zinc-700 text-xs text-zinc-300 hover:text-zinc-100 hover:border-zinc-500 hover:bg-zinc-800/40 transition-colors cursor-pointer"
+        className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded border border-zinc-800 text-xs text-zinc-300 hover:text-zinc-100 hover:bg-zinc-800/60 transition-colors cursor-pointer"
       >
         {icon}
         {label}
@@ -148,7 +148,7 @@ export const MenuButton: React.FC<{
         <div
           role="menu"
           className={cn(
-            'absolute z-20 mt-1.5 w-56 max-h-72 overflow-y-auto rounded-lg border border-zinc-700/80 bg-zinc-900 shadow-2xl p-1',
+            'absolute z-20 mt-1 w-56 max-h-72 overflow-y-auto rounded-md border border-zinc-800 bg-zinc-900 shadow-xl p-1',
             align === 'right' ? 'right-0' : 'left-0'
           )}
         >
@@ -161,10 +161,10 @@ export const MenuButton: React.FC<{
                 setOpen(false);
                 onPick(item.id);
               }}
-              className="w-full text-left px-2.5 py-1.5 rounded-md text-xs text-zinc-200 hover:bg-zinc-800 transition-colors cursor-pointer"
+              className="w-full text-left px-2.5 py-1.5 rounded text-xs text-zinc-200 hover:bg-zinc-800 transition-colors cursor-pointer"
             >
               <span className="block">{item.label}</span>
-              {item.hint && <span className="block text-[10.5px] text-zinc-500 mt-0.5">{item.hint}</span>}
+              {item.hint && <span className="block text-[11px] text-zinc-500 mt-0.5">{item.hint}</span>}
             </button>
           ))}
         </div>
@@ -191,7 +191,7 @@ export const IconAction: React.FC<{
       onClick();
     }}
     className={cn(
-      'p-1 rounded-md transition-colors cursor-pointer disabled:opacity-25 disabled:cursor-default disabled:hover:bg-transparent',
+      'p-1 rounded transition-colors cursor-pointer disabled:opacity-25 disabled:cursor-default disabled:hover:bg-transparent',
       danger ? 'text-zinc-500 hover:text-red-300 hover:bg-red-950/40' : 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800'
     )}
   >
@@ -221,7 +221,7 @@ export const SettingRow: React.FC<{
 
 export const SectionTitle: React.FC<{ children: React.ReactNode; action?: React.ReactNode }> = ({ children, action }) => (
   <div className="flex items-center justify-between pt-4 pb-1">
-    <h4 className="text-[11px] font-medium uppercase tracking-wider text-zinc-500">{children}</h4>
+    <h4 className="text-xs font-medium text-zinc-400">{children}</h4>
     {action}
   </div>
 );

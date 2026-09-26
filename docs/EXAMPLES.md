@@ -6,7 +6,7 @@ Concrete walkthroughs of everyday tasks with local Ollama models. The requests a
 
 ## Example 1: A New Web Page, Verified Before "Done"
 
-**Request** (Emir Code tab, empty folder):
+**Request** (Code tab, empty folder):
 ```
 Bir kahve dükkanı için tek sayfalık modern bir web sitesi oluştur: menü (en az 6 ürün, fiyatlarıyla), hakkımızda ve iletişim bölümleri olsun. Responsive olsun ve iletişim formu JavaScript ile doğrulansın.
 ```
@@ -72,7 +72,7 @@ Kullanıcı oturumlarını saklamak için bir depolama katmanı ekle
 ## Example 6: Multi-Step Refactoring with Rollback
 
 1. Every applied change is recorded with a snapshot of the previous content.
-2. The ↺ button in the agent header shows the number of applied changes; clicking it restores every file changed in the session to its state before the agent touched it (changes you made to those files outside Emir Code in the meantime are overwritten too).
+2. **Undo changes (n)** in the project bar shows the number of applied changes; clicking it restores every file changed in the session to its state before the agent touched it (changes you made to those files outside Emir Code in the meantime are overwritten too).
 
 ## Example 7: Small Models and Missing Tools
 

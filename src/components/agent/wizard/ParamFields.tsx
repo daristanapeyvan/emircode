@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { Select } from '@/components/common/Select';
 import { Check } from 'lucide-react';
 import { ParamField, ParamValue, ParamValues, Lang, tx, valueOf, isVisible } from '@/lib/wizard/params';
 import { Toggle } from '@/components/common/Toggle';
@@ -84,13 +85,14 @@ const ParamRow: React.FC<{
               options={field.options.map((o) => ({ value: o.value, label: tx(o.label, lang) }))}
             />
           ) : (
-            <select id={id} value={value as string} onChange={(e) => onChange(e.target.value)} className={cn(inputClass, 'w-48 cursor-pointer')}>
-              {field.options.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {tx(o.label, lang)}
-                </option>
-              ))}
-            </select>
+            <Select
+              id={id}
+              ariaLabel={label}
+              className="w-48"
+              value={value as string}
+              onChange={(v) => onChange(v)}
+              options={field.options.map((o) => ({ value: o.value, label: tx(o.label, lang) }))}
+            />
           )}
         </SettingRow>
       );

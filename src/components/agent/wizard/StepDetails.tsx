@@ -2,7 +2,7 @@ import React from 'react';
 import { useSiteWizardStore } from '@/stores/siteWizardStore';
 import { FEATURE_KEYS, FeatureKey, WizardContact } from '@/lib/wizard/siteWizard';
 import { Toggle } from '@/components/common/Toggle';
-import { Field, StepHeader, Segmented, inputClass, textareaClass } from './wizardUi';
+import { Field, StepHeader, Segmented, SettingRow, inputClass, textareaClass } from './wizardUi';
 import type { WizardText } from './SiteWizard';
 
 const FEATURE_LABELS: Record<FeatureKey, [keyof WizardText, keyof WizardText]> = {
@@ -72,17 +72,13 @@ export const StepFeatures: React.FC<{ w: WizardText }> = ({ w }) => {
 
       <div>
         <p className="text-xs font-medium text-zinc-300 mb-2.5">{w.features}</p>
-        <div className="grid gap-2 md:grid-cols-2">
+        <div>
           {FEATURE_KEYS.map((key) => {
             const [label, desc] = FEATURE_LABELS[key];
             return (
-              <div key={key} className="flex items-start justify-between gap-3 px-3 py-2.5 rounded-lg bg-zinc-950/40 border border-zinc-800/70">
-                <div className="min-w-0">
-                  <p className="text-[13px] text-zinc-200">{w[label] as string}</p>
-                  <p className="text-[11px] text-zinc-500 mt-0.5 leading-snug">{w[desc] as string}</p>
-                </div>
+              <SettingRow key={key} label={w[label] as string} description={w[desc] as string}>
                 <Toggle checked={!!data.features[key]} onChange={(checked) => setFeature(key, checked)} />
-              </div>
+              </SettingRow>
             );
           })}
         </div>

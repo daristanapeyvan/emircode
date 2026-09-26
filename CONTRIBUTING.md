@@ -26,7 +26,8 @@ Thank you for your interest in contributing to **Emir Code**! Bug reports, featu
 4. **Type-check and run the regression suites**:
    ```bash
    npx tsc --noEmit
-   npm test              # functional, agent reliability, agent engine, architecture, web access, design theme and wizard suites
+   npm test              # functional, agent reliability, agent engine, architecture, web access, design theme, wizard and model library suites
+   npm run check:library # optional: the live ollama.com pages still parse (needs internet)
    npm run test:agent    # only the agent suites (unit checks + scripted-model engine tests)
    ```
 
@@ -59,8 +60,9 @@ Thank you for your interest in contributing to **Emir Code**! Bug reports, featu
 | Packaging hooks | `scripts/afterPack.js` (Windows icon, Linux launcher), `scripts/postbuild.js` |
 | Creation wizards | `src/lib/wizard/` (requests, catalogs, script safety module), `src/components/agent/wizard/`, `src/stores/siteWizardStore.ts`, `src/stores/toolWizardStore.ts` |
 | Design themes | `src/lib/design/` |
+| Model library (Models → Discover) | `src/lib/ollama/library.ts` (parsing, sizes, quantizations, categories), `src/stores/modelLibraryStore.ts`, `src/components/models/DiscoverTab.tsx`, `models:*` handlers in `electron/main.ts` |
 | Agent tests | `test_agent_reliability.ts` (unit), `test_agent_engine.ts` (scripted model), `scripts/agent-e2e.ts` (real model), `scripts/electron-api-mock.ts` |
-| Theme and wizard tests | `test_design_theme.ts`, `test_site_wizard.ts`, `test_tool_wizard.ts` |
+| Theme, wizard and library tests | `test_design_theme.ts`, `test_site_wizard.ts`, `test_tool_wizard.ts`, `test_model_library.ts` (fixtures in `test_fixtures/ollama`) |
 | Release pipeline | `.github/workflows/release.yml`, `scripts/linux-smoke-test.sh` |
 
 ---

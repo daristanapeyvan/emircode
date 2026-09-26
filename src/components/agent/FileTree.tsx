@@ -1,6 +1,9 @@
 import React, { useState } from 'react';
 import { WorkspaceFileInfo } from '../../../electron/preload';
-import { ChevronRight, ChevronDown, FileCode, Folder, FolderOpen, FileText, Trash2, FolderPlus } from 'lucide-react';
+import { ChevronRight, ChevronDown, Trash2, FolderPlus, Folder, FolderOpen, File } from 'lucide-react';
+import { useSettingsStore } from '@/stores/settingsStore';
+import { getTranslations, Translations } from '@/lib/localization/i18n';
+import { cn } from '@/lib/utils/cn';
 
 interface FileTreeProps {
   files: WorkspaceFileInfo[];
@@ -17,16 +20,12 @@ interface TreeNodeProps {
   selectedFilePath?: string;
   onDeleteFile?: (relativePath: string, isDirectory: boolean) => void;
   onCreateFolder?: (parentPath: string) => void;
+  t: Translations['agent'];
 }
 
-const TreeNode: React.FC<TreeNodeProps> = ({
-  item,
-  depth = 0,
-  onSelectFile,
-  selectedFilePath,
-  onDeleteFile,
-  onCreateFolder,
-}) => {
+const rowAction = 'p-0.5 rounded text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700/60 transition-colors cursor-pointer';
+
+const TreeNode: React.FC<TreeNodeProps> = ({ item, depth = 0, onSelectFile, selectedFilePath, onDeleteFile, onCreateFolder, t }) => {
   const [isOpen, setIsOpen] = useState(depth === 0);
 
   if (item.isDirectory) {
@@ -34,14 +33,14 @@ const TreeNode: React.FC<TreeNodeProps> = ({
       <div>
         <div
           onClick={() => setIsOpen(!isOpen)}
-          className="group flex items-center gap-1.5 py-1 px-2 text-xs text-zinc-300 hover:bg-zinc-800/60 hover:text-white rounded cursor-pointer select-none transition-colors"
-          style={{ paddingLeft: `${depth * 12 + 8}px` }}
+          className="group flex items-center gap-1 py-1 px-2 text-xs text-zinc-300 hover:bg-zinc-800/60 rounded cursor-pointer select-none transition-colors"
+          style={{ paddingLeft: `${depth * 12 + 6}px` }}
         >
           {isOpen ? <ChevronDown size={12} className="text-zinc-500 shrink-0" /> : <ChevronRight size={12} className="text-zinc-500 shrink-0" />}
-          {isOpen ? <FolderOpen size={14} className="text-amber-400/90 shrink-0" /> : <Folder size={14} className="text-amber-400/70 shrink-0" />}
-          <span className="truncate font-mono flex-1">{item.name}</span>
+          {isOpen ? <FolderOpen size={13} strokeWidth={1.5} className="text-zinc-500 shrink-0" /> : <Folder size={13} strokeWidth={1.5} className="text-zinc-500 shrink-0" />}
+          <span className="truncate flex-1">{item.name}</span>
 
-          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity ml-auto shrink-0">
+          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
             {onCreateFolder && (
               <button
                 type="button"
@@ -49,8 +48,9 @@ const TreeNode: React.FC<TreeNodeProps> = ({
                   e.stopPropagation();
                   onCreateFolder(item.relativePath);
                 }}
-                className="p-0.5 rounded hover:bg-zinc-700/60 text-zinc-400 hover:text-zinc-200 transition-colors"
-                title="Yeni Alt Klasör"
+                className={rowAction}
+                title={t.newSubfolder}
+                aria-label={t.newSubfolder}
               >
                 <FolderPlus size={12} />
               </button>
@@ -62,8 +62,9 @@ const TreeNode: React.FC<TreeNodeProps> = ({
                   e.stopPropagation();
                   onDeleteFile(item.relativePath, true);
                 }}
-                className="p-0.5 rounded hover:bg-red-950/60 text-zinc-400 hover:text-red-400 transition-colors"
-                title="Klasörü Sil"
+                className={cn(rowAction, 'hover:text-red-400')}
+                title={t.deleteFolder}
+                aria-label={t.deleteFolder}
               >
                 <Trash2 size={12} />
               </button>
@@ -82,6 +83,7 @@ const TreeNode: React.FC<TreeNodeProps> = ({
                 selectedFilePath={selectedFilePath}
                 onDeleteFile={onDeleteFile}
                 onCreateFolder={onCreateFolder}
+                t={t}
               />
             ))}
           </div>
@@ -95,19 +97,14 @@ const TreeNode: React.FC<TreeNodeProps> = ({
   return (
     <div
       onClick={() => onSelectFile(item.relativePath)}
-      className={`group flex items-center gap-1.5 py-1 px-2 text-xs rounded cursor-pointer select-none transition-colors ${
-        isSelected
-          ? 'bg-blue-600/20 text-blue-300 font-medium'
-          : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200'
-      }`}
-      style={{ paddingLeft: `${depth * 12 + 20}px` }}
-    >
-      {item.name.endsWith('.ts') || item.name.endsWith('.tsx') || item.name.endsWith('.js') ? (
-        <FileCode size={13} className="text-blue-400/80 shrink-0" />
-      ) : (
-        <FileText size={13} className="text-zinc-400 shrink-0" />
+      className={cn(
+        'group flex items-center gap-1 py-1 px-2 text-xs rounded cursor-pointer select-none transition-colors',
+        isSelected ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200'
       )}
-      <span className="truncate font-mono flex-1">{item.name}</span>
+      style={{ paddingLeft: `${depth * 12 + 22}px` }}
+    >
+      <File size={13} strokeWidth={1.5} className="text-zinc-500 shrink-0" />
+      <span className="truncate flex-1">{item.name}</span>
 
       {onDeleteFile && (
         <button
@@ -116,8 +113,9 @@ const TreeNode: React.FC<TreeNodeProps> = ({
             e.stopPropagation();
             onDeleteFile(item.relativePath, false);
           }}
-          className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-red-950/60 text-zinc-500 hover:text-red-400 ml-auto cursor-pointer shrink-0"
-          title="Dosyayı Sil"
+          className={cn(rowAction, 'opacity-0 group-hover:opacity-100 hover:text-red-400 shrink-0')}
+          title={t.deleteFile}
+          aria-label={t.deleteFile}
         >
           <Trash2 size={12} />
         </button>
@@ -126,23 +124,16 @@ const TreeNode: React.FC<TreeNodeProps> = ({
   );
 };
 
-export const FileTree: React.FC<FileTreeProps> = ({
-  files,
-  onSelectFile,
-  selectedFilePath,
-  onDeleteFile,
-  onCreateFolder,
-}) => {
+export const FileTree: React.FC<FileTreeProps> = ({ files, onSelectFile, selectedFilePath, onDeleteFile, onCreateFolder }) => {
+  const language = useSettingsStore((s) => s.settings.language);
+  const t = getTranslations(language).agent;
+
   if (files.length === 0) {
-    return (
-      <div className="p-4 text-center text-xs text-zinc-500">
-        Bu klasörde görüntülenebilecek dosya bulunamadı.
-      </div>
-    );
+    return <div className="p-4 text-center text-xs text-zinc-500">{t.emptyFolder}</div>;
   }
 
   return (
-    <div className="py-1 overflow-y-auto max-h-full scrollbar-thin">
+    <div className="py-1">
       {files.map((item) => (
         <TreeNode
           key={item.relativePath}
@@ -151,6 +142,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
           selectedFilePath={selectedFilePath}
           onDeleteFile={onDeleteFile}
           onCreateFolder={onCreateFolder}
+          t={t}
         />
       ))}
     </div>

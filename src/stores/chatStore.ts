@@ -96,13 +96,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   deleteChat: (id: string) => {
+    const deletedMode = storageService.getChat(id)?.mode ?? 'chat';
     storageService.deleteChat(id);
     const chats = storageService.getChats();
     const activeId = get().activeChatId;
 
     if (activeId === id) {
-      if (chats.length > 0) {
-        get().selectChat(chats[0].id);
+      // The next conversation of the same list (Sohbet and Emir Code list different things).
+      const next = chats.find((c) => (c.mode ?? 'chat') === deletedMode);
+      if (next) {
+        set({ chats });
+        get().selectChat(next.id);
+      } else if (deletedMode === 'agent') {
+        set({ chats, activeChatId: null, messages: [] });
       } else {
         get().createNewChat();
       }

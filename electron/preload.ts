@@ -80,7 +80,15 @@ export interface ElectronAPI {
   readGit: (action: 'status' | 'diff' | 'log') => Promise<{ success: boolean; output: string; error?: string }>;
   createWorkspaceDirectory: (relativePath: string) => Promise<{ success: boolean; error?: string }>;
   deleteWorkspaceItem: (relativePath: string) => Promise<{ success: boolean; error?: string }>;
-  
+  /** Whether each absolute path is an existing folder. */
+  pathsExist?: (paths: string[]) => Promise<boolean[]>;
+
+  // New projects (a fresh folder that becomes the workspace)
+  getDefaultProjectParent?: (folderName: string) => Promise<string>;
+  chooseProjectParent?: (options: { title?: string; defaultPath?: string }) => Promise<{ success: boolean; path?: string }>;
+  checkProjectTarget?: (parentDir: string, name: string) => Promise<ProjectTargetCheck>;
+  createProject?: (parentDir: string, name: string) => Promise<{ success: boolean; rootPath?: string; folderName?: string; code?: ProjectErrorCode; error?: string }>;
+
   // Zero Direct Write: Request token & apply with Main Process validation
   requestMutationToken: (params: {
     relativePath: string;
@@ -111,6 +119,24 @@ export interface ElectronAPI {
   webSearch: (query: string, options?: { limit?: number; timeoutMs?: number }) => Promise<Array<{ id: string; title: string; url: string; snippet: string; source: string }>>;
   webFetch: (url: string, options?: { maxBytes?: number; timeoutMs?: number }) => Promise<{ title: string; url: string; content: string; status: number; sizeBytes: number }>;
   webAbortAll?: () => Promise<boolean>;
+
+  // Model library (ollama.com list and tags, registry verification)
+  modelLibrary?: () => Promise<string>;
+  modelTags?: (name: string) => Promise<string>;
+  modelManifest?: (name: string, tag: string) => Promise<ModelManifestResult>;
+}
+
+export type ProjectErrorCode = 'invalid-name' | 'invalid-location' | 'exists' | 'error';
+
+export type ProjectTargetCheck = { ok: true; target: string } | { ok: false; code: ProjectErrorCode; error?: string };
+
+export interface ModelManifestResult {
+  status: 'found' | 'missing' | 'error';
+  /** sha256 of the manifest: the digest `ollama list` shows for the downloaded model. */
+  digest?: string;
+  /** Exact download size in bytes. */
+  bytes?: number;
+  error?: string;
 }
 
 const electronAPI: ElectronAPI = {
@@ -154,6 +180,11 @@ const electronAPI: ElectronAPI = {
   readGit: (action) => ipcRenderer.invoke('workspace:readGit', { action }),
   createWorkspaceDirectory: (relativePath) => ipcRenderer.invoke('workspace:createDirectory', relativePath),
   deleteWorkspaceItem: (relativePath) => ipcRenderer.invoke('workspace:deleteItem', relativePath),
+  pathsExist: (paths) => ipcRenderer.invoke('workspace:pathsExist', paths),
+  getDefaultProjectParent: (folderName) => ipcRenderer.invoke('project:defaultParent', folderName),
+  chooseProjectParent: (options) => ipcRenderer.invoke('project:chooseParent', options),
+  checkProjectTarget: (parentDir, name) => ipcRenderer.invoke('project:check', { parentDir, name }),
+  createProject: (parentDir, name) => ipcRenderer.invoke('project:create', { parentDir, name }),
   requestMutationToken: (params) => ipcRenderer.invoke('workspace:requestMutationToken', params),
   applyApprovedMutation: (params) => ipcRenderer.invoke('workspace:applyApprovedMutation', params),
   runApprovedCommand: (params) => ipcRenderer.invoke('workspace:runApprovedCommand', params),
@@ -163,6 +194,11 @@ const electronAPI: ElectronAPI = {
   webSearch: (query, options) => ipcRenderer.invoke('web:search', { query, options }),
   webFetch: (url, options) => ipcRenderer.invoke('web:fetchUrl', { url, options }),
   webAbortAll: () => ipcRenderer.invoke('web:abortAll'),
+
+  // Model Library Bridge
+  modelLibrary: () => ipcRenderer.invoke('models:library'),
+  modelTags: (name) => ipcRenderer.invoke('models:tags', name),
+  modelManifest: (name, tag) => ipcRenderer.invoke('models:manifest', { name, tag }),
 };
 
 contextBridge.exposeInMainWorld('electronAPI', electronAPI);

@@ -34,7 +34,7 @@ export const IconButton: React.FC<IconButtonProps> = ({
       title={label}
       aria-label={label}
       className={cn(
-        'inline-flex items-center justify-center rounded transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500 disabled:opacity-40 disabled:pointer-events-none cursor-pointer',
+        'inline-flex items-center justify-center rounded transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-500 disabled:opacity-40 disabled:pointer-events-none cursor-pointer',
         sizeClasses[size],
         variantClasses[variant],
         className

@@ -1523,8 +1523,8 @@ export class AgentEngine {
       if (designDone) return;
       designDone = true;
       try {
-        const paths = Array.from(writtenFiles).filter((p) => /\.(?:html?|css)$/i.test(p) && !isThemeAsset(p));
-        if (paths.length === 0) return;
+        const paths = Array.from(writtenFiles).filter((p) => /\.(?:html?|css|js)$/i.test(p) && !isThemeAsset(p));
+        if (!paths.some((p) => /\.(?:html?|css)$/i.test(p))) return;
         const files: Array<{ path: string; content: string }> = [];
         const hashes = new Map<string, string>();
         for (const p of paths) {
@@ -1608,6 +1608,16 @@ export class AgentEngine {
           lines.push(`• ${details.join(' · ')}`);
         }
         if (result.fixedYears.length > 0) lines.push(`• Telif yılı ${new Date().getFullYear()} olarak güncellendi.`);
+        for (const b of result.buttons.filter((x) => done.includes(x.path))) {
+          lines.push(`• "${b.path}": stili olmayan ${b.count} butona sayfanın renginde bir görünüm verildi.`);
+        }
+        for (const m of result.menus.filter((x) => done.includes(x.path))) {
+          const what = [
+            m.repaired.includes('script') ? 'menü düğmesine aç/kapat eklendi' : m.repaired.includes('open') ? 'menü düğmesi artık menüyü açıyor' : '',
+            m.repaired.includes('close') ? 'bir bağlantı seçilince menü kapanıyor' : '',
+          ].filter(Boolean);
+          lines.push(`• "${m.path}" mobil menüsü onarıldı: ${what.join(', ')}.`);
+        }
         if (theme && designPlan) lines.push('Ayarlar › Üretim › Web Tasarımı bölümünden temayı değiştirebilir veya kapatabilirsiniz.');
         notice(lines.join('\n') || `Sayfa düzeltmeleri uygulandı: ${done.join(', ')}`, 'success', theme ? 'Tasarım Teması' : 'Sayfa Düzeltmeleri');
       } catch (err: any) {
@@ -2431,7 +2441,13 @@ export class AgentEngine {
             toolArgs: { query },
             content: `"${query}" terimi aranıyor...`,
           });
-          const searchRes = await window.electronAPI?.searchWorkspaceCode(query);
+          // A failing search is a tool error the model can work around, never the end of the run
+          // (the main process of v1.7.0 and earlier had no handler for it: every search_code crashed the task).
+          const searchRes = await Promise.resolve(window.electronAPI?.searchWorkspaceCode(query)).catch((err: any) => ({
+            success: false as const,
+            matches: undefined,
+            error: String(err?.message || err).replace(/^Error invoking remote method '[^']+': /, ''),
+          }));
           let observation: string;
           if (searchRes?.success && searchRes.matches) {
             consecutiveErrors = 0;
@@ -2457,7 +2473,7 @@ export class AgentEngine {
           } else {
             consecutiveErrors++;
             stepsWithoutProgress++;
-            observation = `[ERROR]: search failed: ${searchRes?.error || 'unknown error'}`;
+            observation = `[ERROR]: search failed: ${searchRes?.error || 'unknown error'}. Use list_dir and read_file instead.`;
           }
           const entry = pushExchange(assistantText, parsed.rawJson, observation, `[search_code "${query}" result shortened]`);
           if (readOnlySignature) seenActions.set(readOnlySignature, { step: stepCount, entry });

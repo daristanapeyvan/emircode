@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Plus,
   PanelLeft,
   Settings,
   Layers,
@@ -9,14 +8,11 @@ import {
   Square,
   Copy,
   X,
-  Sliders,
 } from 'lucide-react';
 import { ModelSelector } from '../chat/ModelSelector';
 import { IconButton } from '../common/IconButton';
 import { AppLogo } from '../common/AppLogo';
 import { useUIStore } from '@/stores/uiStore';
-import { useChatStore } from '@/stores/chatStore';
-import { useAgentStore } from '@/stores/agentStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { getTranslations } from '@/lib/localization/i18n';
 
@@ -27,25 +23,9 @@ export const TitleBar: React.FC = () => {
     openModels,
     openCommandPalette,
     toggleSidebar,
-    toggleSystemPrompt,
-    activeAppMode,
-    setActiveAppMode,
   } = useUIStore();
-  const { createNewChat } = useChatStore();
-  const { clearSession, workspaceRoot, openWorkspaceDialog } = useAgentStore();
   const { settings } = useSettingsStore();
   const t = getTranslations(settings.language);
-
-  const handleNewAction = () => {
-    if (activeAppMode === 'agent') {
-      clearSession();
-      if (!workspaceRoot) {
-        openWorkspaceDialog();
-      }
-    } else {
-      createNewChat();
-    }
-  };
 
   useEffect(() => {
     if (window.electronAPI?.isMaximized) {
@@ -75,18 +55,11 @@ export const TitleBar: React.FC = () => {
 
         <div className="h-3.5 w-px bg-zinc-800/50 mx-0.5" />
 
-        {/* Sidebar & New Chat Actions */}
+        {/* Sidebar toggle (new chats, projects and tasks start from the sidebar) */}
         <IconButton
-          label="Toggle Sidebar"
+          label={t.titleBar.toggleSidebar}
           icon={<PanelLeft size={15} strokeWidth={1.5} />}
           onClick={toggleSidebar}
-          size="sm"
-        />
-
-        <IconButton
-          label={activeAppMode === 'agent' ? (t.agent?.newProjectTask || 'Yeni Görev (Ctrl+N)') : t.titleBar.newChat}
-          icon={<Plus size={15} strokeWidth={1.5} />}
-          onClick={handleNewAction}
           size="sm"
         />
 
@@ -103,13 +76,6 @@ export const TitleBar: React.FC = () => {
           label={t.titleBar.commandPalette}
           icon={<Search size={14} strokeWidth={1.5} />}
           onClick={openCommandPalette}
-          size="sm"
-        />
-
-        <IconButton
-          label={t.chat.systemInstructions}
-          icon={<Sliders size={14} strokeWidth={1.5} />}
-          onClick={toggleSystemPrompt}
           size="sm"
         />
 

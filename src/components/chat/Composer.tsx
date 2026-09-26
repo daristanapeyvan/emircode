@@ -1,13 +1,22 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Paperclip, ArrowUp, Square, Zap, Globe } from 'lucide-react';
+import { Paperclip, ArrowUp, Square, Globe, ScrollText } from 'lucide-react';
 import { AttachmentTray } from './AttachmentTray';
 import { useChatStore } from '@/stores/chatStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useModelStore } from '@/stores/modelStore';
+import { useUIStore } from '@/stores/uiStore';
+import { noticeDialog } from '@/lib/ui/dialogs';
 import { getTranslations } from '@/lib/localization/i18n';
 import { Attachment } from '@/types/chat';
 import { DEFAULT_SETTINGS } from '@/types/settings';
 import { cn } from '@/lib/utils/cn';
+
+/** A square button of the composer; a switched-on one is blue. */
+const toolClass = (active: boolean) =>
+  cn(
+    'inline-flex items-center justify-center w-8 h-8 shrink-0 rounded transition-colors cursor-pointer disabled:opacity-40 disabled:pointer-events-none',
+    active ? 'bg-blue-500/15 text-blue-400 hover:bg-blue-500/25' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/60'
+  );
 
 export const Composer: React.FC = () => {
   const [content, setContent] = useState('');
@@ -15,10 +24,15 @@ export const Composer: React.FC = () => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const { isStreaming, sendMessage, stopStreaming, interruptAndSend, addAttachment } = useChatStore();
+  const { isStreaming, sendMessage, stopStreaming, interruptAndSend, addAttachment, attachments } = useChatStore();
   const { selectedModelDetails, selectedModel } = useModelStore();
   const { settings, setWebAccess } = useSettingsStore();
   const t = getTranslations(settings.language);
+  const toggleSystemPrompt = useUIStore((s) => s.toggleSystemPrompt);
+  const activeChatId = useChatStore((s) => s.activeChatId);
+  const hasSystemPrompt = useChatStore((s) => !!s.chats.find((c) => c.id === s.activeChatId)?.systemPrompt?.trim());
+  const webAccess = settings.webAccess || DEFAULT_SETTINGS.webAccess;
+  const webOn = webAccess.enabled && webAccess.chatEnabled;
 
   // Auto-resize textarea height
   useEffect(() => {
@@ -86,7 +100,7 @@ export const Composer: React.FC = () => {
       const isImage = file.type.startsWith('image/');
 
       if (isImage && !supportsVision) {
-        alert(t.chat.visionNotSupported);
+        void noticeDialog({ title: t.chat.imageNotAddedTitle, message: t.chat.visionNotSupported });
         continue;
       }
 
@@ -127,7 +141,7 @@ export const Composer: React.FC = () => {
   const handleNativeAttachment = async () => {
     if (window.electronAPI?.openFileDialog) {
       const res = await window.electronAPI.openFileDialog({
-        title: 'Attach File',
+        title: t.chat.attachFile,
         multiSelections: true,
       });
 
@@ -136,7 +150,7 @@ export const Composer: React.FC = () => {
         for (const file of res.files) {
           const isImage = /\.(png|jpe?g|webp|gif)$/i.test(file.name);
           if (isImage && !supportsVision) {
-            alert(t.chat.visionNotSupported);
+            void noticeDialog({ title: t.chat.imageNotAddedTitle, message: t.chat.visionNotSupported });
             continue;
           }
           addAttachment({
@@ -178,7 +192,7 @@ export const Composer: React.FC = () => {
   };
 
   return (
-    <div className="p-4 bg-transparent shrink-0">
+    <div className="px-4 pb-4 shrink-0">
       <div
         onDragOver={(e) => {
           e.preventDefault();
@@ -187,25 +201,23 @@ export const Composer: React.FC = () => {
         onDragLeave={() => setIsDragging(false)}
         onDrop={handleDrop}
         className={cn(
-          'max-w-3xl mx-auto rounded-xl border bg-zinc-900/90 shadow-sm overflow-hidden transition-all duration-150',
-          isDragging
-            ? 'border-blue-500 bg-blue-950/20'
-            : 'border-zinc-800/40 focus-within:border-zinc-700/60 focus-within:ring-1 focus-within:ring-zinc-700/30'
+          'max-w-3xl mx-auto rounded-lg border bg-zinc-900 transition-colors',
+          isDragging ? 'border-blue-500' : 'border-zinc-800 focus-within:border-zinc-700'
         )}
       >
         {/* Attachment preview tray */}
         <AttachmentTray />
 
         {/* Input area */}
-        <div className="flex items-end px-3 py-2 gap-2">
-          {/* Attachment Button */}
+        <div className="flex items-end gap-1 p-2">
           <button
             type="button"
             onClick={handleNativeAttachment}
             title={t.chat.attachFile}
-            className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/80 transition-colors cursor-pointer shrink-0 mb-0.5"
+            aria-label={t.chat.attachFile}
+            className={toolClass(false)}
           >
-            <Paperclip size={18} strokeWidth={1.5} />
+            <Paperclip size={16} strokeWidth={1.5} />
           </button>
           <input
             type="file"
@@ -215,85 +227,62 @@ export const Composer: React.FC = () => {
             onChange={(e) => e.target.files && processFiles(e.target.files)}
           />
 
-          {/* Web Access Instant Toggle Button */}
           <button
             type="button"
-            onClick={() => {
-              const current = settings.webAccess || DEFAULT_SETTINGS.webAccess;
-              const isCurrentlyActive = current.enabled && current.chatEnabled;
-              setWebAccess({ enabled: !isCurrentlyActive, chatEnabled: !isCurrentlyActive });
-            }}
-            title={
-              settings.webAccess?.enabled && settings.webAccess?.chatEnabled
-                ? 'Web Erişimi: Açık (İnternet araması ve güncel veriler aktif - Kapatmak için tıklayın)'
-                : 'Web Erişimi: Kapalı (Açmak için tıklayın)'
-            }
-            className={cn(
-              'p-1.5 rounded-lg transition-all cursor-pointer shrink-0 mb-0.5 flex items-center gap-1 text-xs',
-              settings.webAccess?.enabled && settings.webAccess?.chatEnabled
-                ? 'text-cyan-400 bg-cyan-950/60 border border-cyan-800/60 hover:bg-cyan-900/60 shadow-sm'
-                : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/80 border border-transparent'
-            )}
+            onClick={toggleSystemPrompt}
+            disabled={!activeChatId}
+            title={t.chat.systemInstructions}
+            aria-label={t.chat.systemInstructions}
+            aria-pressed={hasSystemPrompt}
+            className={toolClass(hasSystemPrompt)}
           >
-            <Globe size={16} strokeWidth={1.5} />
-            <span className="hidden sm:inline font-mono text-[10px] font-medium">
-              {settings.webAccess?.enabled && settings.webAccess?.chatEnabled ? 'Web' : ''}
-            </span>
+            <ScrollText size={16} strokeWidth={1.5} />
           </button>
 
-          {/* Multiline textarea */}
+          <button
+            type="button"
+            onClick={() => setWebAccess({ enabled: !webOn, chatEnabled: !webOn })}
+            title={webOn ? t.chat.webOn : t.chat.webOff}
+            aria-label={webOn ? t.chat.webOn : t.chat.webOff}
+            aria-pressed={webOn}
+            className={toolClass(webOn)}
+          >
+            <Globe size={16} strokeWidth={1.5} />
+          </button>
+
           <textarea
             ref={textareaRef}
             value={content}
             onChange={(e) => setContent(e.target.value)}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
-            placeholder={
-              !selectedModel
-                ? t.chat.selectModelFirst
-                : isStreaming
-                ? (t.agent?.interruptPlaceholder || 'Araya girip yeni talimat vermek için buraya yazın (Enter)...')
-                : t.chat.inputPlaceholder
-            }
+            placeholder={!selectedModel ? t.chat.selectModelFirst : isStreaming ? t.agent.interruptPlaceholder : t.chat.inputPlaceholder}
             disabled={!selectedModel}
             rows={1}
-            className="flex-1 bg-transparent border-0 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:ring-0 resize-none max-h-44 py-1.5 leading-relaxed font-sans selectable-text"
+            className="flex-1 min-w-0 bg-transparent border-0 px-1.5 py-1.5 text-sm leading-5 text-zinc-100 placeholder-zinc-500 focus:outline-none focus:ring-0 resize-none max-h-44"
           />
 
-          {/* Send / Stop / Interrupt Actions */}
-          {isStreaming ? (
-            <div className="flex items-center gap-1.5 mb-0.5 shrink-0">
-              {content.trim() && (
-                <button
-                  type="button"
-                  onClick={handleSend}
-                  title={t.chat.interruptAndSend || 'Araya Gir & Gönder (Enter)'}
-                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 font-medium text-xs transition-colors cursor-pointer shadow-sm animate-in fade-in"
-                >
-                  <Zap size={14} className="fill-zinc-950" />
-                  <span className="hidden sm:inline font-semibold">{t.chat.interruptAndSend || 'Araya Gir'}</span>
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={stopStreaming}
-                title={t.chat.stop}
-                className="p-1.5 rounded-lg bg-red-600/90 hover:bg-red-500 text-white transition-colors cursor-pointer shadow-sm"
-              >
-                <Square size={16} strokeWidth={2} />
-              </button>
-            </div>
-          ) : (
+          {isStreaming && (
             <button
               type="button"
-              onClick={handleSend}
-              disabled={!content.trim() && useChatStore.getState().attachments.length === 0}
-              title={t.chat.send}
-              className="p-1.5 rounded-lg bg-zinc-100 hover:bg-white text-zinc-900 disabled:opacity-30 disabled:hover:bg-zinc-100 transition-colors cursor-pointer shrink-0 mb-0.5 shadow-sm"
+              onClick={stopStreaming}
+              title={t.chat.stop}
+              aria-label={t.chat.stop}
+              className="inline-flex items-center justify-center w-8 h-8 shrink-0 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200 transition-colors cursor-pointer"
             >
-              <ArrowUp size={16} strokeWidth={2} />
+              <Square size={14} strokeWidth={2} />
             </button>
           )}
+          <button
+            type="button"
+            onClick={handleSend}
+            disabled={!content.trim() && (isStreaming || attachments.length === 0)}
+            title={isStreaming ? t.chat.interruptAndSend : t.chat.send}
+            aria-label={isStreaming ? t.chat.interruptAndSend : t.chat.send}
+            className="inline-flex items-center justify-center w-8 h-8 shrink-0 rounded bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-40 disabled:pointer-events-none transition-colors cursor-pointer"
+          >
+            <ArrowUp size={16} strokeWidth={2} />
+          </button>
         </div>
       </div>
     </div>

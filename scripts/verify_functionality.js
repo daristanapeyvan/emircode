@@ -32,12 +32,11 @@ test('1. Translation Parity: All keys in en.ts match tr.ts', () => {
     'deleteConfirmDesc',
     'languageSystem',
     'appName',
-    'emptyTitle',
-    'emptySubtitle',
-    'newSession',
+    'noModelsInstalled',
     'projectExplorer',
     'openFolder',
-    'sandboxActive',
+    'securityHintStrict',
+    'actionLabels',
   ];
 
   for (const key of requiredKeys) {
@@ -115,8 +114,8 @@ test('4. Security: Command Whitelist strictly blocks unauthorized binaries & arg
   assert.strictEqual(validateCommand('npm', ['test', ';', 'rm', '-rf']).allowed, false);
 });
 
-// 5. Centered EmptyState Layout Validation
-test('5. UI: EmptyState text cluster is centered horizontally and vertically', () => {
+// 5. Empty chat: the mode's icon and a greeting; a missing model gets its hint
+test('5. UI: An empty chat shows the chat icon and a greeting; a missing model gets a download hint', () => {
   const chatContainerSrc = fs.readFileSync(path.join(__dirname, '../src/components/chat/ChatContainer.tsx'), 'utf-8');
   assert(
     chatContainerSrc.includes('flex flex-col items-center justify-center min-h-0'),
@@ -124,10 +123,9 @@ test('5. UI: EmptyState text cluster is centered horizontally and vertically', (
   );
 
   const emptyStateSrc = fs.readFileSync(path.join(__dirname, '../src/components/chat/EmptyState.tsx'), 'utf-8');
-  assert(
-    emptyStateSrc.includes('flex flex-col items-center justify-center p-8 text-center select-none max-w-md mx-auto my-auto'),
-    'EmptyState does not have centered container styling'
-  );
+  assert(!emptyStateSrc.includes('AppLogo'), 'EmptyState still shows the logo as decoration');
+  assert(emptyStateSrc.includes('installedModels.length === 0') && emptyStateSrc.includes("openModels('discover')"), 'EmptyState lacks the way to download a model');
+  assert(emptyStateSrc.includes('<StartIcon') && emptyStateSrc.includes('emptyHeading'), 'EmptyState lacks the chat icon and greeting');
 });
 
 // 6. Mode Switcher Placement
@@ -145,13 +143,13 @@ test('6. UI: Mode switcher is in HistorySidebar above New Chat and removed from 
   assert(modeIdx < newChatIdx, 'Mode switcher is not located above the New Chat button in HistorySidebar');
 });
 
-// 7. Modern Dark Mode Chat Delete Dialog
-test('7. UI: Modern dark mode delete confirmation dialog is used instead of window.confirm', () => {
+// 7. Chat delete confirmation uses the app's own dialog
+test('7. UI: Chat deletion is confirmed in the shared Modal instead of window.confirm', () => {
   const sidebarSrc = fs.readFileSync(path.join(__dirname, '../src/components/layout/HistorySidebar.tsx'), 'utf-8');
   assert(!sidebarSrc.includes('window.confirm'), 'HistorySidebar still uses browser window.confirm');
   assert(sidebarSrc.includes('chatToDelete'), 'HistorySidebar lacks chatToDelete state');
   assert(sidebarSrc.includes('deleteConfirmTitle'), 'HistorySidebar lacks deleteConfirmTitle');
-  assert(sidebarSrc.includes('bg-rose-600'), 'HistorySidebar lacks dark styled delete confirmation button');
+  assert(sidebarSrc.includes('<Modal') && sidebarSrc.includes('variant="danger"'), 'HistorySidebar delete confirmation does not use Modal with a danger button');
 });
 
 // 8. Unified Chat & Agent Sessions
@@ -264,19 +262,24 @@ test('17. Circuit Breaker: Timeout enforces >= 30 minutes floor and user configu
 
   const generalSettingsSrc = fs.readFileSync(path.join(__dirname, '../src/components/settings/GeneralSettings.tsx'), 'utf-8');
   assert(generalSettingsSrc.includes('circuitBreakerMinutes'), 'GeneralSettings lacks circuit breaker selector');
-  assert(generalSettingsSrc.includes('value={30}'), 'GeneralSettings lacks 30m option');
-  assert(generalSettingsSrc.includes('value={120}'), 'GeneralSettings lacks 120m option');
+  assert(generalSettingsSrc.includes('value: 30,'), 'GeneralSettings lacks 30m option');
+  assert(generalSettingsSrc.includes('value: 120,'), 'GeneralSettings lacks 120m option');
 });
 
-// 18. Context-Aware New Task (+) Button
-test('18. Context-Aware New Task: TitleBar + button & Ctrl+N handle Emir Code mode properly', () => {
+// 18. Projects: New Project in the sidebar, "+" per project folder, no TitleBar duplicate
+test('18. Projects: sidebar groups tasks by folder, starts projects and tasks; Ctrl+N / Ctrl+Shift+N', () => {
   const titleBarSrc = fs.readFileSync(path.join(__dirname, '../src/components/layout/TitleBar.tsx'), 'utf-8');
-  assert(titleBarSrc.includes("activeAppMode === 'agent'"), 'TitleBar does not inspect activeAppMode');
-  assert(titleBarSrc.includes('clearSession()'), 'TitleBar does not call clearSession() in agent mode');
-  assert(titleBarSrc.includes('newProjectTask'), 'TitleBar does not provide dynamic newProjectTask tooltip');
+  assert(!titleBarSrc.includes('handleNewAction') && !titleBarSrc.includes('<Plus'), 'TitleBar still has its own new chat / task button');
+
+  const sidebarSrc = fs.readFileSync(path.join(__dirname, '../src/components/layout/HistorySidebar.tsx'), 'utf-8');
+  assert(sidebarSrc.includes('groupTasksByProject'), 'HistorySidebar does not group tasks by project folder');
+  assert(sidebarSrc.includes('startTaskInFolder'), 'Project folders lack their "+" (new task in folder)');
+  assert(sidebarSrc.includes('openNewProject()'), 'HistorySidebar lacks New Project');
 
   const appSrc = fs.readFileSync(path.join(__dirname, '../src/App.tsx'), 'utf-8');
   assert(appSrc.includes("if (activeAppMode === 'agent')"), 'App.tsx Ctrl+N does not check activeAppMode');
+  assert(appSrc.includes('e.shiftKey') && appSrc.includes('openNewProject()'), 'App.tsx lacks Ctrl+Shift+N for New Project');
+  assert(appSrc.includes('<NewProjectDialog />'), 'App.tsx does not mount NewProjectDialog');
 });
 
 // 19. Real-Time Inline Transcript & LLM Token Streaming
@@ -294,7 +297,7 @@ test('19. Live Token Streaming: onStreamChunk emits character chunks into inline
   const wsSrc = fs.readFileSync(path.join(__dirname, '../src/components/agent/AgentWorkspace.tsx'), 'utf-8');
   assert(wsSrc.includes('toggleInlineTranscript'), 'AgentWorkspace does not wire toggleInlineTranscript');
   assert(wsSrc.includes('activeStreamText'), 'AgentWorkspace does not display activeStreamText');
-  assert(wsSrc.includes('liveTokenStream') || wsSrc.includes('CANLI TOKEN AKIŞI'), 'AgentWorkspace lacks live token stream badge');
+  assert(wsSrc.includes('inlineTranscriptOpen') && wsSrc.includes('parseAgentStream(activeStreamText)'), 'AgentWorkspace does not show the streaming step inline');
 });
 
 // 20. HiDPI Multi-Resolution Icon & App Branding
@@ -373,9 +376,12 @@ test('24. Agent Hardware Optimization: Configurable tokens and synthesis strateg
   assert(agentEngineTs.includes('agentOpt?.maxTokens'), 'AgentEngine.ts missing dynamic maxTokens reading');
   assert(agentEngineTs.includes('webSynthesisStrategy'), 'AgentEngine.ts missing webSynthesisStrategy handling');
 
-  const genSettingsTs = fs.readFileSync(path.join(__dirname, '../src/components/settings/GenerationSettings.tsx'), 'utf-8');
-  assert(genSettingsTs.includes('t.settings.agentOptimization'), 'GenerationSettings.tsx missing agentOptimization UI');
-  assert(genSettingsTs.includes('detectedHardware'), 'GenerationSettings.tsx missing hardware detection card');
+  const agentSettingsTs = fs.readFileSync(path.join(__dirname, '../src/components/settings/AgentSettings.tsx'), 'utf-8');
+  assert(agentSettingsTs.includes('setAgentOptimization'), 'AgentSettings.tsx missing agent optimization controls');
+  assert(agentSettingsTs.includes('hardwareProfile') && agentSettingsTs.includes('webSynthesisStrategy') && agentSettingsTs.includes('modificationStrategy'), 'AgentSettings.tsx missing profile or strategy selectors');
+
+  const aboutTs = fs.readFileSync(path.join(__dirname, '../src/components/settings/AboutSettings.tsx'), 'utf-8');
+  assert(aboutTs.includes('hardware.cpu') && aboutTs.includes('refreshHardware'), 'AboutSettings.tsx missing detected hardware');
 });
 
 console.log(`\n==============================================`);

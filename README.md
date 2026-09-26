@@ -22,17 +22,17 @@
 
 ## ✨ What can you do with Emir Code?
 
-Emir Code has two modes: **Chat** for questions and **Emir Code** (the agent) for work inside a project folder. You can write in Turkish or English — answers follow your language.
+Emir Code has two modes: **Chat** for questions and **Code** (the agent) for work inside a project folder. You can write in Turkish or English — answers follow your language.
 
 ### 💬 Chat with a local model
 - Ask coding questions and get explanations and code with syntax highlighting and one-click copy.
 - Attach a text/code file or an image and ask about it (images need a vision-capable model).
 - Switch on **Web** and ask about people, news, prices or the weather — Emir Code searches the web and answers with numbered sources:
   > `şebnem ferah kimdir?` · `bugün İstanbul'da hava nasıl?` · `What changed in React 19?`
-- Choose a generation preset in Settings → Generation (Balanced, Precise, Creative, Coding) and a system prompt from the chat's system prompt button (General Assistant, Senior Developer, Ultra Concise), or write your own.
+- Choose a generation preset in Settings → Generation (Balanced, Precise, Creative, Coding) and system instructions from the button next to the message box (General assistant, Senior developer, Very concise), or write your own.
 
 ### 🤖 Let the agent do the work
-Pick a project folder in the **Emir Code** tab, describe what you want, and follow the agent as it reads files, writes code, runs tests and reports back.
+In the **Emir Code** tab, start a **New Project** (empty, or from one of the wizards — the folder is created for you under Documents › Emir Code Projects) or open a folder you already have, describe what you want, and follow the agent as it reads files, writes code, runs tests and reports back. The sidebar lists your tasks by project folder; the **+** next to a project starts a new task in it.
 
 | You want to… | Example request |
 | :--- | :--- |
@@ -49,14 +49,14 @@ What happens behind the scenes:
 2. Every file it writes is checked automatically (HTML, CSS, JS/TS, Python, JSON, YAML, Java, C#, Go, Rust…). Problems are sent back to the model with the exact line numbers until they are fixed.
 3. Web pages must pass real acceptance checks before the task can finish: actual CSS rules, working JavaScript, a mobile viewport tag, linked files that exist — and working menu links when you ask about links ("Home About Services Contact — get these working"). Existing tests are protected — a failing test is fixed in the code, never by editing the test.
 4. You see every change as a line-by-line diff; depending on the security profile you approve it or it is applied for you.
-5. The ↺ button undoes everything the agent changed in the session.
+5. **Undo changes (n)** in the project bar undoes everything the agent changed in the session.
 6. The next request in the same session knows what was asked and changed before, so "now add a footer" just works.
 7. A change that would break a working file is never applied — the model has to send a correct version instead of patching its own breakage.
 
 **Tip:** if a request has several separate jobs, write them as a numbered list (`1. … 2. …`) or join them with "sonra" / "then" — they become a checklist that must be completed in full. Everything else is treated as one task, however many sentences or lines it has.
 
 ### 🧭 Start from a wizard
-In an empty folder, three suggestions appear above the message box:
+Choose one in **New Project** (the project folder is created when you confirm the wizard):
 - **Website Oluştur** — pick pages, sections, texts and a design theme; the app writes a precise request with a page plan.
 - **Mini Uygulama** — 21 single-file web tools (calculators, Pomodoro, to-do list, trackers, games) with their own settings page.
 - **Betik** — 13 Python / Node.js command-line scripts (bulk rename, folder organizer, CSV/JSON tools, search & replace). Scripts preview by default, change files only with `--uygula` / `--apply`, never delete or overwrite, keep backups and an action log.
@@ -64,14 +64,14 @@ In an empty folder, three suggestions appear above the message box:
 Confirming a wizard puts the request into the message box — you read or edit it and press send. New web pages the agent builds get one of 24 hand-tuned design themes (Settings → Generation → Web Design).
 
 ### 🧩 Manage your models
-Download models from the built-in catalog or by name, see which models are loaded in memory, unload or delete them — no terminal needed (**Ctrl+Shift+M**).
+Browse the Ollama library by category (coding, agents & tools, reasoning, vision, lightweight, chat, embedding), pick any size and quantization, see whether it fits your computer, and download it — every tag is verified against the Ollama registry automatically, and installed models are checked for updates. See which models are loaded in memory, unload or delete them — no terminal needed (**Ctrl+Shift+M**).
 
 ### 🛡️ Stay in control
-- **Security profiles** — *Strict* (default): you approve every change and command. *Balanced*: file changes are applied automatically; commands and deletions need your approval. *Autonomous*: file changes and test commands (`npm test`, `pytest`, `cargo test`) run automatically and the agent does not stop to ask questions; deleting files always needs your approval.
+- **Agent approvals** (security profile, in the project bar and Settings → General) — *Strict* (default): you approve every change and command. *Balanced*: file changes are applied automatically; commands and deletions need your approval. *Autonomous*: file changes and test commands (`npm test`, `pytest`, `cargo test`) run automatically and the agent does not stop to ask questions; deleting files always needs your approval.
 - The agent can only touch files inside the folder you picked. Writes go through one-time tokens checked by Electron's main process.
 - Only `npm test`/`npm run <test|build|lint|typecheck|check>`, `node`, `python`, `pytest` and `cargo` can be run — never `npx` or arbitrary shell commands.
 
-**Keyboard shortcuts:** Ctrl+N new chat (new agent task in the Emir Code tab) · Ctrl+K command palette · Ctrl+Shift+M models · Ctrl+, settings.
+**Keyboard shortcuts:** Ctrl+N new chat (in the Code tab: a new task in the open project) · Ctrl+Shift+N new project · Ctrl+K command palette · Ctrl+Shift+M models · Ctrl+, settings.
 
 ---
 
@@ -119,15 +119,15 @@ Pre-built packages for every release are on the [GitHub Releases](https://github
 | **Setup wizard** (`emir-code-setup-linux.sh`) | `bash emir-code-setup-linux.sh` — installs to `~/.local/share/emir-code` with menu entry, desktop shortcut, `emir-code` command and `uninstall.sh`. Downloads the matching `.tar.gz` automatically if it is not next to the script. |
 | **Archive** (`emir-code-X.Y.Z.tar.gz`) | Extract and run `./emir-code` |
 
-When started from an AppImage or an extracted folder, **Settings → About → "Masaüstü Kısayollarını Oluştur / Güncelle"** adds Emir Code to the application menu and desktop.
+When started from an AppImage or an extracted folder, **Settings → About → Create shortcuts** adds Emir Code to the application menu and desktop.
 
 On distributions that block Chromium's sandbox for normal users (Ubuntu 23.10+ restricts unprivileged user namespaces with AppArmor), the `emir-code` launcher starts the app without the sandbox automatically instead of failing to start. Every release is launched in CI from each Linux package format (see [ARCHITECTURE.md §13](./ARCHITECTURE.md#13-packaging--release-pipeline)).
 
 ### First steps
 1. Open Emir Code, pick a model in the model selector at the top.
 2. **Chat**: type a question. Turn on **Web** for questions about current information.
-3. **Emir Code tab**: choose a project folder (an empty folder is fine for new projects), pick a security profile and describe your task.
-4. Follow the timeline; open the 💡 panel to see the model's reasoning and raw output.
+3. **Code tab**: choose a project folder (an empty folder is fine for new projects), pick the approval level and describe your task.
+4. Follow the task as it runs; the **Logs** panel (panel icon in the project bar) shows the agent's events and the model's raw output.
 
 ### Troubleshooting
 - **The first agent step is slow** — the model is loaded and the whole task is read once (on CPU this can take 1–3 minutes). Later steps reuse Ollama's cache and are much faster.
@@ -215,7 +215,8 @@ Pushing a `vX.Y.Z` tag runs the release workflow, which builds all packages, lau
 
 - **No telemetry**: no analytics, no tracking, no accounts.
 - **Local inference**: prompts and code go only to your Ollama endpoint (`http://localhost:11434` by default).
-- **Web access is the only network feature** besides Ollama. It is switched on by default and can be turned off completely or per mode (chat / agent) in Settings → Web Access. Searches go to DuckDuckGo; with Web access off, nothing leaves your computer.
+- **Web access** is switched on by default and can be turned off completely or per mode (chat / agent) in Settings → Web Access. Searches go to DuckDuckGo.
+- **Model library**: the Models window reads the model list from ollama.com and verifies tags with registry.ollama.ai (the source `ollama pull` uses) while its Discover or Installed tab is open. No personal data is sent.
 
 ---
 

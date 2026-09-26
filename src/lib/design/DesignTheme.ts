@@ -17,6 +17,7 @@ import { DesignCategory, ThemeDefinition, THEMES, NEUTRAL_THEME, getTheme, pickT
 import { buildThemeCss, readThemeMarker, isThemeAsset, THEME_FILE } from './themeCss';
 import { ThemeRewriter } from './cssRewrite';
 import { injectThemeLink, ensureViewport, fixCopyrightYears, replaceEmojiIcons, relativeHref } from './html';
+import { pageSources, repairMobileMenu, styleBareButtons } from './pageRepairs';
 import { categorizeByKeywords } from './categorize';
 
 export type CategorySource = 'keywords' | 'model' | 'fixed' | 'random' | 'default' | 'existing' | 'wizard';
@@ -75,6 +76,10 @@ export interface DesignResult {
   colorChanges: number;
   icons: number;
   fixedYears: string[];
+  /** Pages whose buttons had no style of their own and got one (no theme covered them). */
+  buttons: Array<{ path: string; count: number }>;
+  /** Pages whose mobile menu was repaired: "open" (the button now opens it), "script" (a toggle was added), "close". */
+  menus: Array<{ path: string; repaired: Array<'open' | 'script' | 'close'> }>;
 }
 
 const FRAMEWORK =
@@ -283,6 +288,8 @@ export function applyDesign(params: {
     colorChanges: 0,
     icons: 0,
     fixedYears: [],
+    buttons: [],
+    menus: [],
   };
   const files = params.files.filter((f) => !isThemeAsset(f.path));
   const pages = files.filter((f) => /\.html?$/i.test(f.path));
@@ -336,6 +343,26 @@ export function applyDesign(params: {
       }
       next.set(page.path, html);
     }
+  }
+
+  // Faults the model left in its pages: buttons without a style (when no theme's base layer covers
+  // them) and a hamburger menu that does not open, or does not close after a link is chosen.
+  const covered = !!plan && applies && !!(plan.theme || plan.base);
+  for (const page of pages) {
+    let html = next.get(page.path)!;
+    if (!covered) {
+      const buttons = styleBareButtons(html, pageSources(page.path, html, next));
+      if (buttons.count > 0) {
+        html = buttons.html;
+        result.buttons.push({ path: page.path, count: buttons.count });
+      }
+    }
+    const menu = repairMobileMenu(html, pageSources(page.path, html, next));
+    if (menu.repaired.length > 0) {
+      html = menu.html;
+      result.menus.push({ path: page.path, repaired: menu.repaired });
+    }
+    next.set(page.path, html);
   }
 
   for (const f of files) {

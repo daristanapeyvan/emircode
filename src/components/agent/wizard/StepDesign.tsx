@@ -29,7 +29,7 @@ const headingFont = (t: ThemeDefinition) =>
   t.fonts.heading.family ? `"${t.fonts.heading.family}", ${t.fonts.heading.fallback}` : t.fonts.heading.fallback;
 
 /** A miniature page in the theme: header band, headline, text lines, button and card. */
-const ThemeMiniature: React.FC<{ theme: ThemeDefinition; name: string }> = ({ theme, name }) => {
+const ThemeMiniature: React.FC<{ theme: ThemeDefinition; name: string; heading: string }> = ({ theme, name, heading }) => {
   const c = theme.colors;
   return (
     <div className="rounded-lg overflow-hidden border select-none" style={{ backgroundColor: c.bg, borderColor: c.border }} aria-hidden="true">
@@ -57,7 +57,7 @@ const ThemeMiniature: React.FC<{ theme: ThemeDefinition; name: string }> = ({ th
             color: c.ink,
           }}
         >
-          Aa Başlık
+          {heading}
         </div>
         <div className="h-[5px] w-4/5 rounded-full" style={{ backgroundColor: c.inkSoft, opacity: 0.35 }} />
         <div className="h-[5px] w-3/5 rounded-full" style={{ backgroundColor: c.inkSoft, opacity: 0.25 }} />
@@ -108,12 +108,12 @@ export const StepDesign: React.FC<{ w: WizardText }> = ({ w }) => {
           selected ? 'border-zinc-400 bg-zinc-800/60' : 'border-zinc-800 bg-zinc-900 hover:border-zinc-600'
         )}
       >
-        <ThemeMiniature theme={theme} name={siteName} />
+        <ThemeMiniature theme={theme} name={siteName} heading={w.previewHeading} />
         <div className="mt-2 flex items-center justify-between gap-2">
           <span className="text-[13px] font-medium text-zinc-100 truncate">{theme.name}</span>
           <span className="flex items-center gap-1 shrink-0">
-            {isRecommended && <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300">{w.recommended}</span>}
-            {theme.mode === 'dark' && <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300 border border-zinc-700">{w.darkBadge}</span>}
+            {isRecommended && <span className="text-[11px] text-zinc-500">{w.recommended}</span>}
+            {theme.mode === 'dark' && <span className="text-[11px] text-zinc-500">{w.darkBadge}</span>}
             {selected && <Check size={13} className="text-zinc-100" />}
           </span>
         </div>
@@ -183,14 +183,14 @@ export const StepDesign: React.FC<{ w: WizardText }> = ({ w }) => {
         )}
 
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 mb-2">
+          <p className="text-xs font-medium text-zinc-400 mb-2">
             {w.recommended} · {w.categories[category]}
           </p>
           <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">{recommended.map((t) => themeCard(t, true))}</div>
         </div>
 
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 mb-2">{w.otherThemes}</p>
+          <p className="text-xs font-medium text-zinc-400 mb-2">{w.otherThemes}</p>
           <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">{others.map((t) => themeCard(t, false))}</div>
         </div>
       </div>

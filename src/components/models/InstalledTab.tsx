@@ -1,24 +1,29 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { MessageSquare, Info, Star, Trash2, Search } from 'lucide-react';
 import { useModelStore } from '@/stores/modelStore';
+import { useModelLibraryStore } from '@/stores/modelLibraryStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useChatStore } from '@/stores/chatStore';
 import { useUIStore } from '@/stores/uiStore';
 import { getTranslations } from '@/lib/localization/i18n';
 import { formatBytes, formatParameterSize } from '@/lib/utils/formatters';
-import { Button } from '../common/Button';
+import { IconButton } from '../common/IconButton';
+import { confirmDialog } from '@/lib/ui/dialogs';
+import { inputClass } from '../agent/wizard/wizardUi';
 import { cn } from '@/lib/utils/cn';
 
 export const InstalledTab: React.FC = () => {
   const [search, setSearch] = useState('');
 
-  const {
-    installedModels,
-    runningModels,
-    selectedModel,
-    selectModel,
-    deleteModel,
-  } = useModelStore();
+  const { installedModels, runningModels, selectModel, deleteModel, pullModel, downloads } = useModelStore();
+  const { installed: registryState, checkInstalledModels } = useModelLibraryStore();
+
+  // Every installed model is compared with the Ollama registry on its own: up to date or an update.
+  const digests = installedModels.map((m) => `${m.name}@${m.digest}`).join(',');
+  useEffect(() => {
+    void checkInstalledModels(installedModels.map((m) => ({ name: m.name, digest: m.digest })));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [digests, checkInstalledModels]);
 
   const { settings, updateSettings } = useSettingsStore();
   const { createNewChat } = useChatStore();
@@ -27,9 +32,7 @@ export const InstalledTab: React.FC = () => {
 
   const runningSet = new Set(runningModels.map((m) => m.name));
 
-  const filtered = installedModels.filter((m) =>
-    m.name.toLowerCase().includes(search.toLowerCase().trim())
-  );
+  const filtered = installedModels.filter((m) => m.name.toLowerCase().includes(search.toLowerCase().trim()));
 
   const handleStartChat = (modelName: string) => {
     selectModel(modelName);
@@ -37,141 +40,88 @@ export const InstalledTab: React.FC = () => {
     closeModels();
   };
 
-  const handleSetDefault = (modelName: string) => {
-    updateSettings({ defaultModel: modelName });
-  };
-
   const handleDelete = async (modelName: string) => {
-    if (settings.confirmDestructive) {
-      const confirmMsg = t.models.deleteConfirm.replace('{name}', modelName);
-      if (window.confirm(confirmMsg)) {
-        await deleteModel(modelName);
-      }
-    } else {
-      await deleteModel(modelName);
-    }
+    if (
+      settings.confirmDestructive &&
+      !(await confirmDialog({ title: t.models.deleteModelTitle, message: t.models.deleteConfirm.replace('{name}', modelName), confirmLabel: t.common.delete, danger: true }))
+    )
+      return;
+    await deleteModel(modelName);
   };
 
   return (
-    <div className="space-y-4 text-xs">
-      {/* Search filter */}
-      <div className="relative">
-        <Search size={14} className="absolute left-3 top-2.5 text-zinc-500 pointer-events-none" strokeWidth={1.5} />
+    <div className="space-y-3 text-xs">
+      <label className="relative block">
+        <Search size={13} strokeWidth={1.5} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
         <input
-          type="text"
+          type="search"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder={t.models.searchPlaceholder}
-          className="w-full h-8 pl-8 pr-3 rounded bg-zinc-950/60 border border-zinc-800 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-zinc-700"
+          aria-label={t.models.searchPlaceholder}
+          className={cn(inputClass, 'pl-8')}
         />
-      </div>
+      </label>
 
-      {/* Models List */}
-      <div className="space-y-2">
-        {filtered.length === 0 ? (
-          <div className="py-8 text-center text-zinc-500">
-            {t.models.noInstalledModels}
-          </div>
-        ) : (
-          filtered.map((m) => {
-            const isRunning = runningSet.has(m.name);
+      {filtered.length === 0 ? (
+        <p className="py-8 text-center text-zinc-500">{t.models.noInstalledModels}</p>
+      ) : (
+        <div className="rounded-md border border-zinc-800 divide-y divide-zinc-800">
+          {filtered.map((m) => {
             const isDefault = settings.defaultModel === m.name;
-            const isSelected = selectedModel === m.name;
             const paramLabel = formatParameterSize(m.details?.parameter_size);
+            const registry = registryState[m.name.includes(':') ? m.name : `${m.name}:latest`];
+            const status = [
+              isDefault ? t.models.defaultBadge : '',
+              runningSet.has(m.name) ? t.models.activeStatus : '',
+              registry === 'match' ? t.models.upToDate : '',
+            ].filter(Boolean);
+            const meta = [paramLabel, formatBytes(m.size), m.details?.quantization_level, m.details?.family].filter(Boolean);
 
             return (
-              <div
-                key={m.name}
-                className={cn(
-                  'p-3.5 rounded-lg border bg-zinc-950/40 transition-colors flex flex-col md:flex-row md:items-center justify-between gap-3',
-                  isSelected ? 'border-blue-500/40 bg-blue-950/10' : 'border-zinc-800/40 hover:border-zinc-700/50'
-                )}
-              >
-                {/* Model Info */}
-                <div className="space-y-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-mono font-medium text-sm text-zinc-100 truncate">
-                      {m.name}
-                    </span>
-
-                    {isRunning && (
-                      <span className="px-1.5 py-0.5 rounded text-[10px] bg-emerald-950 border border-emerald-800/60 text-emerald-400 font-mono flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                        {t.models.activeStatus}
+              <div key={m.name} className="group flex items-center gap-3 px-3 py-2.5 hover:bg-zinc-800/30 transition-colors">
+                <div className="min-w-0 flex-1 space-y-0.5">
+                  <p className="flex items-center gap-2 min-w-0">
+                    <span className="font-mono text-[13px] text-zinc-100 truncate">{m.name}</span>
+                    {status.length > 0 && <span className="text-[11px] text-zinc-500 shrink-0">{status.join(' · ')}</span>}
+                    {registry === 'differs' && (
+                      <span className="text-[11px] text-amber-400/90 shrink-0" title={t.models.updateAvailableTitle}>
+                        {t.models.updateAvailable}
+                        {downloads[m.name] ? (
+                          <span className="ml-1 tabular-nums">{downloads[m.name].percentage}%</span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => void pullModel(m.name).catch(() => {})}
+                            className="ml-1.5 underline underline-offset-2 hover:text-amber-300 cursor-pointer"
+                          >
+                            {t.models.update}
+                          </button>
+                        )}
                       </span>
                     )}
-
-                    {isDefault && (
-                      <span className="px-1.5 py-0.5 rounded text-[10px] bg-blue-950 border border-blue-800/60 text-blue-400 font-medium">
-                        {t.models.defaultBadge}
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="flex items-center gap-2 text-zinc-500 text-[11px] font-mono">
-                    {paramLabel && <span>{paramLabel}</span>}
-                    {paramLabel && <span>·</span>}
-                    <span>{formatBytes(m.size)}</span>
-                    {m.details?.quantization_level && (
-                      <>
-                        <span>·</span>
-                        <span>{m.details.quantization_level}</span>
-                      </>
-                    )}
-                    {m.details?.family && (
-                      <>
-                        <span>·</span>
-                        <span>{m.details.family}</span>
-                      </>
-                    )}
-                  </div>
+                  </p>
+                  <p className="text-[11px] text-zinc-500 font-mono truncate">{meta.join(' · ')}</p>
                 </div>
 
-                {/* Actions */}
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <Button
-                    variant="primary"
+                <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                  <IconButton label={t.models.startChat} icon={<MessageSquare size={14} strokeWidth={1.5} />} size="sm" onClick={() => handleStartChat(m.name)} />
+                  <IconButton label={t.common.details} icon={<Info size={14} strokeWidth={1.5} />} size="sm" onClick={() => openModelDetails(m.name)} />
+                  <IconButton
+                    label={t.models.setDefault}
+                    icon={<Star size={14} strokeWidth={1.5} />}
                     size="sm"
-                    icon={<MessageSquare size={13} strokeWidth={1.5} />}
-                    onClick={() => handleStartChat(m.name)}
-                  >
-                    Chat
-                  </Button>
-
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    icon={<Info size={13} strokeWidth={1.5} />}
-                    onClick={() => openModelDetails(m.name)}
-                  >
-                    {t.common.details}
-                  </Button>
-
-                  {!isDefault && (
-                    <button
-                      type="button"
-                      onClick={() => handleSetDefault(m.name)}
-                      title={t.models.setDefault}
-                      className="p-1.5 rounded text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors cursor-pointer"
-                    >
-                      <Star size={14} strokeWidth={1.5} />
-                    </button>
-                  )}
-
-                  <button
-                    type="button"
-                    onClick={() => handleDelete(m.name)}
-                    title={t.common.delete}
-                    className="p-1.5 rounded text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer"
-                  >
-                    <Trash2 size={14} strokeWidth={1.5} />
-                  </button>
+                    disabled={isDefault}
+                    className={cn(isDefault && 'invisible')}
+                    onClick={() => updateSettings({ defaultModel: m.name })}
+                  />
+                  <IconButton label={t.common.delete} icon={<Trash2 size={14} strokeWidth={1.5} />} size="sm" variant="danger" onClick={() => handleDelete(m.name)} />
                 </div>
               </div>
             );
-          })
-        )}
-      </div>
+          })}
+        </div>
+      )}
     </div>
   );
 };

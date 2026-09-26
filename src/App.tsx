@@ -9,6 +9,8 @@ import { CommandPalette } from './components/palette/CommandPalette';
 import { DownloadProgress } from './components/models/DownloadProgress';
 import { AgentWorkspace } from './components/agent/AgentWorkspace';
 import { OnboardingModal } from './components/onboarding/OnboardingModal';
+import { NewProjectDialog, focusAgentComposer } from './components/agent/NewProjectDialog';
+import { DialogHost } from './components/common/DialogHost';
 import { useSettingsStore } from './stores/settingsStore';
 import { useModelStore } from './stores/modelStore';
 import { useChatStore } from './stores/chatStore';
@@ -32,6 +34,8 @@ export const App: React.FC = () => {
     isCommandPaletteOpen,
     isModelDetailsOpen,
     activeAppMode,
+    setActiveAppMode,
+    openNewProject,
   } = useUIStore();
 
   // App Initialization
@@ -56,13 +60,23 @@ export const App: React.FC = () => {
   // Global Keyboard Shortcuts
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
-      // Ctrl+N: New chat or New Agent Task
+      // Ctrl+Shift+N: New project (Emir Code)
+      if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'n') {
+        e.preventDefault();
+        setActiveAppMode('agent');
+        openNewProject();
+        return;
+      }
+
+      // Ctrl+N: New chat, or a new task in the open project (no project yet: New Project)
       if (e.ctrlKey && e.key.toLowerCase() === 'n') {
         e.preventDefault();
         if (activeAppMode === 'agent') {
-          useAgentStore.getState().clearSession();
-          if (!useAgentStore.getState().workspaceRoot) {
-            useAgentStore.getState().openWorkspaceDialog();
+          const { workspaceRoot, startTaskInFolder } = useAgentStore.getState();
+          if (workspaceRoot) {
+            startTaskInFolder(workspaceRoot).then((started) => started && focusAgentComposer());
+          } else {
+            openNewProject();
           }
         } else {
           createNewChat();
@@ -91,8 +105,8 @@ export const App: React.FC = () => {
         return;
       }
 
-      // Escape: Stop generation or close open modals
-      if (e.key === 'Escape') {
+      // Escape: Stop generation or close open modals (unless a dialog or menu already took the key)
+      if (e.key === 'Escape' && !e.defaultPrevented) {
         if (isCommandPaletteOpen) {
           closeCommandPalette();
         } else if (isModelDetailsOpen) {
@@ -110,6 +124,9 @@ export const App: React.FC = () => {
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
   }, [
+    activeAppMode,
+    setActiveAppMode,
+    openNewProject,
     createNewChat,
     openCommandPalette,
     openModels,
@@ -127,7 +144,7 @@ export const App: React.FC = () => {
   ]);
 
   return (
-    <div className="h-screen w-screen flex flex-col overflow-hidden bg-canvas-dark text-zinc-200">
+    <div className="h-screen w-screen flex flex-col overflow-hidden bg-canvas text-zinc-200">
       {/* Native Windows Title Bar */}
       <TitleBar />
 
@@ -144,6 +161,8 @@ export const App: React.FC = () => {
       <CommandPalette />
       <DownloadProgress />
       <OnboardingModal />
+      <NewProjectDialog />
+      <DialogHost />
     </div>
   );
 };

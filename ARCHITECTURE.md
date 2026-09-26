@@ -238,6 +238,8 @@ Emir Code guarantees zero state loss across application restarts through unified
 - **Dynamic Workspace Reconnection**: Selecting any historical session automatically triggers the native `workspace:setPath` IPC handler, validating and binding the project folder and refreshing the filesystem tree in real time.
 - **Smart Directory Memory**: The application remembers the last active project folder, allowing instant continuation upon reboot.
 - **Startup Clean Slate**: The application launches in a clean, unselected state (`activeChatId: null`), eliminating misleading visual selection of previous sessions while maintaining instantaneous access through the unified history sidebar.
+- **Projects in the sidebar**: in the Code tab the sidebar groups agent tasks by their `workspaceRoot` (`groupTasksByProject` in `lib/utils/projects.ts`; Windows paths compare case-insensitively and with either slash), most recently used folder first, tasks without a folder last; the open folder is listed before its first task. The "+" of a project calls `agentStore.startTaskInFolder`; **New Project** (`components/agent/NewProjectDialog.tsx`) creates a folder through `project:check` / `project:create` in the main process (same name rules on both sides, an existing folder is reused only when empty). A wizard chosen there keeps a `pendingProject` and creates the folder on its "Onayla", so a wizard closed halfway leaves nothing on disk. Moved or deleted folders are found with `workspace:pathsExist` and shown dimmed.
+- **One session at a time**: the agent state belongs to `sessionChatId` (not the selected conversation), so opening a chat in the Chat tab never stops a running task from being saved. Leaving a session (another task, another project, a new task) asks before stopping a running task; `clearSession` / `loadSession` stop it, answer its pending approvals with "no" and drop whatever the stopped run reports afterwards (a run id), and a new session starts without the previous task's rollback list.
 
 ---
 
@@ -347,7 +349,7 @@ Local models of every size write web pages in the same tutorial style (Arial, `#
 | --- | --- | --- |
 | Plan (before the first step) | New web page? (no HTML yet, no framework / single-file / own-color request) → category from keywords; only if none or several match, one grammar-constrained question to the same model with the agent's `num_ctx` (JSON enum answer, `think:false`), made before the agent's first request so it cannot evict the agent's cached prompt. A project with our `theme/theme.css` continues its theme. | `DesignTheme.planDesignTheme`, `categorize.ts`, `AgentEngine.classifySiteCategory` |
 | Work | The agent runs unchanged; the files it writes are tracked. It never sees theme files (they are excluded from the preloaded contents). | `AgentEngine.ts` |
-| Apply (after `finish`) | `theme/theme.css` (tokens, Google Fonts with system fallbacks, zero-specificity `:where()` base layer) is written first; the run's HTML/CSS get theme roles instead of color/font literals — by property, the rule's own background and ancestor selectors (`.topnav a` inherits `.topnav`), `var()` references resolved; band rules re-point the inherited text tokens so text inside colored/dark areas stays readable; originals stay as `var()` fallbacks. Icon emoji → SVG icons, sticky bars get a z-index, stale copyright years and a missing viewport are fixed. Every change passes the same "do no harm" check as agent edits and the security profile's approval. | `cssRewrite.ts`, `html.ts`, `themeCss.ts`, `AgentEngine.applyDesignTheme` |
+| Apply (after `finish`) | `theme/theme.css` (tokens, Google Fonts with system fallbacks, zero-specificity `:where()` base layer) is written first; the run's HTML/CSS get theme roles instead of color/font literals — by property, the rule's own background and ancestor selectors (`.topnav a` inherits `.topnav`), `var()` references resolved; band rules re-point the inherited text tokens so text inside colored/dark areas stays readable; originals stay as `var()` fallbacks. Icon emoji → SVG icons, sticky bars get a z-index, stale copyright years and a missing viewport are fixed. With or without a theme, `pageRepairs.ts` repairs the mobile menu (the page's own open-state rules attached to the element the script really toggles via `:root:has()`, a missing toggle added, closing on link choice) and, when no theme's base layer covers them, gives buttons that no rule selects a zero-specificity style in the page's accent; pages whose CSS/JS files this run did not write are left alone. Every change passes the same "do no harm" check as agent edits and the security profile's approval. | `cssRewrite.ts`, `html.ts`, `pageRepairs.ts`, `themeCss.ts`, `AgentEngine.applyDesignTheme` |
 
 24 themes in 8 categories (`themes.ts`) differ in palette, type pairing, shape, depth, button style, texture and icon stroke. `test_design_theme.ts` requires every text pair of every theme to reach WCAG AAA (7:1); a rendered audit of 72 themed sample pages (24 themes × 3 typical small-model sites) found no text element below 7:1.
 
@@ -355,7 +357,7 @@ Local models of every size write web pages in the same tutorial style (Arial, `#
 
 ## 14. Creation Wizards ("Website Oluştur", "Mini Uygulama", "Betik")
 
-Structured front doors for new work, next to the free-text composer (which is unchanged). The wizards never ask the model to write a prompt: the app compiles the request deterministically, because a small model cannot improve on a carefully structured request and every extra model call costs time on CPU. The chips show only in an empty session whose folder is empty or not chosen (`SuggestionChips`, `countFiles`).
+Structured front doors for new work, next to the free-text composer (which is unchanged). The wizards never ask the model to write a prompt: the app compiles the request deterministically, because a small model cannot improve on a carefully structured request and every extra model call costs time on CPU. They are chosen in New Project (`NewProjectDialog`), which creates the folder when the wizard is confirmed.
 
 **Hand-over through the composer.** No wizard starts a run. "Onayla" calls `setWizardDraft({ kind, toolId?, label, prompt, options })`; `AgentWorkspace` puts the prompt into the composer (asking first when the box holds other text), shows a one-line badge ("Sihirbazı aç" / ×) and gives the box more height. On send, `composerRunOptions(draft, text)` attaches the run options to whatever the user sent; `checklistForText` drops checklist items whose file no longer appears in the edited text. Emptying the box or × drops the options.
 
@@ -372,7 +374,17 @@ Structured front doors for new work, next to the free-text composer (which is un
 
 ---
 
-## 15. Packaging & Release Pipeline
+## 15. Online Model Library (Models → Discover)
+
+| Concern | Mechanism | Code |
+| --- | --- | --- |
+| Where the list comes from | ollama.com's library page (name, description, capability labels, sizes, pulls) and each model's tags page (every tag with digest, file size, context window and input types), parsed from their markup; a parse that yields fewer than 20 models is not trusted. Cached in localStorage for 12 hours; offline: the saved copy, else a short built-in list. | `src/lib/ollama/library.ts`, `src/stores/modelLibraryStore.ts` |
+| Network boundary | The renderer cannot reach ollama.com (CORS) and gets no general fetch: the main process exposes `models:library`, `models:tags` and `models:manifest`, which only build fixed URLs on ollama.com / registry.ollama.ai from validated names and refuse redirects to other hosts. | `electron/main.ts`, `electron/preload.ts` |
+| Sizes and quantizations | Tags are grouped by size; tags with the same digest are one choice; the default tag's aliases name its build ("7b" = "7b-instruct-q4_K_M"), whose common quantizations are the main choices; the rest is folded. The preselected size is the largest one that runs comfortably (file size × 1.2 + 1 GB ≤ 60 % of RAM, or fits the GPU). | `groupVariants`, `pickSize`, `hardwareFit` |
+| Verification | `models:manifest` fetches the registry manifest (as `ollama pull` does), returns its sha256 and the exact download size; the sha256 equals the digest Ollama reports for the downloaded model, so a finished download and every installed model are compared with the registry (identical / update available). | `verifyTag`, `compareInstalled`, `checkInstalledModels` |
+| Categories | From the capability labels (tools, thinking, vision, audio, embedding), the sizes and the name/description (coding); Recommended lists the models of our own benchmark. | `categoriesOf`, `modelsFor` |
+
+## 16. Packaging & Release Pipeline
 
 | Step | What happens | Code |
 | --- | --- | --- |

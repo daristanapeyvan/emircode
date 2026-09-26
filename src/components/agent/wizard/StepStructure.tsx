@@ -51,7 +51,7 @@ export const StepStructure: React.FC<{ w: WizardText; lang: 'tr' | 'en' }> = ({ 
             ) : (
               <ol className="space-y-1.5 max-w-lg">
                 {first.sections.map((s, i) => (
-                  <li key={s.id} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-zinc-950/50 border border-zinc-800/80">
+                  <li key={s.id} className="flex items-center gap-2 px-3 py-1.5 rounded-md border border-zinc-800">
                     <span className="w-5 text-[11px] font-mono text-zinc-600">{i + 1}</span>
                     <span className="flex-1 text-[13px] text-zinc-200">{s.title.trim() || sectionLabel(s.kind, lang)}</span>
                     <IconAction label={w.moveUp} disabled={i === 0} onClick={() => moveSection(first.id, s.id, -1)}>
@@ -74,7 +74,7 @@ export const StepStructure: React.FC<{ w: WizardText; lang: 'tr' | 'en' }> = ({ 
           <p className="text-xs font-medium text-zinc-300">{w.pages}</p>
           <ol className="space-y-2">
             {data.pages.map((page, i) => (
-              <li key={page.id} className="rounded-lg bg-zinc-950/50 border border-zinc-800/80 px-3 py-2.5">
+              <li key={page.id} className="rounded-md border border-zinc-800 px-3 py-2.5">
                 <div className="flex items-center gap-2">
                   <FileText size={14} className="text-zinc-500 shrink-0" />
                   <input
@@ -99,7 +99,7 @@ export const StepStructure: React.FC<{ w: WizardText; lang: 'tr' | 'en' }> = ({ 
                 </div>
                 <div className="flex flex-wrap gap-1 mt-2 pl-6">
                   {page.sections.map((s) => (
-                    <span key={s.id} className="text-[10.5px] px-2 py-0.5 rounded-full bg-zinc-800/70 text-zinc-400 border border-zinc-700/60">
+                    <span key={s.id} className="text-[11px] px-2 py-0.5 rounded bg-zinc-800 text-zinc-400">
                       {s.title.trim() || sectionLabel(s.kind, lang)}
                     </span>
                   ))}

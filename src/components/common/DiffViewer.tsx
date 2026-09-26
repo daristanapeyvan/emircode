@@ -1,6 +1,9 @@
 import React, { useMemo, useState } from 'react';
 import { tokenizeCode, getTokenClassName } from '@/lib/utils/SyntaxHighlighter';
-import { Check, Copy, Columns, AlignJustify } from 'lucide-react';
+import { Check, Copy } from 'lucide-react';
+import { useSettingsStore } from '@/stores/settingsStore';
+import { getTranslations } from '@/lib/localization/i18n';
+import { cn } from '@/lib/utils/cn';
 
 export interface DiffViewerProps {
   originalContent: string;
@@ -96,6 +99,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
 }) => {
   const [copied, setCopied] = useState(false);
   const [showOnlyChanges, setShowOnlyChanges] = useState(false);
+  const t = getTranslations(useSettingsStore((s) => s.settings.language)).diff;
 
   const diffLines = useMemo(
     () => computeLineDiff(originalContent, newContent),
@@ -124,53 +128,39 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   };
 
   return (
-    <div
-      className={`rounded-xl border border-zinc-800 bg-zinc-950 flex flex-col overflow-hidden text-xs font-mono shadow-inner ${className}`}
-    >
-      {/* Diff Header Bar */}
-      <div className="px-4 py-2 bg-zinc-900/90 border-b border-zinc-800 flex items-center justify-between select-none">
-        <div className="flex items-center gap-2">
-          {filePath && <span className="text-zinc-200 font-semibold">{filePath}</span>}
-          <div className="flex items-center gap-1 text-[11px] font-medium">
-            <span className="px-1.5 py-0.5 rounded bg-emerald-950/60 border border-emerald-800/60 text-emerald-400">
-              +{stats.additions}
-            </span>
-            <span className="px-1.5 py-0.5 rounded bg-rose-950/60 border border-rose-800/60 text-rose-400">
-              -{stats.deletions}
-            </span>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setShowOnlyChanges(!showOnlyChanges)}
-            title={showOnlyChanges ? 'Tüm satırları göster' : 'Sadece değişiklikleri göster'}
-            className={`px-2 py-1 rounded text-[11px] font-sans flex items-center gap-1 border transition-colors cursor-pointer ${
-              showOnlyChanges
-                ? 'bg-cyan-950 border-cyan-700 text-cyan-300'
-                : 'bg-zinc-800/60 border-zinc-700 text-zinc-400 hover:text-zinc-200'
-            }`}
-          >
-            {showOnlyChanges ? <AlignJustify size={12} /> : <Columns size={12} />}
-            <span>{showOnlyChanges ? 'Tüm Kod' : 'Sadece Değişiklikler'}</span>
-          </button>
-
-          <button
-            onClick={handleCopyNew}
-            className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors cursor-pointer"
-            title="Yeni içeriği kopyala"
-          >
-            {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
-          </button>
-        </div>
+    <div className={cn('rounded-md border border-zinc-800 bg-zinc-950 flex flex-col overflow-hidden text-xs font-mono', className)}>
+      <div className="px-3 py-1.5 border-b border-zinc-800 flex items-center gap-3 select-none">
+        {filePath && <span className="text-zinc-200 truncate">{filePath}</span>}
+        <span className="text-[11px] tabular-nums">
+          <span className="text-emerald-400">+{stats.additions}</span> <span className="text-red-400">−{stats.deletions}</span>
+        </span>
+        <span className="flex-1" />
+        <button
+          type="button"
+          onClick={() => setShowOnlyChanges(!showOnlyChanges)}
+          aria-pressed={showOnlyChanges}
+          className={cn(
+            'px-2 py-0.5 rounded text-[11px] font-sans transition-colors cursor-pointer',
+            showOnlyChanges ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60'
+          )}
+        >
+          {t.onlyChanges}
+        </button>
+        <button
+          type="button"
+          onClick={handleCopyNew}
+          className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors cursor-pointer"
+          title={t.copyNew}
+          aria-label={t.copyNew}
+        >
+          {copied ? <Check size={13} /> : <Copy size={13} />}
+        </button>
       </div>
 
       {/* Diff Body Lines */}
       <div className="overflow-auto max-h-[500px] divide-y divide-zinc-900/40 select-text leading-relaxed">
         {displayedLines.length === 0 ? (
-          <div className="p-6 text-center text-zinc-500 font-sans">
-            Fark bulunamadı (İçerikler aynı).
-          </div>
+          <div className="p-6 text-center text-zinc-500 font-sans">{t.noDifference}</div>
         ) : (
           displayedLines.map((line, idx) => {
             const isAdded = line.type === 'added';
@@ -184,7 +174,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
                   isAdded
                     ? 'bg-emerald-950/25 border-l-2 border-emerald-500 hover:bg-emerald-950/40'
                     : isRemoved
-                    ? 'bg-rose-950/25 border-l-2 border-rose-500 hover:bg-rose-950/40'
+                    ? 'bg-red-950/25 border-l-2 border-red-500 hover:bg-red-950/40'
                     : 'hover:bg-zinc-900/40 border-l-2 border-transparent'
                 }`}
               >
@@ -204,7 +194,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
                     isAdded
                       ? 'text-emerald-400'
                       : isRemoved
-                      ? 'text-rose-400'
+                      ? 'text-red-400'
                       : 'text-zinc-600'
                   }`}
                 >
@@ -218,7 +208,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
                       key={tIdx}
                       className={
                         isRemoved
-                          ? 'text-rose-300 line-through opacity-80'
+                          ? 'text-red-300 line-through opacity-80'
                           : isAdded
                           ? 'text-emerald-200'
                           : getTokenClassName(token.type)

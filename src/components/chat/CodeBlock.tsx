@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Check, Copy } from 'lucide-react';
-import { cn } from '@/lib/utils/cn';
+import { useSettingsStore } from '@/stores/settingsStore';
+import { getTranslations } from '@/lib/localization/i18n';
 import { tokenizeCode, getTokenClassName } from '@/lib/utils/SyntaxHighlighter';
 
 interface CodeBlockProps {
@@ -10,6 +11,7 @@ interface CodeBlockProps {
 
 export const CodeBlock: React.FC<CodeBlockProps> = ({ language = 'text', code }) => {
   const [copied, setCopied] = useState(false);
+  const t = getTranslations(useSettingsStore((s) => s.settings.language)).common;
 
   const handleCopy = async () => {
     try {
@@ -22,29 +24,17 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({ language = 'text', code })
   };
 
   return (
-    <div className="my-3 rounded-md border border-zinc-800 bg-[#0e0f12] overflow-hidden text-xs font-mono">
+    <div className="my-3 rounded-md border border-zinc-800 bg-zinc-950 overflow-hidden text-xs font-mono">
       {/* Code Header */}
-      <div className="flex items-center justify-between px-3 py-1.5 bg-zinc-900/80 border-b border-zinc-800/80 text-zinc-400 select-none">
-        <span className="text-[11px] font-medium tracking-wide uppercase text-zinc-400">
-          {language || 'text'}
-        </span>
+      <div className="flex items-center justify-between px-3 py-1 border-b border-zinc-800 text-zinc-500 select-none">
+        <span className="text-[11px]">{language || 'text'}</span>
         <button
           type="button"
           onClick={handleCopy}
-          className="flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60 transition-colors cursor-pointer"
-          title="Copy code"
+          className="flex items-center gap-1.5 px-1.5 py-0.5 rounded text-[11px] font-sans text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60 transition-colors cursor-pointer"
         >
-          {copied ? (
-            <>
-              <Check size={12} className="text-emerald-400" strokeWidth={1.5} />
-              <span className="text-emerald-400 font-sans">Copied</span>
-            </>
-          ) : (
-            <>
-              <Copy size={12} strokeWidth={1.5} />
-              <span className="font-sans">Copy</span>
-            </>
-          )}
+          {copied ? <Check size={12} strokeWidth={1.5} /> : <Copy size={12} strokeWidth={1.5} />}
+          {copied ? t.copied : t.copy}
         </button>
       </div>
 

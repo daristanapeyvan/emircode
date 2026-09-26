@@ -5,6 +5,58 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Online model library in Models → Discover**: the list comes from ollama.com (the 226 models that run on your own computer; cloud-only models are left out) and is sorted into categories by type and use — Recommended (the models of our own agent benchmark, with a note on each), Coding, Agents & tools, Reasoning, Vision & audio, Lightweight (4B or less), Chat & general, Embedding (search) and All — with a search box. Nothing to press: the list loads when the tab opens and is kept for 12 hours; without a connection the saved copy, or a short built-in list, is shown.
+- **Every size and quantization**: a model's page lists all its sizes (qwen3: 0.6B–235B) with the largest one that runs comfortably on this computer preselected, and the quantizations of its default build — Q4_K_M (default), Q5_K_M, Q6_K, Q8_0, FP16, QAT — each with its file size, a plain explanation and whether it fits this computer's memory. Rarer quantizations and other builds (base, text, instruct/thinking releases) are one click away; tags that are the same file are shown once.
+- **Automatic verification**: the selected tag is checked in the Ollama registry (the source `ollama pull` uses) together with its exact size; a finished download is compared with the registry digest ("identical to the version on ollama.com"); the Installed tab marks every model as up to date or offers the update. A model or tag typed by hand is verified before it is downloaded.
+- The Models window contacts only ollama.com and registry.ollama.ai, through fixed addresses in the main process, and sends no personal data.
+- `npm run check:library` reads the live pages the same way, to notice early when ollama.com changes its pages.
+
+- **Projects in the sidebar (Code tab)**: tasks are grouped by their project folder, the most recently used project first; the open project is listed even before its first task. The **+** next to a project starts a new task in it (always visible on the open project, on hover on the others). A project folds and unfolds with a click (remembered), shows its last 5 tasks with "show more", and each task shows how long ago it was worked on ("5m", "2d") or a spinner while it runs. Folders that were moved or deleted are dimmed with a warning; old tasks saved without a folder are listed under "No folder". The Chat tab lists only chats, by date.
+- **New Project** (the sidebar button in the Code tab, `Ctrl+Shift+N`, the command palette): choose an empty project, Website, Mini App or Script, a name and a location (Documents › Emir Code Projects by default, the last location is remembered). An empty project's folder is created right away; for a wizard the folder is created when the wizard is confirmed, so a wizard closed halfway leaves nothing on disk, and the wizard shows the folder it will create. Names that cannot be folder names on Windows/macOS/Linux are refused while typing, and an existing folder is reused only when it is empty. "Open an existing folder…" opens a project you already have. With no folder open, the agent view offers "New Project" and "Open Project Folder".
+- `Ctrl+N` in the Code tab starts a new task in the open project (New Project when none is open); the command palette has "New project" and "New task in the open project".
+
+### Changed
+- **A plainer, native interface.** The screens were gone through for decoration that did not help anyone do anything, and it was taken out:
+  - One dialog frame for every window (approvals, delete confirmations, setup, New Project, wizards, system instructions); Escape closes only the top one, and approval dialogs close only with their buttons.
+  - No more bare system pop-ups: the operating system's dropdown lists are the app's own dropdown (same look in both themes, grouped options, keyboard: arrows, Home/End, Enter, Escape, typing a letter), and the browser's confirm/alert boxes are the app's own dialogs with a title and clear buttons (red for deleting, stopping or undoing). Escape closes an open dropdown first, then the dialog under it.
+  - The agent's task is a plain log instead of a stack of cards: thoughts as text, tool calls as one line with their result below, your own messages like chat messages. The live block shows only what the model is writing now, with the elapsed time; the "LIVE TOKEN STREAM" badge, step counter, spinning clock, emojis and the duplicate reasoning views are gone. The right panel is **Logs** (events and model output).
+  - Approvals show the file or command, the agent's reason and the buttons — no security jargon, hashes or colored banners; the file count appears once, on the button.
+  - The project bar shows the project name (full path as a tooltip), **Approval: Strict/Balanced/Autonomous** with a plain explanation, **Undo changes (n)** (asks first when "Ask before deleting" is on), and the Files and Logs panel buttons.
+  - Start screens instead of a logo and slogan: the mode's icon (chat or code) above a heading — a new chat names the model that will answer; the Code tab shows New Project / Open project folder without a project, and the project's name, location and file count once one is open.
+  - The wizards are chosen in **New Project** only; the three suggestions above the message box repeated that dialog and are gone.
+  - Chat messages lost their avatars; the time, speed and copy/edit/regenerate buttons appear on hover, and the model is named only when it changes. The system instructions button moved from the title bar to the message box.
+  - The installed models are a plain list with their actions on hover; model details are one page (unknown values are shown as "—" instead of guessed ones); tab counters, pulsing dots and the bouncing download arrow are gone.
+  - Settings: **Generation** keeps the sampling of the open chat; the agent's options moved to a new **Agent** page and the web themes to **Web design**; hardware is shown once, under About. Option names are plain ("Edit the changed parts" instead of "Smart Chunk Replacement (Surgical AST / Diff)").
+  - The setup wizard has two plain steps (requirements, model) and never shows a model that was not chosen.
+  - Graphite accents (buttons, switches, sliders, tabs) instead of blue; blue remains only in the message box: the send button and its switches when they are on (web access, system instructions). Red for danger, amber for warnings; no cyan/purple glows, uppercase micro-headings or 9–10 px text.
+  - Rounder corners throughout (controls 8 px, cards 10 px, dialogs and the message box 12 px).
+  - One spacing grid: the message box has the same padding on every side, its text line is as tall as its buttons and the icons are centered (the web icon sat off-center); the sidebar rows share one left edge and one height; the approval selector is as wide as its text.
+  - The agent mode is called **Code** (Chat · Code).
+- **The light theme works**: until now choosing it changed almost nothing. Dark stays the default; the light theme is a calm grey (a #eef0f2 page with #f6f7f8 surfaces) rather than white, with darker tones for colored text so it stays readable, and the window opens in the saved theme's color.
+- Every interface text is translated: English strings no longer appear in the Turkish interface ("You", "Copy", "Active Downloads", "Actions"…) and Turkish ones no longer in the English interface (the agent's action names, file tree, diff viewer); the built-in presets and system instructions are named in the interface language.
+- The built-in model list (shown when ollama.com cannot be reached) lists gemma2 once, with both tested sizes.
+- The "+" in the title bar is gone: new chats, projects and tasks start from the sidebar.
+- The Project Explorer (file tree) is closed by default; the tree button opens it and the choice is remembered.
+
+### Fixed
+- Opening another task, project or new task while a task was running left the run going in the background: its steps landed in the newly opened session. The app now asks first, stops the run, answers its pending approvals with "no" and ignores whatever the stopped run still reports.
+- A new task kept the previous task's undo list, so ↺ could roll back another task's changes (possibly in another folder).
+- A running task stopped being saved as soon as a conversation was opened in the Chat tab.
+- Deleting the open conversation selected the newest item of the other tab's list (a task instead of a chat).
+- `Ctrl+N` could act on the tab that was active earlier instead of the current one.
+- Model sizes below a billion parameters were shown in billions (all-minilm "33B" instead of "33M").
+- **The agent's code search ended the whole task**: the main process never had a handler for `search_code` ("Ajan hatası: No handler registered for 'workspace:search'"), so the first search stopped the run before the page was finished and themed. The search now works (text or regular expression, inside the project folder, ignored folders, hidden files and binaries skipped, at most 200 matches), and a failing search is a tool error the model can work around.
+- **Hamburger menus that did not open or close**: models toggle a class on one element while their CSS expects it on another (qwen2.5-coder: `nav.classList.toggle('active')` with `.navbar.active a { display: block }`), write no script, or leave the menu open after a link is chosen. At the end of a run the page's own open-state rules are attached to the element the script really toggles (`:root:has(...)`), a missing toggle is added and the menu closes when a link is chosen. Menus that already work, and pages whose CSS or script files this run did not write, are left alone.
+- **Buttons without any style**: when no theme covers them, buttons that no CSS rule selects get a zero-specificity style in the page's own accent color (the page's own rules still win).
+
+### Tests
+- `test_design_theme.ts` covers the page repairs (102 checks: the real "Kahve Durağı" page, working menus left alone, icon-and-menu toggles, no script, slide-in menus, unknown script files, button accent and contrast); `test_agent_engine.ts` covers a failing code search (53 checks).
+- `test_model_library.ts` (51 checks) joins `npm test`: real, trimmed ollama.com pages (`test_fixtures/ollama`), sizes and quantizations, categories, fit for this computer, cache, offline fallback and registry checks.
+- `test_projects.ts` (61 checks) joins `npm test`: folder keys, name rules, grouping tasks by folder, ages, and the agent store's project actions (a task in a folder, New Project, a wizard's pending project, leaving a running task).
+
 ## [1.7.0] - 2026-09-26
 
 ### Added

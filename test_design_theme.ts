@@ -278,6 +278,171 @@ async function run() {
   const foreign = applyDesign({ plan: plan(), files: [{ path: 'index.html', content: PAGE }], themeCss: 'body{}', year: 2026 });
   check(!foreign.theme && !foreign.changes.some((c) => c.path === THEME_FILE), 'Foreign theme.css: page fixes only');
 
+  // =====================================================================
+  section('8. Page repairs: unstyled buttons and the mobile menu');
+  // =====================================================================
+  // The page qwen2.5-coder:7b wrote in the app ("Kahve Durağı"): the script toggles "active" on the
+  // <nav>, the CSS expects it on .navbar; the buttons have no rule at all.
+  const KAHVE = `<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kahve Durağı</title>
+    <style>
+        .navbar { display: flex; justify-content: space-between; align-items: center; background-color: #333; color: white; }
+        .navbar a { color: white; text-decoration: none; margin: 0 15px; }
+        .hamburger { display: none; cursor: pointer; }
+        @media (max-width: 768px) {
+            .hamburger { display: block; }
+            .navbar a { display: none; }
+            .navbar.active a { display: block; }
+        }
+        .card { background-color: white; padding: 20px; }
+    </style>
+</head>
+<body>
+    <div class="navbar">
+        <h1>Kahve Durağı</h1>
+        <div class="hamburger">☰</div>
+        <nav>
+            <a href="#giris">Başlangıç</a>
+            <a href="#menu">Menü</a>
+        </nav>
+    </div>
+    <section id="giris"><button onclick="alert('ok')">Sipariş Ver</button></section>
+    <section id="menu"><form id="contactForm"><input type="text"><button type="submit">Gönder</button></form></section>
+    <script>
+        document.querySelector('.hamburger').addEventListener('click', function() {
+            document.querySelector('.navbar nav').classList.toggle('active');
+        });
+    </script>
+</body>
+</html>
+`;
+  const kahve = applyDesign({ plan: null, files: [{ path: 'index.html', content: KAHVE }], themeCss: null, year: 2026 });
+  const kahvePage = kahve.changes[0]?.after || '';
+  check(
+    kahve.menus[0]?.repaired.join(',') === 'open,close' &&
+      /@media \(max-width: 768px\) \{\s*:root:has\(\.navbar nav\.active\) \.navbar a \{ display: block; \}/.test(kahvePage),
+    'Menu: the page\'s own open rule is attached to the element the script really toggles (:root:has)',
+    kahvePage.slice(kahvePage.indexOf('data-emir-code="menu"') - 20, kahvePage.indexOf('data-emir-code="menu"') + 400)
+  );
+  check(/document\.querySelectorAll\('\.navbar nav'\)\.forEach\(function \(el\) \{ el\.classList\.remove\('active'\); \}\)/.test(kahvePage) && kahvePage.lastIndexOf('data-emir-code="menu"') > kahvePage.lastIndexOf('<script>'), 'Menu: it closes when a link is chosen (script after the page\'s own)');
+  check(
+    kahve.buttons[0]?.count === 2 && /:where\(button:not\(\[class\]\)\) \{[^}]*background: #333; color: #ffffff;/.test(kahvePage),
+    'Buttons without any rule get a zero-specificity style in the page\'s own color',
+    kahvePage.match(/<style data-emir-code="buttons">[\s\S]*?<\/style>/)?.[0]
+  );
+  const again = applyDesign({ plan: null, files: [{ path: 'index.html', content: kahvePage }], themeCss: null, year: 2026 });
+  check(again.changes.length === 0, 'Repairs are not applied twice');
+  const themedKahve = applyDesign({ plan: plan(), files: [{ path: 'index.html', content: KAHVE }], themeCss: null, year: 2026 });
+  check(themedKahve.buttons.length === 0 && themedKahve.menus.length === 1, 'With a theme its base layer styles the buttons; the menu is still repaired');
+
+  const sitePage = (css: string, body: string, js: string) =>
+    `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width"><style>${css}</style></head><body>${body}<script>${js}</script></body></html>`;
+  const NAV = '<header class="site-header"><button class="menu-toggle" aria-label="Menü">☰</button><ul class="nav-links"><li><a href="#a">A</a></li><li><a href="#b">B</a></li></ul></header>';
+  const working = applyDesign({
+    plan: null,
+    files: [
+      {
+        path: 'index.html',
+        content: sitePage(
+          '.nav-links{display:flex}.menu-toggle{display:none}@media (max-width: 700px){.menu-toggle{display:block}.nav-links{display:none}.nav-links.open{display:flex}}',
+          NAV,
+          "const links = document.querySelector('.nav-links'); document.querySelector('.menu-toggle').addEventListener('click', () => links.classList.toggle('open')); links.querySelectorAll('a').forEach((a) => a.addEventListener('click', () => links.classList.remove('open')));"
+        ),
+      },
+    ],
+    themeCss: null,
+  });
+  check(working.menus.length === 0, 'A menu that already opens and closes is not touched', working.menus);
+
+  const iconAndMenu = applyDesign({
+    plan: null,
+    files: [
+      {
+        path: 'index.html',
+        content: sitePage(
+          '.nav-links{display:flex}@media (max-width: 700px){.nav-links{display:none}.menu-toggle.active span{opacity:0}.nav-links.active{display:flex}}',
+          NAV,
+          "const toggle = document.querySelector('.menu-toggle'); const nav = document.getElementById('x') || document.querySelector('.nav-links'); toggle.addEventListener('click', function () { this.classList.toggle('active'); document.querySelector('.nav-links').classList.toggle('active'); });"
+        ),
+      },
+    ],
+    themeCss: null,
+  });
+  check(iconAndMenu.menus[0]?.repaired.join(',') === 'close', 'Icon and menu toggled together: the menu opens already, only closing is added', iconAndMenu.menus);
+
+  const noScript = applyDesign({
+    plan: null,
+    files: [{ path: 'index.html', content: sitePage('.nav-links{display:flex;gap:1rem}.menu-toggle{display:none}@media (max-width: 700px){.menu-toggle{display:block}.nav-links{display:none}}', NAV, '') }],
+    themeCss: null,
+  });
+  const noScriptPage = noScript.changes[0]?.after || '';
+  check(
+    noScript.menus[0]?.repaired.join(',') === 'script,close' &&
+      /:root:has\(ul\.nav-links\.emir-menu-open\) \.nav-links \{ display: flex; \}/.test(noScriptPage) &&
+      /document\.querySelector\('button\.menu-toggle'\)/.test(noScriptPage) &&
+      /aria-expanded/.test(noScriptPage),
+    'A hamburger with no script gets one; the menu opens with its desktop layout (flex)',
+    noScriptPage.slice(noScriptPage.indexOf('data-emir-code="menu"'), noScriptPage.indexOf('data-emir-code="menu"') + 300)
+  );
+
+  const slide = applyDesign({
+    plan: null,
+    files: [
+      {
+        path: 'index.html',
+        content: sitePage(
+          '@media (max-width: 800px){.nav-links{position:fixed;transform:translateX(-100%)}.site-header.open .nav-links{transform:none}}',
+          NAV,
+          "const menu = document.querySelector('.nav-links'); document.querySelector('.menu-toggle').onclick = null; document.querySelector('.menu-toggle').addEventListener('click', () => menu.classList.toggle('open'));"
+        ),
+      },
+    ],
+    themeCss: null,
+  });
+  check(
+    slide.menus[0]?.repaired.includes('open') && /:root:has\(\.nav-links\.open\) \.site-header \.nav-links \{ transform:none \}/.test(slide.changes[0]?.after || ''),
+    'A menu that slides in (transform) is repaired the same way',
+    slide.changes[0]?.after.match(/<style data-emir-code="menu">[\s\S]*?<\/style>/)?.[0]
+  );
+
+  const external = applyDesign({
+    plan: null,
+    files: [{ path: 'index.html', content: sitePage('@media (max-width: 700px){.nav-links{display:none}}', NAV, '').replace('<script></script>', '<script src="js/menu.js"></script>') }],
+    themeCss: null,
+  });
+  check(external.menus.length === 0, 'A page whose script file this run did not write is left alone');
+  const withFile = applyDesign({
+    plan: null,
+    files: [
+      { path: 'index.html', content: sitePage('@media (max-width: 700px){.nav-links{display:none}.nav-links.show{display:block}}', NAV, '').replace('<script></script>', '<script src="js/menu.js"></script>') },
+      { path: 'js/menu.js', content: "document.querySelector('.menu-toggle').addEventListener('click', () => document.querySelector('.nav-links').classList.toggle('show'));" },
+    ],
+    themeCss: null,
+  });
+  check(withFile.menus[0]?.repaired.join(',') === 'close' && !withFile.changes.some((c) => c.path === 'js/menu.js'), 'Scripts in files of this run are read; only the page gets the fix');
+
+  const styledButtons = applyDesign({
+    plan: null,
+    files: [{ path: 'index.html', content: sitePage('.btn{background:#e67e22;color:#fff}button{font:inherit}', '<button class="btn">A</button><button>B</button>', '') }],
+    themeCss: null,
+  });
+  check(styledButtons.buttons.length === 0, 'Buttons the page styles (by class or element rule) are left as they are');
+  const colored = applyDesign({
+    plan: null,
+    files: [{ path: 'index.html', content: sitePage('.hero{background:#e67e22}.cta{margin:0}', '<button class="order">Sipariş</button><input type="submit" value="Gönder">', '') }],
+    themeCss: null,
+  });
+  const coloredPage = colored.changes[0]?.after || '';
+  check(
+    colored.buttons[0]?.count === 2 && coloredPage.includes(':where(button.order, input[type="submit"]:not([class]))') && /background: #e67e22; color: #111111;/.test(coloredPage),
+    'The accent is the page\'s first clear color; the text color keeps the contrast',
+    coloredPage.match(/:where\([^)]*\)[^\n]*/)?.[0]
+  );
+
   console.log(`\n===========================================`);
   if (failures.length > 0) {
     console.error(`❌ ${failures.length} FAILED, ${passed} passed`);

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { RefreshCw, CheckCircle, AlertTriangle, AlertCircle, ExternalLink } from 'lucide-react';
+import { Select } from '@/components/common/Select';
+import { RefreshCw, AlertTriangle, ExternalLink } from 'lucide-react';
 import { SettingsRow } from './SettingsRow';
 import { Button } from '../common/Button';
 import { useSettingsStore } from '@/stores/settingsStore';
@@ -21,97 +22,73 @@ export const OllamaSettings: React.FC = () => {
     setIsTesting(false);
   };
 
-  const isRemoteHttp =
-    endpointInput.startsWith('http://') &&
-    !endpointInput.includes('localhost') &&
-    !endpointInput.includes('127.0.0.1');
+  const isRemoteHttp = endpointInput.startsWith('http://') && !endpointInput.includes('localhost') && !endpointInput.includes('127.0.0.1');
+  const connected = connectionStatus === 'connected';
 
   return (
-    <div className="space-y-4 text-xs">
-      {/* Endpoint row */}
-      <SettingsRow
-        label={t.settings.endpoint}
-        description={t.settings.endpointDesc}
-      >
-        <div className="flex items-center gap-2">
-          <input
-            type="text"
-            value={endpointInput}
-            onChange={(e) => setEndpointInput(e.target.value)}
-            placeholder="http://localhost:11434"
-            className="w-56 h-8 px-2.5 rounded bg-zinc-900 border border-zinc-750 text-xs text-zinc-200 font-mono focus:outline-none focus:border-zinc-600"
-          />
-          <Button
-            size="sm"
-            variant="secondary"
-            disabled={isTesting}
-            icon={<RefreshCw size={12} className={isTesting ? 'animate-spin' : ''} strokeWidth={1.5} />}
-            onClick={handleTest}
-          >
-            {t.settings.testConnection}
-          </Button>
-        </div>
-      </SettingsRow>
-
-      {/* Remote warning */}
-      {isRemoteHttp && (
-        <div className="p-3 rounded bg-amber-950/40 border border-amber-800/50 text-amber-300 flex items-start gap-2">
-          <AlertTriangle size={15} className="shrink-0 mt-0.5 text-amber-400" strokeWidth={1.5} />
-          <p className="leading-relaxed text-[11px]">{t.settings.remoteWarning}</p>
-        </div>
-      )}
-
-      {/* Connection Status Card */}
-      <div className="p-3.5 rounded-lg border border-zinc-800 bg-zinc-950/60 flex items-center justify-between">
-        <div className="flex items-center gap-2.5">
-          {connectionStatus === 'connected' ? (
-            <CheckCircle size={16} className="text-emerald-400" strokeWidth={1.5} />
-          ) : (
-            <AlertCircle size={16} className="text-rose-400" strokeWidth={1.5} />
-          )}
-
-          <div>
-            <span className="font-medium text-zinc-200 block">
-              {connectionStatus === 'connected' ? t.common.connected : t.common.disconnected}
-            </span>
-            {connectionError && (
-              <span className="text-[11px] text-zinc-500 font-mono mt-0.5 block">
-                {connectionError}
-              </span>
-            )}
+    <div className="text-xs">
+      <div className="py-3.5 border-b border-zinc-800/60 space-y-2">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <label className="text-xs font-medium text-zinc-200">{t.settings.endpoint}</label>
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={endpointInput}
+              onChange={(e) => setEndpointInput(e.target.value)}
+              placeholder="http://localhost:11434"
+              aria-label={t.settings.endpoint}
+              className="w-56 h-8 px-2.5 rounded bg-zinc-900 border border-zinc-750 text-xs text-zinc-200 font-mono focus:outline-none focus:border-zinc-600"
+            />
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={isTesting}
+              icon={<RefreshCw size={12} className={isTesting ? 'animate-spin' : ''} strokeWidth={1.5} />}
+              onClick={handleTest}
+            >
+              {t.settings.testConnection}
+            </Button>
           </div>
         </div>
 
-        {connectionStatus !== 'connected' && (
-          <a
-            href="https://ollama.com/download"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1 text-blue-400 hover:text-blue-300 transition-colors"
-          >
-            <span>Download Ollama</span>
-            <ExternalLink size={12} strokeWidth={1.5} />
-          </a>
+        <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
+          <span className={connected ? 'text-emerald-400' : 'text-red-400'}>{connected ? t.common.connected : t.common.disconnected}</span>
+          {!connected && connectionError && <span className="text-zinc-500 font-mono">{connectionError}</span>}
+          {!connected && (
+            <a
+              href="https://ollama.com/download"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-zinc-200 underline underline-offset-2 hover:text-zinc-50 transition-colors"
+            >
+              {t.settings.downloadOllama}
+              <ExternalLink size={11} strokeWidth={1.5} />
+            </a>
+          )}
+        </p>
+
+        {isRemoteHttp && (
+          <p className="flex items-start gap-1.5 text-[11px] text-amber-400/90 leading-relaxed">
+            <AlertTriangle size={13} className="shrink-0 mt-px" strokeWidth={1.5} />
+            {t.settings.remoteWarning}
+          </p>
         )}
       </div>
 
-      {/* Keep Alive & Timeout */}
-      <SettingsRow
-        label={t.settings.keepAlive}
-        description={t.settings.keepAliveDesc}
-      >
-        <select
+      <SettingsRow label={t.settings.keepAlive} description={t.settings.keepAliveDesc}>
+        <Select
+          ariaLabel={t.settings.keepAlive}
           value={settings.keepAlive}
-          onChange={(e) => updateSettings({ keepAlive: e.target.value })}
-          className="h-8 px-3 rounded bg-zinc-900 border border-zinc-750 text-xs text-zinc-200 focus:outline-none focus:border-zinc-600"
-        >
-          <option value="0">0 (Immediate unload)</option>
-          <option value="5m">5 minutes</option>
-          <option value="15m">15 minutes</option>
-          <option value="30m">30 minutes</option>
-          <option value="1h">1 hour</option>
-          <option value="-1">Infinite (-1)</option>
-        </select>
+          onChange={(v) => updateSettings({ keepAlive: v })}
+          options={[
+            { value: '0', label: t.settings.keepAliveNone },
+            { value: '5m', label: t.settings.keepAlive5m },
+            { value: '15m', label: t.settings.keepAlive15m },
+            { value: '30m', label: t.settings.keepAlive30m },
+            { value: '1h', label: t.settings.keepAlive1h },
+            { value: '-1', label: t.settings.keepAliveForever },
+          ]}
+        />
       </SettingsRow>
     </div>
   );

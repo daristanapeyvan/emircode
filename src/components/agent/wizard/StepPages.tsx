@@ -55,7 +55,7 @@ export const StepPages: React.FC<{ w: WizardText; lang: 'tr' | 'en' }> = ({ w, l
         <div className="space-y-4 min-w-0">
           {multi && (
             <div className="space-y-1.5">
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">{w.pages}</p>
+              <p className="text-xs font-medium text-zinc-400">{w.pages}</p>
               <ul className="space-y-1" role="listbox" aria-label={w.pages}>
                 {data.pages.map((p, i) => (
                   <li key={p.id}>
@@ -72,14 +72,14 @@ export const StepPages: React.FC<{ w: WizardText; lang: 'tr' | 'en' }> = ({ w, l
                         }
                       }}
                       className={cn(
-                        'flex items-center gap-2 px-2.5 py-1.5 rounded-lg border cursor-pointer transition-colors',
+                        'flex items-center gap-2 px-2.5 py-1.5 rounded border cursor-pointer transition-colors',
                         i === pageIndex ? 'bg-zinc-800/70 border-zinc-700 text-zinc-100' : 'bg-zinc-950/40 border-zinc-800/70 text-zinc-400 hover:text-zinc-200'
                       )}
                     >
                       <FileText size={13} className="shrink-0 opacity-70" />
                       <span className="flex-1 min-w-0">
                         <span className="block text-[13px] truncate">{p.name.trim() || files[i]}</span>
-                        <span className="block text-[10px] font-mono text-zinc-600 truncate">{files[i]}</span>
+                        <span className="block text-[11px] font-mono text-zinc-600 truncate">{files[i]}</span>
                       </span>
                       <IconAction label={w.moveUp} disabled={i <= 1} onClick={() => movePage(p.id, -1)}>
                         <ArrowUp size={12} />
@@ -115,7 +115,7 @@ export const StepPages: React.FC<{ w: WizardText; lang: 'tr' | 'en' }> = ({ w, l
                 />
               </Field>
             )}
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 pt-1">
+            <p className="text-xs font-medium text-zinc-400 pt-1">
               {w.sections} · <span className="font-mono normal-case tracking-normal text-zinc-600">{files[pageIndex]}</span>
             </p>
             {page.sections.length === 0 && <p className="text-xs text-zinc-500 italic">{w.noSections}</p>}
@@ -137,7 +137,7 @@ export const StepPages: React.FC<{ w: WizardText; lang: 'tr' | 'en' }> = ({ w, l
                         }
                       }}
                       className={cn(
-                        'flex items-center gap-2 px-2.5 py-1.5 rounded-lg border cursor-pointer transition-colors',
+                        'flex items-center gap-2 px-2.5 py-1.5 rounded border cursor-pointer transition-colors',
                         s.id === selectedSectionId ? 'bg-zinc-800 border-zinc-600 text-zinc-100' : 'bg-zinc-900 border-zinc-800/70 text-zinc-400 hover:text-zinc-200'
                       )}
                     >
@@ -177,7 +177,7 @@ export const StepPages: React.FC<{ w: WizardText; lang: 'tr' | 'en' }> = ({ w, l
                   {sectionLabel(section.kind, lang)}
                   <span className="ml-2 font-mono text-[11px] font-normal text-zinc-500">#{anchors[sectionIndex]}</span>
                 </h4>
-                <span className={cn('text-[10.5px] px-2 py-0.5 rounded-full border', section.content.trim() ? 'text-zinc-200 border-zinc-600 bg-zinc-800' : 'text-zinc-400 border-zinc-700 bg-zinc-800/50')}>
+                <span className={cn('text-[11px] px-2 py-0.5 rounded border', section.content.trim() ? 'text-zinc-200 border-zinc-600 bg-zinc-800' : 'text-zinc-400 border-zinc-700 bg-zinc-800/50')}>
                   {section.content.trim() ? w.yourText : w.agentWrites}
                 </span>
               </div>

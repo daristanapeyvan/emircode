@@ -30,14 +30,24 @@ Emir Code, bilgisayarınızda çalışan yapay zekâ modelleriyle (Ollama) sohbe
 
 **İpuçları**
 - **Web** düğmesi açıkken güncel sorularda Emir Code internette arar ve cevabı numaralı kaynaklarla verir. Model "erişimim yok" derse uygulama aramayı kendisi yapıp cevabı yeniden üretir.
-- **Ayarlar → Üretim** bölümündeki ön ayarlarla cevap tarzını seçebilirsiniz: **Balanced, Precise, Creative, Coding**. Sohbetteki sistem istemi düğmesinde **General Assistant, Senior Developer, Ultra Concise** hazır gelir; kendi isteminizi de yazabilirsiniz.
+- **Ayarlar → Üretim** bölümündeki ön ayarlarla cevap tarzını seçebilirsiniz: **Dengeli, Kesin, Yaratıcı, Kodlama**. Mesaj kutusunun yanındaki **Sistem yönergeleri** düğmesinde **Genel asistan, Kıdemli geliştirici, Çok kısa** hazır gelir; kendi yönergenizi de yazabilirsiniz.
 - Görsel sorularında görseli anlayabilen bir model gerekir (ör. `llama3.2-vision`, `gemma3`).
 
 ---
 
-## 🤖 Ajan (Emir Code sekmesi) ile neler yapabilirsiniz?
+## 🤖 Ajan (Kod sekmesi) ile neler yapabilirsiniz?
 
-Emir Code sekmesinde bir **proje klasörü** seçin (yeni proje için boş bir klasör yeterli), ne istediğinizi yazın. Ajan dosyaları okur, kod yazar, gerekirse test çalıştırır ve sonucu size özetler.
+**Kod** sekmesinde soldaki **Yeni Proje** ile sıfırdan başlayın ya da elinizdeki bir projeyi **Var olan bir klasörü aç…** ile açın; sonra ne istediğinizi yazın. Ajan dosyaları okur, kod yazar, gerekirse test çalıştırır ve sonucu size özetler.
+
+### Projeler ve görevler (sol menü)
+- **Yeni Proje** (`Ctrl+Shift+N`) bir pencere açar: ne yapmak istediğinizi (**Boş proje**, **Website**, **Mini Uygulama**, **Betik**), proje adını ve konumu seçersiniz. Konum varsayılan olarak **Belgeler › Emir Code Projeleri**'dir; **Değiştir** ile başka bir yer seçebilirsiniz, son seçtiğiniz yer hatırlanır. Boş proje **Oluştur**'a bastığınızda açılır; sihirbaz seçtiyseniz klasör, sihirbazda **Onayla**'ya bastığınızda oluşturulur (sihirbazı yarıda kapatırsanız diskte hiçbir şey kalmaz). Aynı adda dolu bir klasör varsa üzerine yazılmaz, uyarı çıkar.
+- Görevler klasörlerine göre gruplanır; en son kullandığınız proje en üsttedir. Açık proje kalın yazılır.
+- Proje adının yanındaki **+** o projede yeni görev açar (açık projede her zaman, diğerlerinde fareyle üzerine gelince görünür). `Ctrl+N` açık projede yeni görev açar.
+- Proje adına tıklamak listeyi daraltır / açar. Her projede son 5 görev görünür; gerisi **… tane daha göster** ile açılır. Görevin yanında ne zaman çalışıldığı yazar (ör. `5 dk`, `2 g`); çalışan görevde dönen bir simge görünür.
+- Taşınmış veya silinmiş klasörler soluk ve ⚠ işaretiyle gösterilir. Klasörü kaydedilmemiş eski görevler **Klasörsüz** altında toplanır.
+- Çalışan bir görevden başka bir göreve ya da projeye geçerken görev durdurulmadan önce size sorulur.
+- **Dosyalar** paneli (dosya ağacı) varsayılan olarak kapalıdır; proje çubuğundaki ağaç simgesiyle açılır ve seçiminiz hatırlanır.
+- **Sohbet** sekmesinde yalnızca sohbetler, tarihe göre listelenir.
 
 | Ne yapmak istiyorsunuz? | Örnek istek |
 | :--- | :--- |
@@ -62,8 +72,8 @@ Emir Code sekmesinde bir **proje klasörü** seçin (yeni proje için boş bir k
 
 ### Değişiklikleri siz kontrol edersiniz
 - Her değişiklik satır satır **fark (diff)** olarak gösterilir.
-- **↺** düğmesi ajanın o oturumda yaptığı tüm değişiklikleri geri alır.
-- **💡** paneli modelin düşüncelerini ve ham çıktısını gösterir.
+- Proje çubuğundaki **Değişiklikleri geri al (n)** düğmesi ajanın o oturumda yaptığı tüm değişiklikleri geri alır (**Silmeden önce sor** açıksa önce onay ister).
+- **Kayıtlar** paneli (proje çubuğunun sağındaki panel simgesi) ajanın olay kaydını ve modelin ham çıktısını gösterir.
 
 ### Güvenlik profilleri
 | Profil | Dosya değişiklikleri | Komutlar (`npm test`, `pytest`…) | Dosya silme | Ajan soru sorar mı? |
@@ -78,7 +88,7 @@ Ajan hiçbir modda seçtiğiniz klasörün dışına dosya yazamaz; `npx` veya r
 
 ## 🧭 Oluşturma sihirbazları: Website, Mini Uygulama, Betik
 
-Boş bir klasörde (ya da henüz klasör seçmeden) yeni bir görev açtığınızda metin kutusunun üstünde üç öneri görünür: **Website Oluştur**, **Mini Uygulama** ve **Betik**. İçinde dosya bulunan bir proje açıkken bu öneriler çıkmaz.
+Sihirbazlara **Yeni Proje** penceresinde türü seçerek ulaşırsınız: **Website**, **Mini Uygulama** veya **Betik**. Proje klasörü, sihirbazı onayladığınızda oluşturulur.
 
 **Hiçbir sihirbaz görevi kendiliğinden başlatmaz.** **Onayla**'ya bastığınızda hazırlanan istek metin kutusuna gelir; üstünde küçük bir etiket görünür. İsteği okuyabilir, istediğiniz gibi değiştirebilir ya da ek isteklerinizi yazabilirsiniz; ardından gönder tuşuna siz basarsınız. Etiketteki **Sihirbazı aç** sizi seçtiğiniz ayarlara geri götürür, **×** isteği kaldırır. İsteği düzenleseniz de seçtiğiniz tema, sayfa planı ve denetimler istekle birlikte gider. Metin kutusuna doğrudan istek yazmak eskisi gibi çalışır.
 
@@ -162,6 +172,8 @@ Yerel modeller, hangisi olursa olsun, siteleri hep aynı "w3schools" görünüm�
 - Sayfanın renkleri temadaki rollerine bağlanır. Koyu menü çubuğu temanın koyu şeridi, yeşil buton temanın vurgu rengi, beyaz kart temanın kart yüzeyi olur. Koyu ya da renkli bir alanın içindeki yazılar okunur kalır.
 - Özellik kartlarındaki ve iletişim satırlarındaki emojiler (☕ 📍 📞 🚀 …) temanın çizgi kalınlığında SVG simgelere dönüşür.
 - Footer'daki eski yıl ("© 2023", "2022-2023") güncel yılla değiştirilir. Bu düzeltme tema kapalıyken de yapılır.
+- **Hamburger menü onarılır:** modelin betiği sınıfı bir öğeye ekleyip CSS'i başka bir öğede beklediğinde (menü telefonda açılmaz), menü düğmesinin hiç betiği yoksa ya da menü bir bağlantı seçilince kapanmıyorsa, iş bitince menü açılıp kapanacak şekilde düzeltilir. Zaten çalışan menülere dokunulmaz. Bu onarım tema kapalıyken de yapılır.
+- **Stilsiz butonlar:** tema uygulanmadığında, sayfanın hiçbir CSS kuralının seçmediği butonlar sayfanın kendi renginde sade bir görünüm alır; sayfanın kendi kuralları her zaman önceliklidir.
 
 **24 tema, 8 kategori:** Kurumsal, Lüks, Eğlenceli, Teknoloji, Doğa & Sağlık, Yemek & Kafe, Yaratıcı ve Genel. Temalar yalnızca renk değişikliği değildir; her biri kendi yazı tipi eşleşmesi, köşe biçimi, gölge ve kenarlık tarzı, buton stili, arka plan dokusu ve simge çizgisiyle ayrı bir tasarım yönüdür. Tüm temalarda metin kontrastı WCAG AAA (7:1) seviyesindedir.
 
@@ -173,7 +185,7 @@ Yerel modeller, hangisi olursa olsun, siteleri hep aynı "w3schools" görünüm�
 - "Tek dosya", "sadece HTML" gibi bir kısıt verdiyseniz.
 - Kendi renklerinizi belirttiyseniz ("mavi tonlarında", "#1e3a8a"). Bu durumda renk teması uygulanmaz, yalnızca temel stil kullanılır. Kendi yazı tipinizi belirttiyseniz yazı tiplerine dokunulmaz.
 
-**Ayarlar › Üretim › Web Tasarımı**
+**Ayarlar › Web tasarımı**
 | Ayar | Seçenekler |
 | :--- | :--- |
 | Tasarım Teması | Konuya göre (önerilen), Rastgele, Sabit tema (önizlemeli seçim), Kapalı |
@@ -185,6 +197,17 @@ Tema ve Temel CSS ikisi birden kapalıyken sayfalara hiçbir şey eklenmez.
 > **İpucu:** Temanın renklerini değiştirmek için `theme/theme.css` dosyasının başındaki `:root` değişkenlerini düzenlemeniz yeterli (ör. `--theme-accent`). Sayfanın kendi CSS'i her zaman önceliklidir. `theme/theme.css` silinirse sayfa, modelin yazdığı orijinal renklere geri döner.
 
 ---
+
+## 📦 Model indirme (Model yöneticisi → Keşfet)
+
+`Ctrl+Shift+M` ile açılan model yöneticisinin **Keşfet** sekmesi, Ollama kütüphanesini ollama.com'dan kendiliğinden getirir; bir şeye basmanız gerekmez.
+
+- **Kategoriler:** Önerilen (kendi ajan testlerimizdeki modeller), Kodlama, Ajan ve araç kullanımı, Akıl yürütme, Görüntü ve ses, Hafif (4B ve altı), Sohbet ve genel, Gömme (arama) ve Tümü. Üstteki kutudan ada veya açıklamaya göre arayabilirsiniz. Yalnızca ollama.com bulutunda çalışan modeller listelenmez.
+- **Boyut:** bir modele tıklayınca tüm boyutları görünür (ör. qwen3 için 0.6B–235B). Bilgisayarınızda rahat çalışan en büyük boyut önceden seçilidir.
+- **Nicemleme:** varsayılan (Q4_K_M) ile daha doğru ama daha büyük seçenekler (Q5_K_M, Q6_K, Q8_0, FP16) dosya boyutları ve kısa açıklamalarıyla listelenir. Her satırda "Rahat çalışır", "Sınırda" veya "Belleğe sığmaz" yazar. Seyrek nicemlemeler ve diğer sürümler (base, text…) **Diğer sürümler** altındadır.
+- **Doğrulama:** seçtiğiniz etiket Ollama kayıt deposunda (Ollama'nın indirdiği kaynak) kendiliğinden doğrulanır ve kesin boyutu gösterilir. İndirme bitince model depodakiyle karşılaştırılır: "İndirildi ve doğrulandı: ollama.com'daki sürümle birebir aynı." **Yüklü** sekmesi de her modelin güncel olup olmadığını gösterir; yeni sürüm varsa **Güncelle** düğmesi çıkar.
+- Listede olmayan bir modeli veya etiketi (ör. `qwen3:14b-q8_0`) alttaki kutuya yazabilirsiniz; indirmeden önce doğrulanır.
+- İnternet yoksa en son alınan liste, o da yoksa kısa bir yerleşik liste gösterilir. Liste 12 saatte bir yenilenir.
 
 ## 🧠 Hangi modeli seçmeliyim?
 
@@ -205,9 +228,10 @@ GPU'suz bir dizüstü bilgisayarda (Ryzen 5 7530U, 16 GB RAM) yerleşik ajan tes
 
 | Kısayol | İşlev |
 | :--- | :--- |
-| `Ctrl+N` | Yeni sohbet (Emir Code sekmesinde yeni ajan görevi) |
+| `Ctrl+N` | Yeni sohbet (Kod sekmesinde açık projede yeni görev) |
+| `Ctrl+Shift+N` | Yeni Proje |
 | `Ctrl+K` | Komut paleti |
-| `Ctrl+Shift+M` | Model yöneticisi (indir, sil, bellekten çıkar) |
+| `Ctrl+Shift+M` | Model yöneticisi (kategorilere göre keşfet, boyut ve nicemleme seçip indir, doğrula, sil, bellekten çıkar) |
 | `Ctrl+,` | Ayarlar |
 
 ---
@@ -230,4 +254,4 @@ Windows simgeleri önbellekte tutar. Uygulamayı görev çubuğundan kaldırıp 
 AppImage için FUSE 2 gerekir: Ubuntu 24.04'te `sudo apt install libfuse2t64`, 22.04'te `sudo apt install libfuse2`. Ubuntu 23.10+ sürümlerindeki sandbox kısıtlamasını Emir Code kendisi algılar ve uygulamayı yine de başlatır.
 
 **Kodum internete gider mi?**
-Hayır. Modeller bilgisayarınızda çalışır. İnternete yalnızca **Web erişimi** özelliği çıkar (arama için DuckDuckGo). Bu özellik varsayılan olarak açıktır; **Ayarlar → Web Erişimi**'nden tamamen veya sohbet/ajan için ayrı ayrı kapatabilirsiniz.
+Hayır. Modeller bilgisayarınızda çalışır. İnternete yalnızca iki şey çıkar: **Web erişimi** özelliği (arama için DuckDuckGo) ve model yöneticisi (Keşfet ve Yüklü sekmeleri açıkken model listesi için ollama.com, doğrulama için Ollama kayıt deposu). İkisi de kodunuzu veya kişisel verinizi göndermez. Web erişimi varsayılan olarak açıktır; **Ayarlar → Web Erişimi**'nden tamamen veya sohbet/ajan için ayrı ayrı kapatabilirsiniz.

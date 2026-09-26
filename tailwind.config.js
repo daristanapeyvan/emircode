@@ -1,43 +1,41 @@
 /** @type {import('tailwindcss').Config} */
+
+/** A color taken from the theme variables in src/index.css, so it follows the light / dark theme. */
+const themed = (name) => `rgb(var(--${name}) / <alpha-value>)`;
+const scale = (family, shades) => Object.fromEntries(shades.map((shade) => [shade, themed(`${family}-${shade}`)]));
+
+const SHADES = ['50', '100', '200', '300', '400', '500', '600', '700', '800', '900', '950'];
+
 export default {
-  content: [
-    "./index.html",
-    "./src/**/*.{js,ts,jsx,tsx}",
-  ],
+  content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
   darkMode: 'class',
   theme: {
     extend: {
       colors: {
-        canvas: {
-          dark: '#121316',
-          light: '#f9f9fb',
-        },
-        surface: {
-          dark: '#18191d',
-          'dark-hover': '#212328',
-          'dark-subtle': '#141518',
-          light: '#ffffff',
-          'light-hover': '#f3f4f6',
-          'light-subtle': '#f4f5f8',
-        },
-        border: {
-          dark: '#26282f',
-          'dark-subtle': '#1e2025',
-          light: '#e5e7eb',
-          'light-subtle': '#f0f1f4',
-        },
+        canvas: themed('canvas'),
+        // Graphite: the accent of buttons, switches and sliders (the composer keeps its blue).
         accent: {
-          DEFAULT: '#3b82f6',
-          hover: '#2563eb',
-          subtle: 'rgba(59, 130, 246, 0.1)',
+          DEFAULT: themed('accent'),
+          hover: themed('accent-hover'),
+          fg: themed('accent-fg'),
         },
-        zinc: {
-          750: '#23252b',
-          850: '#1b1c21',
-        },
+        zinc: scale('zinc', [...SHADES.slice(0, 8), '750', '800', '850', '900', '950']),
+        red: scale('red', SHADES),
+        amber: scale('amber', SHADES),
+        emerald: scale('emerald', SHADES),
+        blue: scale('blue', SHADES),
+        purple: scale('purple', SHADES),
+        sky: scale('sky', SHADES),
+        teal: scale('teal', SHADES),
+        pink: scale('pink', SHADES),
       },
-      borderColor: {
-        DEFAULT: 'rgba(255, 255, 255, 0.08)',
+      // Rounder corners than Tailwind's defaults: controls 8px, cards 10px, dialogs and the composer 12px.
+      borderRadius: {
+        sm: '0.375rem',
+        DEFAULT: '0.5rem',
+        md: '0.625rem',
+        lg: '0.75rem',
+        xl: '1rem',
       },
       fontFamily: {
         sans: ['Segoe UI', 'Inter', '-apple-system', 'BlinkMacSystemFont', 'system-ui', 'sans-serif'],

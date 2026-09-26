@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
-import { ChevronRight, BrainCircuit } from 'lucide-react';
+import { ChevronRight, Loader2 } from 'lucide-react';
+import { useSettingsStore } from '@/stores/settingsStore';
+import { getTranslations } from '@/lib/localization/i18n';
 import { cn } from '@/lib/utils/cn';
 
 interface ReasoningBlockProps {
@@ -7,38 +9,29 @@ interface ReasoningBlockProps {
   isStreaming?: boolean;
 }
 
+/** The model's thinking, folded under one line. */
 export const ReasoningBlock: React.FC<ReasoningBlockProps> = ({ thinking, isStreaming }) => {
-  // Collapsed by default unless currently streaming the initial thought
   const [isExpanded, setIsExpanded] = useState(false);
+  const language = useSettingsStore((s) => s.settings.language);
+  const t = getTranslations(language);
 
   if (!thinking || !thinking.trim()) return null;
 
   return (
-    <div className="my-2 border border-zinc-800/40 bg-zinc-900/30 rounded-md overflow-hidden text-xs">
-      {/* Header Accordion */}
+    <div className="mb-2 text-xs">
       <button
         type="button"
         onClick={() => setIsExpanded(!isExpanded)}
-        className="w-full px-3 py-2 flex items-center justify-between text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer select-none"
+        aria-expanded={isExpanded}
+        className="flex items-center gap-1.5 text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer select-none"
       >
-        <div className="flex items-center gap-2">
-          <BrainCircuit size={14} className="text-zinc-500" strokeWidth={1.5} />
-          <span className="font-medium tracking-wide">Reasoning</span>
-          {isStreaming && (
-            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
-          )}
-        </div>
-
-        <ChevronRight
-          size={14}
-          strokeWidth={1.5}
-          className={cn('transition-transform duration-200 text-zinc-500', isExpanded && 'rotate-90')}
-        />
+        <ChevronRight size={13} strokeWidth={1.5} className={cn('transition-transform', isExpanded && 'rotate-90')} />
+        <span>{t.chat.thinking}</span>
+        {isStreaming && <Loader2 size={11} className="animate-spin" />}
       </button>
 
-      {/* Collapsed/Expanded Content */}
       {isExpanded && (
-        <div className="px-3.5 py-2.5 border-t border-zinc-800/60 bg-zinc-950/40 text-zinc-400 whitespace-pre-wrap font-mono text-[11px] leading-relaxed max-h-80 overflow-y-auto selectable-text">
+        <div className="mt-1.5 ml-1.5 pl-3 border-l border-zinc-800 text-zinc-400 whitespace-pre-wrap text-[11px] leading-relaxed max-h-80 overflow-y-auto select-text">
           {thinking.trim()}
         </div>
       )}

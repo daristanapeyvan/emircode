@@ -7,6 +7,8 @@ export type SettingsCategory =
   | 'webAccess'
   | 'models'
   | 'generation'
+  | 'agent'
+  | 'design'
   | 'keyboard'
   | 'storage'
   | 'ollama'
@@ -14,6 +16,17 @@ export type SettingsCategory =
   | 'about';
 
 export type ModelsTab = 'installed' | 'discover' | 'running';
+
+const EXPLORER_KEY = 'emir.agent.explorerOpen';
+
+/** The Project Explorer starts closed; once the user opens (or closes) it, that choice stays. */
+function readExplorerOpen(): boolean {
+  try {
+    return localStorage.getItem(EXPLORER_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
 
 interface UIState {
   isSettingsOpen: boolean;
@@ -26,6 +39,8 @@ interface UIState {
   isSystemPromptOpen: boolean;
   isSidebarOpen: boolean;
   activeAppMode: 'chat' | 'agent';
+  isNewProjectOpen: boolean;
+  isExplorerOpen: boolean;
 
   openSettings: (category?: SettingsCategory) => void;
   closeSettings: () => void;
@@ -42,6 +57,9 @@ interface UIState {
   setSidebarOpen: (open: boolean) => void;
   setActiveAppMode: (mode: 'chat' | 'agent') => void;
   toggleAppMode: () => void;
+  openNewProject: () => void;
+  closeNewProject: () => void;
+  setExplorerOpen: (open: boolean) => void;
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -55,9 +73,22 @@ export const useUIStore = create<UIState>((set) => ({
   isSystemPromptOpen: false,
   isSidebarOpen: true,
   activeAppMode: 'chat',
+  isNewProjectOpen: false,
+  isExplorerOpen: readExplorerOpen(),
 
   setActiveAppMode: (activeAppMode) => set({ activeAppMode }),
   toggleAppMode: () => set((s) => ({ activeAppMode: s.activeAppMode === 'chat' ? 'agent' : 'chat' })),
+
+  openNewProject: () => set({ isNewProjectOpen: true }),
+  closeNewProject: () => set({ isNewProjectOpen: false }),
+  setExplorerOpen: (open) => {
+    try {
+      localStorage.setItem(EXPLORER_KEY, String(open));
+    } catch {
+      /* a convenience only */
+    }
+    set({ isExplorerOpen: open });
+  },
 
   openSettings: (category = 'general') => set({ isSettingsOpen: true, settingsCategory: category }),
   closeSettings: () => set({ isSettingsOpen: false }),

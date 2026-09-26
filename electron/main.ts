@@ -20,6 +20,16 @@ const userDataPath = app.getPath('userData');
 const storageFilePath = path.join(userDataPath, 'emir_code_data.json');
 const legacyStorageFilePath = path.join(userDataPath, 'local_llm_data.json');
 
+/** The theme saved in the settings, so the window opens in its colors (dark unless light was chosen). */
+function savedTheme(): 'light' | 'dark' {
+  try {
+    const data = JSON.parse(fs.readFileSync(storageFilePath, 'utf-8'));
+    return data?.settings?.theme === 'light' ? 'light' : 'dark';
+  } catch {
+    return 'dark';
+  }
+}
+
 function createWindow() {
   const iconPng = path.join(__dirname, '../dist/icon.png');
   const iconIco = path.join(__dirname, '../build/icon.ico');
@@ -33,7 +43,7 @@ function createWindow() {
     minWidth: 900,
     minHeight: 600,
     frame: false,
-    backgroundColor: '#121316',
+    backgroundColor: savedTheme() === 'light' ? '#eef0f2' : '#121316',
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -783,6 +793,101 @@ ipcMain.handle('workspace:setPath', async (_, targetPath: string) => {
   }
 });
 
+// New projects: a fresh folder under a chosen location (Documents by default). The same name
+// rules as src/lib/utils/projects.ts, checked again here because this side touches the disk.
+const INVALID_PROJECT_NAME_CHARS = /[<>:"/\\|?*\u0000-\u001f]/;
+const RESERVED_WINDOWS_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
+
+function isUsableFolderName(name: string): boolean {
+  return (
+    name.length > 0 &&
+    name.length <= 80 &&
+    !INVALID_PROJECT_NAME_CHARS.test(name) &&
+    name !== '.' &&
+    name !== '..' &&
+    !/[. ]$/.test(name) &&
+    !RESERVED_WINDOWS_NAME.test(name)
+  );
+}
+
+type ProjectTargetCheck =
+  | { ok: true; target: string }
+  | { ok: false; code: 'invalid-name' | 'invalid-location' | 'exists' | 'error'; error?: string };
+
+/** Where the project folder would go; an existing folder is only reused when it is empty. */
+async function inspectProjectTarget(parentDir: unknown, name: unknown): Promise<ProjectTargetCheck> {
+  if (typeof parentDir !== 'string' || !parentDir.trim() || !path.isAbsolute(parentDir)) {
+    return { ok: false, code: 'invalid-location' };
+  }
+  const cleanName = typeof name === 'string' ? name.trim() : '';
+  if (!isUsableFolderName(cleanName)) return { ok: false, code: 'invalid-name' };
+
+  const parent = path.resolve(parentDir);
+  const target = path.join(parent, cleanName);
+  if (path.dirname(target) !== parent) return { ok: false, code: 'invalid-name' };
+
+  try {
+    const parentStat = await fs.promises.stat(parent).catch(() => null);
+    if (parentStat && !parentStat.isDirectory()) return { ok: false, code: 'invalid-location' };
+    const existing = await fs.promises.stat(target).catch(() => null);
+    if (!existing) return { ok: true, target };
+    if (!existing.isDirectory()) return { ok: false, code: 'exists' };
+    const entries = await fs.promises.readdir(target);
+    return entries.length === 0 ? { ok: true, target } : { ok: false, code: 'exists' };
+  } catch (err: any) {
+    return { ok: false, code: 'error', error: err?.message };
+  }
+}
+
+ipcMain.handle('project:defaultParent', (_, folderName: unknown) => {
+  const name = typeof folderName === 'string' && isUsableFolderName(folderName.trim()) ? folderName.trim() : 'Emir Code Projects';
+  return path.join(app.getPath('documents'), name);
+});
+
+ipcMain.handle('project:chooseParent', async (_, options?: { title?: string; defaultPath?: string }) => {
+  if (!mainWindow) return { success: false };
+  const wanted = typeof options?.defaultPath === 'string' ? options.defaultPath : '';
+  const res = await dialog.showOpenDialog(mainWindow, {
+    title: typeof options?.title === 'string' ? options.title : undefined,
+    defaultPath: wanted && fs.existsSync(wanted) ? wanted : app.getPath('documents'),
+    properties: ['openDirectory', 'createDirectory'],
+  });
+  if (res.canceled || res.filePaths.length === 0) return { success: false };
+  return { success: true, path: path.resolve(res.filePaths[0]) };
+});
+
+ipcMain.handle('project:check', async (_, params?: { parentDir?: unknown; name?: unknown }) => {
+  return inspectProjectTarget(params?.parentDir, params?.name);
+});
+
+ipcMain.handle('project:create', async (_, params?: { parentDir?: unknown; name?: unknown }) => {
+  const check = await inspectProjectTarget(params?.parentDir, params?.name);
+  if (!check.ok) return { success: false, code: check.code, error: check.error };
+  try {
+    await fs.promises.mkdir(check.target, { recursive: true });
+    currentWorkspaceRoot = check.target;
+    canonicalWorkspaceRoot = await fs.promises.realpath(check.target);
+    return { success: true, rootPath: currentWorkspaceRoot, folderName: path.basename(currentWorkspaceRoot) };
+  } catch (err: any) {
+    return { success: false, code: 'error', error: err?.message || String(err) };
+  }
+});
+
+// Which project folders of the sidebar still exist (moved or deleted ones are shown dimmed).
+ipcMain.handle('workspace:pathsExist', async (_, paths: unknown) => {
+  if (!Array.isArray(paths)) return [];
+  return Promise.all(
+    paths.slice(0, 500).map(async (p) => {
+      if (typeof p !== 'string' || !path.isAbsolute(p)) return false;
+      try {
+        return (await fs.promises.stat(p)).isDirectory();
+      } catch {
+        return false;
+      }
+    })
+  );
+});
+
 // Recursive safe file tree reader
 async function scanDirectoryTree(dirPath: string, currentDepth: number, maxDepth: number): Promise<any[]> {
   if (currentDepth > maxDepth || !canonicalWorkspaceRoot) return [];
@@ -884,6 +989,64 @@ ipcMain.handle('workspace:readFile', async (_, relativePath: string) => {
     const content = await fs.promises.readFile(check.canonicalPath, 'utf-8');
     const hash = computeSha256(content);
     return { success: true, content, hash };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+});
+
+// Code search for the agent's search_code tool (preload: searchWorkspaceCode). Case-insensitive text
+// (or regex) search in the project's text files: skips the ignored folders, symbolic links, files the
+// access policy hides, binaries and files over 1 MB; at most 200 matches.
+const SEARCH_IGNORED = new Set(['node_modules', '.git', 'dist', 'dist-electron', 'release', 'build', '.next', '.venv', '__pycache__', '.turbo']);
+ipcMain.handle('workspace:search', async (_, params: { query: string; options?: { isRegex?: boolean } }) => {
+  const root = canonicalWorkspaceRoot;
+  if (!root) return { success: false, error: 'Henüz bir proje klasörü açılmadı.' };
+  const query = String(params?.query ?? '').trim();
+  if (!query) return { success: false, error: 'Arama metni boş.' };
+  let matches: (line: string) => boolean;
+  if (params?.options?.isRegex) {
+    try {
+      const re = new RegExp(query, 'i');
+      matches = (line) => re.test(line);
+    } catch (err: any) {
+      return { success: false, error: `Geçersiz düzenli ifade: ${err.message}` };
+    }
+  } else {
+    const needle = query.toLowerCase();
+    matches = (line) => line.toLowerCase().includes(needle);
+  }
+  const MAX_MATCHES = 200;
+  const MAX_FILES = 5000;
+  const found: Array<{ relativePath: string; lineNumber: number; lineContent: string }> = [];
+  let scanned = 0;
+  const walk = async (dir: string, depth: number): Promise<void> => {
+    if (depth > 8 || found.length >= MAX_MATCHES || scanned >= MAX_FILES) return;
+    const entries = await fs.promises.readdir(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (found.length >= MAX_MATCHES || scanned >= MAX_FILES) return;
+      if (SEARCH_IGNORED.has(entry.name) || entry.isSymbolicLink()) continue;
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await walk(full, depth + 1);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      const rel = path.relative(root, full).replace(/\\/g, '/');
+      if (!evaluateAccessPolicy(rel, 'read').allowed) continue;
+      const stats = await fs.promises.stat(full);
+      if (stats.size > 1024 * 1024) continue;
+      scanned++;
+      const buffer = await fs.promises.readFile(full);
+      if (buffer.includes(0)) continue; // binary
+      const lines = buffer.toString('utf8').split(/\r?\n/);
+      for (let i = 0; i < lines.length && found.length < MAX_MATCHES; i++) {
+        if (matches(lines[i])) found.push({ relativePath: rel, lineNumber: i + 1, lineContent: lines[i].slice(0, 400) });
+      }
+    }
+  };
+  try {
+    await walk(root, 0);
+    return { success: true, matches: found };
   } catch (err: any) {
     return { success: false, error: err.message };
   }
@@ -1817,6 +1980,73 @@ ipcMain.handle('web:fetchUrl', async (_event, { url, options }: { url: string; o
   }
 
   throw new Error('Maksimum yönlendirme sınırına ulaşıldı.');
+});
+
+// ---------------------------------------------------------------------------
+// Model library bridge: the Models window lists models from ollama.com and verifies a tag against
+// the Ollama registry (the source `ollama pull` uses). Only these two hosts, fixed paths and
+// validated names are reachable here; no user data is sent.
+// ---------------------------------------------------------------------------
+const LIBRARY_HOSTS = new Set(['ollama.com', 'registry.ollama.ai']);
+const LIBRARY_MODEL_RE = /^[a-z0-9][a-z0-9._-]{0,79}(?:\/[a-z0-9][a-z0-9._-]{0,79})?$/;
+const LIBRARY_TAG_RE = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$/;
+
+async function fetchLibrarySource(url: string, accept: string, maxBytes: number): Promise<{ status: number; body: Buffer }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20000);
+  try {
+    const res = await fetch(url, {
+      headers: { 'User-Agent': `EmirCode/${app.getVersion()} (+https://github.com/daristanapeyvan/emircode)`, Accept: accept },
+      redirect: 'follow',
+      signal: controller.signal,
+    });
+    const host = new URL(res.url || url).hostname;
+    if (!LIBRARY_HOSTS.has(host)) throw new Error(`Beklenmeyen yönlendirme: ${host}`);
+    const body = Buffer.from(await res.arrayBuffer());
+    if (body.length > maxBytes) throw new Error('ollama.com yanıtı beklenenden büyük.');
+    return { status: res.status, body };
+  } catch (err: any) {
+    if (err?.name === 'AbortError') throw new Error('ollama.com yanıt vermedi (zaman aşımı).');
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+ipcMain.handle('models:library', async () => {
+  const { status, body } = await fetchLibrarySource('https://ollama.com/library?sort=popular', 'text/html', 6 * 1024 * 1024);
+  if (status !== 200) throw new Error(`ollama.com: HTTP ${status}`);
+  return body.toString('utf8');
+});
+
+ipcMain.handle('models:tags', async (_event, name: string) => {
+  if (typeof name !== 'string' || !LIBRARY_MODEL_RE.test(name) || name.includes('/')) throw new Error('Geçersiz model adı.');
+  const { status, body } = await fetchLibrarySource(`https://ollama.com/library/${name}/tags`, 'text/html', 6 * 1024 * 1024);
+  if (status === 404) return '';
+  if (status !== 200) throw new Error(`ollama.com: HTTP ${status}`);
+  return body.toString('utf8');
+});
+
+/** Whether a tag exists, its exact download size and its digest (sha256 of the manifest, as `ollama list` shows it). */
+ipcMain.handle('models:manifest', async (_event, { name, tag }: { name: string; tag: string }) => {
+  if (typeof name !== 'string' || typeof tag !== 'string' || !LIBRARY_MODEL_RE.test(name) || !LIBRARY_TAG_RE.test(tag)) {
+    return { status: 'error', error: 'Geçersiz model etiketi.' };
+  }
+  try {
+    const repo = name.includes('/') ? name : `library/${name}`;
+    const { status, body } = await fetchLibrarySource(
+      `https://registry.ollama.ai/v2/${repo}/manifests/${tag}`,
+      'application/vnd.docker.distribution.manifest.v2+json',
+      1024 * 1024
+    );
+    if (status === 404) return { status: 'missing' };
+    if (status !== 200) return { status: 'error', error: `HTTP ${status}` };
+    const manifest = JSON.parse(body.toString('utf8'));
+    const bytes = (manifest.config?.size || 0) + (manifest.layers || []).reduce((sum: number, l: any) => sum + (Number(l.size) || 0), 0);
+    return { status: 'found', digest: crypto.createHash('sha256').update(body).digest('hex'), bytes };
+  } catch (err: any) {
+    return { status: 'error', error: err?.message || String(err) };
+  }
 });
 
 app.whenReady().then(() => {

@@ -4,6 +4,7 @@ import { useSiteWizardStore } from '@/stores/siteWizardStore';
 import { useAgentStore } from '@/stores/agentStore';
 import { compileSitePrompt, pageFiles, FEATURE_KEYS } from '@/lib/wizard/siteWizard';
 import { getTheme } from '@/lib/design/themes';
+import { compactPath } from '@/lib/utils/projects';
 import { WorkspaceFileInfo } from '../../../../electron/preload';
 import { StepHeader, SettingRow, fill } from './wizardUi';
 import { Button } from '@/components/common/Button';
@@ -19,16 +20,17 @@ export function countFiles(items: WorkspaceFileInfo[]): number {
   return n;
 }
 
-const Card: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
-  <div className="rounded-md border border-zinc-800/80 bg-zinc-900 p-3.5">
-    <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 mb-2">{title}</p>
-    <div className="text-[13px] text-zinc-200 space-y-1">{children}</div>
+/** One line of the summary: what it is on the left, the answer on the right. */
+const Line: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
+  <div className="flex items-start justify-between gap-6 py-3 border-b border-zinc-800/60 text-xs">
+    <span className="text-zinc-400 shrink-0">{label}</span>
+    <div className="min-w-0 text-right text-zinc-200 space-y-0.5">{children}</div>
   </div>
 );
 
 export const StepSummary: React.FC<{ w: WizardText; lang: 'tr' | 'en' }> = ({ w, lang }) => {
   const data = useSiteWizardStore((s) => s.data);
-  const { workspaceRoot, workspaceName, workspaceFiles, agentStatus, openWorkspaceDialog } = useAgentStore();
+  const { workspaceRoot, workspaceName, workspaceFiles, agentStatus, openWorkspaceDialog, pendingProject } = useAgentStore();
   const compiled = useMemo(() => compileSitePrompt(data), [data]);
   const fileCount = countFiles(workspaceFiles || []);
   const files = pageFiles(data.pages);
@@ -43,82 +45,82 @@ export const StepSummary: React.FC<{ w: WizardText; lang: 'tr' | 'en' }> = ({ w,
     <div className="space-y-5">
       <StepHeader title={w.stepSummary} description={w.stepSummaryDesc} />
 
-      <div className="grid gap-3 md:grid-cols-2">
-        <Card title={w.summarySite}>
-          <p className="font-medium text-zinc-100">{data.siteName.trim() || '—'}</p>
-          <p className="text-zinc-400 text-xs">
+      <div>
+        <Line label={w.summarySite}>
+          <p className="text-zinc-100">{data.siteName.trim() || '—'}</p>
+          <p className="text-zinc-500">
             {[data.siteType.trim(), w.categories[compiled.category], data.language === 'en' ? 'English' : 'Türkçe'].filter(Boolean).join(' · ')}
           </p>
-          {data.description.trim() && <p className="text-zinc-500 text-xs line-clamp-2">{data.description.trim()}</p>}
-        </Card>
-        <Card title={w.summaryDesign}>
+        </Line>
+        <Line label={w.summaryDesign}>
           {!compiled.design.enabled ? (
             <p>{w.themeNone}</p>
           ) : theme ? (
-            <div className="flex items-center gap-2.5">
-              <span className="flex rounded overflow-hidden border border-zinc-700 shrink-0" aria-hidden="true">
+            <p className="flex items-center justify-end gap-2">
+              <span className="flex rounded-sm overflow-hidden border border-zinc-700 shrink-0" aria-hidden="true">
                 {[theme.colors.bg, theme.colors.inverse, theme.colors.accent, theme.colors.accent2].map((c, i) => (
-                  <i key={i} className="block w-3.5 h-5" style={{ backgroundColor: c }} />
+                  <i key={i} className="block w-2.5 h-4" style={{ backgroundColor: c }} />
                 ))}
               </span>
-              <span>
-                <span className="block">{theme.name}</span>
-                <span className="block text-xs text-zinc-500">{theme.fonts.heading.family} / {theme.fonts.body.family}</span>
-              </span>
-            </div>
+              {theme.name} <span className="text-zinc-500">· {theme.fonts.heading.family} / {theme.fonts.body.family}</span>
+            </p>
           ) : (
             <p>
               {w.themeAuto} · {w.categories[compiled.category]}
               {data.colorMode !== 'auto' && ` · ${data.colorMode === 'dark' ? w.colorModeDark : w.colorModeLight}`}
             </p>
           )}
-        </Card>
-        <Card title={w.summaryStructure}>
-          <p className="text-xs text-zinc-400">
+        </Line>
+        <Line label={w.summaryStructure}>
+          <p className="text-zinc-500">
             {fill(w.pagesCount, { count: compiled.stats.pages })} · {fill(w.sectionsCount, { count: compiled.stats.sections })}
           </p>
-          <ul className="space-y-0.5">
-            {data.pages.map((p, i) => (
-              <li key={p.id} className="text-xs text-zinc-300 truncate">
-                <span className="font-mono text-zinc-500">{files[i]}</span> — {p.sections.map((s) => s.title.trim() || sectionLabel(s.kind, lang)).join(', ') || '—'}
-              </li>
-            ))}
-          </ul>
-        </Card>
-        <Card title={`${w.summaryContent} · ${w.summaryFeatures}`}>
-          <p className="text-xs">{compiled.stats.userTexts > 0 ? fill(w.summaryUserTexts, { count: compiled.stats.userTexts }) : w.summaryAgentTexts}</p>
-          <p className="text-xs text-zinc-400">{featureNames.length ? featureNames.join(', ') : w.summaryNone}</p>
-        </Card>
-      </div>
-
-      {/* Project folder */}
-      <div className="rounded-md border border-zinc-800/80 bg-zinc-900 px-3.5">
-        <SettingRow label={w.folder} description={workspaceRoot ? undefined : w.folderNone}>
-          {workspaceRoot && (
-            <span className="text-xs font-mono text-zinc-300 truncate max-w-[260px]" title={workspaceRoot}>
-              {workspaceName || workspaceRoot}
+          {data.pages.map((p, i) => (
+            <p key={p.id} className="truncate">
+              <span className="font-mono text-zinc-500">{files[i]}</span> — {p.sections.map((s) => s.title.trim() || sectionLabel(s.kind, lang)).join(', ') || '—'}
+            </p>
+          ))}
+        </Line>
+        <Line label={w.summaryContent}>
+          <p>{compiled.stats.userTexts > 0 ? fill(w.summaryUserTexts, { count: compiled.stats.userTexts }) : w.summaryAgentTexts}</p>
+        </Line>
+        <Line label={w.summaryFeatures}>
+          <p>{featureNames.length ? featureNames.join(', ') : w.summaryNone}</p>
+        </Line>
+        {pendingProject ? (
+          <SettingRow label={w.folder} description={w.folderNew}>
+            <span className="text-xs font-mono text-zinc-300 truncate max-w-[320px]" title={pendingProject.target}>
+              {compactPath(pendingProject.target, 3)}
             </span>
-          )}
-          <Button variant="secondary" size="sm" onClick={() => openWorkspaceDialog()}>
-            {workspaceRoot ? w.folderChange : w.folderChoose}
-          </Button>
-        </SettingRow>
+          </SettingRow>
+        ) : (
+          <SettingRow label={w.folder} description={workspaceRoot ? undefined : w.folderNone}>
+            {workspaceRoot && (
+              <span className="text-xs font-mono text-zinc-300 truncate max-w-[260px]" title={workspaceRoot}>
+                {workspaceName || workspaceRoot}
+              </span>
+            )}
+            <Button variant="secondary" size="sm" onClick={() => openWorkspaceDialog()}>
+              {workspaceRoot ? w.folderChange : w.folderChoose}
+            </Button>
+          </SettingRow>
+        )}
       </div>
-      {workspaceRoot && fileCount > 0 && (
-        <p className="text-xs text-amber-300/90 flex items-start gap-2">
+      {!pendingProject && workspaceRoot && fileCount > 0 && (
+        <p className="text-xs text-amber-400/90 flex items-start gap-2">
           <AlertTriangle size={13} className="mt-0.5 shrink-0" /> {fill(w.folderNotEmpty, { count: fileCount })}
         </p>
       )}
 
       {busy && (
-        <p className="text-xs text-amber-300 flex items-center gap-2">
+        <p className="text-xs text-amber-400/90 flex items-center gap-2">
           <AlertTriangle size={14} /> {w.agentBusy}
         </p>
       )}
       {compiled.warnings.length > 0 && (
         <ul className="space-y-1">
           {compiled.warnings.map((warning) => (
-            <li key={warning} className="text-xs text-amber-300/90 flex items-start gap-2">
+            <li key={warning} className="text-xs text-amber-400/90 flex items-start gap-2">
               <AlertTriangle size={13} className="mt-0.5 shrink-0" /> {warning}
             </li>
           ))}

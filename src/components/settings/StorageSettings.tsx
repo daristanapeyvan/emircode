@@ -2,6 +2,7 @@ import React from 'react';
 import { Download, Upload, Trash2, FileText, Code, Database } from 'lucide-react';
 import { SettingsRow } from './SettingsRow';
 import { Button } from '../common/Button';
+import { confirmDialog, noticeDialog } from '@/lib/ui/dialogs';
 import { storageService } from '@/lib/storage/StorageService';
 import { useChatStore } from '@/stores/chatStore';
 import { useSettingsStore } from '@/stores/settingsStore';
@@ -27,7 +28,7 @@ export const StorageSettings: React.FC = () => {
 
     if (window.electronAPI?.saveFileDialog) {
       await window.electronAPI.saveFileDialog({
-        title: 'Export Conversation',
+        title: t.settings.exportChat,
         defaultPath: `conversation_${Date.now()}.${ext}`,
         filters: [{ name: format.toUpperCase(), extensions: [ext] }],
         content,
@@ -48,9 +49,9 @@ export const StorageSettings: React.FC = () => {
     const backupJson = storageService.exportAllBackup();
     if (window.electronAPI?.saveFileDialog) {
       await window.electronAPI.saveFileDialog({
-        title: 'Export All Local LLM Data',
-        defaultPath: `local_llm_backup_${Date.now()}.json`,
-        filters: [{ name: 'JSON Backup', extensions: ['json'] }],
+        title: t.settings.exportAll,
+        defaultPath: `emir_code_backup_${Date.now()}.json`,
+        filters: [{ name: 'JSON', extensions: ['json'] }],
         content: backupJson,
       });
     } else {
@@ -58,7 +59,7 @@ export const StorageSettings: React.FC = () => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `local_llm_backup_${Date.now()}.json`;
+      a.download = `emir_code_backup_${Date.now()}.json`;
       a.click();
       URL.revokeObjectURL(url);
     }
@@ -67,31 +68,31 @@ export const StorageSettings: React.FC = () => {
   const handleImport = async () => {
     if (window.electronAPI?.openFileDialog) {
       const res = await window.electronAPI.openFileDialog({
-        title: 'Import Local LLM Backup',
-        filters: [{ name: 'JSON Backup', extensions: ['json'] }],
+        title: t.settings.importData,
+        filters: [{ name: 'JSON', extensions: ['json'] }],
       });
       if (res.success && res.files && res.files.length > 0) {
         const file = res.files[0];
         const ok = storageService.importAllBackup(file.content);
         if (ok) {
           await reloadChats();
-          alert('Data backup restored successfully.');
+          void noticeDialog({ title: t.settings.importData, message: t.settings.importDone });
         } else {
-          alert('Failed to parse backup JSON.');
+          void noticeDialog({ title: t.settings.importData, message: t.settings.importFailed });
         }
       }
     }
   };
 
-  const handleClearAll = () => {
-    if (window.confirm('Are you sure you want to delete ALL chats? This cannot be undone.')) {
+  const handleClearAll = async () => {
+    if (await confirmDialog({ title: t.settings.clearAllChats, message: t.settings.clearAllConfirm, confirmLabel: t.common.delete, danger: true })) {
       storageService.clearAllData();
       reloadChats();
     }
   };
 
   return (
-    <div className="space-y-1">
+    <div>
       {/* Export active conversation */}
       <SettingsRow
         label={t.settings.exportChat}
@@ -153,7 +154,7 @@ export const StorageSettings: React.FC = () => {
           icon={<Upload size={13} strokeWidth={1.5} />}
           onClick={handleImport}
         >
-          Import
+          {t.settings.importButton}
         </Button>
       </SettingsRow>
 

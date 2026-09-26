@@ -1,4 +1,5 @@
 import React from 'react';
+import { Select } from '@/components/common/Select';
 import { useSiteWizardStore } from '@/stores/siteWizardStore';
 import { SITE_TYPE_SUGGESTIONS, TONES, CATEGORY_OPTIONS, resolveCategory, Tone } from '@/lib/wizard/siteWizard';
 import { DesignCategory } from '@/lib/design/themes';
@@ -71,18 +72,17 @@ export const StepSite: React.FC<{ w: WizardText; showErrors: boolean }> = ({ w, 
         htmlFor="wz-cat"
         hint={data.category === 'auto' ? fill(w.categoryDetected, { name: w.categories[detected] }) : undefined}
       >
-        <select
+        <Select
           id="wz-cat"
-          className={`${inputClass} max-w-xs cursor-pointer`}
+          ariaLabel={w.category}
+          className="w-full max-w-xs"
           value={data.category}
-          onChange={(e) => update({ category: e.target.value as DesignCategory | 'auto' })}
-        >
-          {CATEGORY_OPTIONS.map((c) => (
-            <option key={c} value={c}>
-              {c === 'auto' ? `${w.categoryAuto} (${w.categories[detected]})` : w.categories[c]}
-            </option>
-          ))}
-        </select>
+          onChange={(v) => update({ category: v as DesignCategory | 'auto' })}
+          options={CATEGORY_OPTIONS.map((c) => ({
+            value: c,
+            label: c === 'auto' ? `${w.categoryAuto} (${w.categories[detected]})` : w.categories[c],
+          }))}
+        />
       </Field>
 
       {detailed ? (
@@ -117,7 +117,7 @@ export const StepSite: React.FC<{ w: WizardText; showErrors: boolean }> = ({ w, 
           </Field>
         </div>
       ) : (
-        <details className="group rounded-lg border border-zinc-800/80 bg-zinc-950/30 px-3.5 py-2.5">
+        <details className="group rounded-md border border-zinc-800 px-3.5 py-2.5">
           <summary className="cursor-pointer text-xs font-medium text-zinc-300 select-none">{w.optionalContact}</summary>
           <p className="text-[11px] text-zinc-500 mt-1.5">{w.optionalContactHint}</p>
           <div className="grid gap-4 md:grid-cols-3 mt-3">

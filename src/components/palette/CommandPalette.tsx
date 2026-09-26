@@ -7,27 +7,33 @@ import {
   Sun,
   Moon,
   Globe,
-  FileText,
   Search,
-  Check,
+  FolderPlus,
+  ScrollText,
 } from 'lucide-react';
 import { useUIStore } from '@/stores/uiStore';
 import { useChatStore } from '@/stores/chatStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useModelStore } from '@/stores/modelStore';
+import { useAgentStore } from '@/stores/agentStore';
+import { focusAgentComposer } from '@/components/agent/NewProjectDialog';
 import { getTranslations } from '@/lib/localization/i18n';
 import { cn } from '@/lib/utils/cn';
+
+type Group = 'actions' | 'navigation' | 'preferences' | 'models';
+const GROUP_ORDER: Group[] = ['actions', 'navigation', 'preferences', 'models'];
 
 interface CommandItem {
   id: string;
   title: string;
-  category: string;
-  icon: React.ReactNode;
+  category: Group;
+  icon: React.ReactNode | null;
   action: () => void;
 }
 
 export const CommandPalette: React.FC = () => {
-  const { isCommandPaletteOpen, closeCommandPalette, openSettings, openModels } = useUIStore();
+  const { isCommandPaletteOpen, closeCommandPalette, openSettings, openModels, openNewProject, setActiveAppMode, activeAppMode, setSystemPromptOpen } = useUIStore();
+  const workspaceRoot = useAgentStore((s) => s.workspaceRoot);
   const { createNewChat, activeChatId } = useChatStore();
   const { settings, setTheme, setLanguage } = useSettingsStore();
   const { installedModels, selectModel } = useModelStore();
@@ -42,17 +48,61 @@ export const CommandPalette: React.FC = () => {
     {
       id: 'new_chat',
       title: t.commandPalette.newChat,
-      category: 'Actions',
+      category: 'actions',
       icon: <Plus size={14} strokeWidth={1.5} />,
       action: () => {
         createNewChat();
+        setActiveAppMode('chat');
         closeCommandPalette();
       },
     },
     {
+      id: 'new_project',
+      title: t.projects.paletteNewProject,
+      category: 'actions',
+      icon: <FolderPlus size={14} strokeWidth={1.5} />,
+      action: () => {
+        closeCommandPalette();
+        setActiveAppMode('agent');
+        openNewProject();
+      },
+    },
+    ...(workspaceRoot
+      ? [
+          {
+            id: 'new_task',
+            title: t.projects.paletteNewTask,
+            category: 'actions' as Group,
+            icon: <Plus size={14} strokeWidth={1.5} />,
+            action: () => {
+              closeCommandPalette();
+              setActiveAppMode('agent');
+              useAgentStore
+                .getState()
+                .startTaskInFolder(workspaceRoot)
+                .then((started) => started && focusAgentComposer());
+            },
+          },
+        ]
+      : []),
+    ...(activeAppMode === 'chat' && activeChatId
+      ? [
+          {
+            id: 'system_prompt',
+            title: t.chat.systemInstructions,
+            category: 'actions' as Group,
+            icon: <ScrollText size={14} strokeWidth={1.5} />,
+            action: () => {
+              closeCommandPalette();
+              setSystemPromptOpen(true);
+            },
+          },
+        ]
+      : []),
+    {
       id: 'manage_models',
       title: t.commandPalette.openModels,
-      category: 'Navigation',
+      category: 'navigation',
       icon: <Layers size={14} strokeWidth={1.5} />,
       action: () => {
         openModels('installed');
@@ -62,7 +112,7 @@ export const CommandPalette: React.FC = () => {
     {
       id: 'download_model',
       title: t.commandPalette.downloadModel,
-      category: 'Actions',
+      category: 'actions',
       icon: <Download size={14} strokeWidth={1.5} />,
       action: () => {
         openModels('discover');
@@ -72,7 +122,7 @@ export const CommandPalette: React.FC = () => {
     {
       id: 'open_settings',
       title: t.commandPalette.openSettings,
-      category: 'Navigation',
+      category: 'navigation',
       icon: <Settings size={14} strokeWidth={1.5} />,
       action: () => {
         openSettings();
@@ -82,7 +132,7 @@ export const CommandPalette: React.FC = () => {
     {
       id: 'toggle_theme',
       title: t.commandPalette.toggleTheme,
-      category: 'Preferences',
+      category: 'preferences',
       icon: settings.theme === 'dark' ? <Sun size={14} strokeWidth={1.5} /> : <Moon size={14} strokeWidth={1.5} />,
       action: () => {
         setTheme(settings.theme === 'dark' ? 'light' : 'dark');
@@ -92,7 +142,7 @@ export const CommandPalette: React.FC = () => {
     {
       id: 'switch_language',
       title: t.commandPalette.switchLanguage,
-      category: 'Preferences',
+      category: 'preferences',
       icon: <Globe size={14} strokeWidth={1.5} />,
       action: () => {
         setLanguage(settings.language === 'en' ? 'tr' : 'en');
@@ -105,9 +155,9 @@ export const CommandPalette: React.FC = () => {
   installedModels.forEach((m) => {
     commands.push({
       id: `model_${m.name}`,
-      title: `${t.commandPalette.switchModel} ${m.name}`,
-      category: 'Models',
-      icon: <Layers size={14} strokeWidth={1.5} />,
+      title: m.name,
+      category: 'models',
+      icon: null,
       action: () => {
         selectModel(m.name);
         closeCommandPalette();
@@ -115,10 +165,15 @@ export const CommandPalette: React.FC = () => {
     });
   });
 
-  // Filter commands
-  const filtered = commands.filter((c) =>
-    c.title.toLowerCase().includes(search.toLowerCase().trim())
-  );
+  // Filter commands; listed group by group, so the arrow keys follow what is on screen
+  const query = search.toLowerCase().trim();
+  const filtered = GROUP_ORDER.flatMap((group) => commands.filter((c) => c.category === group && c.title.toLowerCase().includes(query)));
+  const groupLabels: Record<Group, string> = {
+    actions: t.commandPalette.groupActions,
+    navigation: t.commandPalette.groupNavigation,
+    preferences: t.commandPalette.groupPreferences,
+    models: t.commandPalette.groupModels,
+  };
 
   useEffect(() => {
     setSelectedIndex(0);
@@ -164,14 +219,12 @@ export const CommandPalette: React.FC = () => {
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-24 p-4">
       {/* Backdrop */}
       <div
-        className="fixed inset-0 bg-black/60 backdrop-blur-[2px]"
+        className="fixed inset-0 bg-black/30 dark:bg-black/60 backdrop-blur-[2px]"
         onClick={closeCommandPalette}
       />
 
-      {/* Palette Container */}
       <div className="relative w-full max-w-xl bg-zinc-900 border border-zinc-800 rounded-lg shadow-2xl overflow-hidden z-10 text-xs">
-        {/* Search Header */}
-        <div className="flex items-center px-3.5 py-3 border-b border-zinc-800 bg-zinc-950/80 gap-2.5">
+        <div className="flex items-center px-3.5 py-2.5 border-b border-zinc-800 gap-2.5">
           <Search size={15} className="text-zinc-500 shrink-0" strokeWidth={1.5} />
           <input
             ref={inputRef}
@@ -179,44 +232,34 @@ export const CommandPalette: React.FC = () => {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder={t.commandPalette.placeholder}
+            aria-label={t.commandPalette.placeholder}
             className="flex-1 bg-transparent border-0 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:ring-0"
           />
-          <kbd className="px-1.5 py-0.5 rounded bg-zinc-800 border border-zinc-700 text-zinc-400 text-[10px] font-mono">
-            ESC
-          </kbd>
         </div>
 
-        {/* Results List */}
-        <div className="max-h-72 overflow-y-auto p-1.5 space-y-0.5">
+        <div className="max-h-80 overflow-y-auto p-1.5">
           {filtered.length === 0 ? (
-            <div className="py-8 text-center text-zinc-500 text-xs">
-              {t.commandPalette.noCommandsFound}
-            </div>
+            <div className="py-8 text-center text-zinc-500">{t.commandPalette.noCommandsFound}</div>
           ) : (
             filtered.map((item, idx) => {
               const isSelected = idx === selectedIndex;
+              const firstOfGroup = idx === 0 || filtered[idx - 1].category !== item.category;
               return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={item.action}
-                  onMouseEnter={() => setSelectedIndex(idx)}
-                  className={cn(
-                    'w-full flex items-center justify-between px-3 py-2 rounded text-xs transition-colors cursor-pointer text-left',
-                    isSelected ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:bg-zinc-800/40 hover:text-zinc-200'
-                  )}
-                >
-                  <div className="flex items-center gap-2.5">
-                    <span className={cn(isSelected ? 'text-blue-400' : 'text-zinc-500')}>
-                      {item.icon}
-                    </span>
-                    <span className="font-medium">{item.title}</span>
-                  </div>
-
-                  <span className="text-[10px] text-zinc-500 font-mono">
-                    {item.category}
-                  </span>
-                </button>
+                <React.Fragment key={item.id}>
+                  {firstOfGroup && <div className="px-3 pt-2 pb-1 text-[11px] font-medium text-zinc-500">{groupLabels[item.category]}</div>}
+                  <button
+                    type="button"
+                    onClick={item.action}
+                    onMouseEnter={() => setSelectedIndex(idx)}
+                    className={cn(
+                      'w-full flex items-center gap-2.5 px-3 py-2 rounded text-left transition-colors cursor-pointer',
+                      isSelected ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400'
+                    )}
+                  >
+                    <span className={cn('w-3.5 shrink-0', isSelected ? 'text-zinc-200' : 'text-zinc-500')}>{item.icon}</span>
+                    <span className={cn('truncate', item.category === 'models' && 'font-mono')}>{item.title}</span>
+                  </button>
+                </React.Fragment>
               );
             })
           )}

@@ -66,10 +66,12 @@ const lastUserMessage = (call: number) => {
   return [...msgs].reverse().find((m) => m.role === 'user')?.content || '';
 };
 
-async function run(goal: string, seed: Record<string, string>, replies: Reply[], options: RunGoalOptions = {}) {
+async function run(goal: string, seed: Record<string, string>, replies: Reply[], options: RunGoalOptions = {}, patchApi?: (api: any) => void) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'emir-engine-'));
   for (const [file, content] of Object.entries(seed)) fs.writeFileSync(path.join(dir, file), content, 'utf8');
-  (globalThis as any).window = { electronAPI: makeElectronApi(dir) };
+  const api = makeElectronApi(dir);
+  patchApi?.(api);
+  (globalThis as any).window = { electronAPI: api };
   script = [...replies];
   sent.length = 0;
   const steps: any[] = [];
@@ -632,6 +634,26 @@ if __name__ == "__main__":
       /\[NOT APPLIED\]: this edit deletes the definition of plan \(line 9\), but "arac\.py" still uses it[\s\S]*choose a range that ends before line 9/.test(lastUserMessage(1)),
     'An edit that deletes a function the file still calls is refused with the line to stop before',
     lastUserMessage(1).slice(0, 600)
+  );
+
+  // v1.7.0 had no main-process handler for search_code: the first search ended the whole run ("Ajan hatası").
+  const searched = await run(
+    'index.html dosyasındaki başlığı düzelt.',
+    { 'index.html': SHOP },
+    [{ thought: 'Başlığı arayayım.', action: 'search_code', query: '<title>' }, finishNow],
+    {},
+    (api) => {
+      api.searchWorkspaceCode = async () => {
+        throw new Error("Error invoking remote method 'workspace:search': Error: No handler registered for 'workspace:search'");
+      };
+    }
+  );
+  check(
+    searched.status === 'finished' &&
+      !searched.steps.some((s) => /Ajan hatası/.test(String(s.content))) &&
+      /\[ERROR\]: search failed: Error: No handler registered for 'workspace:search'\. Use list_dir and read_file instead\./.test(lastUserMessage(1)),
+    'A failing code search is a tool error the model can work around, not the end of the run',
+    { status: searched.status, observation: lastUserMessage(1).slice(0, 300) }
   );
 
   // The third app run: the rename script was applied to the sample folder five times, each time
