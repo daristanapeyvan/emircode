@@ -102,3 +102,6 @@ win-unpacked/
 *.njsproj
 *.sln
 *.sw?
+
+# Instructions for local AI assistants
+GEMINI.md

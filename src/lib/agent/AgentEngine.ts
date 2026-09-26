@@ -3525,7 +3525,7 @@ export class AgentEngine {
         } else if (/not found|pull/i.test(rawMessage) && /model/i.test(rawMessage)) {
           friendly = `Model bulunamadı: "${model}". Model Yöneticisi'nden indirin veya başka bir model seçin. (${rawMessage})`;
         } else if (/memory|out of memory|runner.*(terminated|stopped)/i.test(rawMessage)) {
-          friendly = `Model belleğe sığmadı veya çalıştırıcı durdu (${rawMessage}). Ayarlar > Üretim bölümünden bağlam uzunluğunu düşürün veya daha küçük bir model seçin.`;
+          friendly = `Model belleğe sığmadı veya çalıştırıcı durdu (${rawMessage}). Ayarlar › Ajan bölümünden bağlam uzunluğunu düşürün veya daha küçük bir model seçin.`;
         }
         callbacks.onStep({
           id: `step_err_${Date.now()}`,

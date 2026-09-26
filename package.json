@@ -1,7 +1,7 @@
 {
   "name": "emir-code",
   "version": "1.8.0",
-  "description": "Emir Code - AI Native Coding Agent Desktop Client",
+  "description": "Desktop app for chatting with local Ollama models and running a coding agent in a project folder",
   "main": "dist-electron/main.js",
   "author": {
     "name": "Agah Emir",
@@ -103,8 +103,8 @@
       "executableName": "emir-code",
       "icon": "build/icon.png",
       "category": "Development",
-      "synopsis": "AI Native Coding Agent Desktop Client",
-      "description": "Emir Code is an AI native coding agent desktop client featuring local LLM integration, sandboxed workspace tools, and visual diff reviews.",
+      "synopsis": "Local AI chat and coding agent for Ollama",
+      "description": "Emir Code runs AI models on your computer through Ollama. Chat with a model, or let a coding agent read, write and test code in a project folder while you review every change.",
       "desktop": {
         "Terminal": "false",
         "Type": "Application",

@@ -1,33 +1,26 @@
 ---
-name: Bug Report
-about: Create a report to help us improve Emir Code
-title: '[BUG] '
-labels: ['bug', 'triage']
+name: Bug report
+about: Something in Emir Code does not work as expected
+title: ''
+labels: ['bug']
 assignees: ''
 ---
 
-**Describe the Bug**
-A clear and concise description of what the bug is.
+**What happened**
 
-**To Reproduce**
-Steps to reproduce the behavior:
-1. Open project workspace '...'
-2. Set security profile to '...'
-3. Enter goal '...'
-4. See error
+**Steps to reproduce**
+1.
+2.
+3.
 
-**Expected Behavior**
-A clear and concise description of what you expected to happen.
+**What you expected**
 
-**Environment Information:**
-- OS: [e.g. Windows 11 23H2 (x64)]
-- Local LLM Runner: [e.g. Ollama v0.5.12]
-- Model Used: [e.g. qwen2.5-coder:7b, deepseek-coder-v2:16b, llama3.1:8b]
-- Emir Code Version: [e.g. 1.6.0]
-- Hardware: [e.g. Ryzen 5 7530U, 16 GB RAM, no GPU]
+**Environment**
+- Operating system:
+- Emir Code version (Settings › About):
+- Ollama version (`ollama --version`):
+- Model:
+- Approval level (Strict / Balanced / Autonomous), for agent tasks:
 
-**Screenshots / Logs**
-If applicable, add screenshots or the reasoning & dump panel output (💡 button in the agent header).
-
-**Additional Context**
-Add any other context about the problem here.
+**Logs or screenshots**
+For agent tasks, the Logs panel in the Code tab has two tabs, Events and Model output; copy the relevant part.

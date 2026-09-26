@@ -1,238 +1,183 @@
-# ⚡ Emir Code
+# Emir Code
 
 <div align="center">
 
-<img src="build/icon.png" width="128" height="128" alt="Emir Code Logo" />
+<img src="build/icon.png" width="128" height="128" alt="Emir Code icon" />
 
-### **A private AI coding assistant and agent that runs on your own computer**
+A desktop app for Windows and Linux that runs AI models on your own computer through [Ollama](https://ollama.com): chat with a model, or let a coding agent work in a project folder while you review every change.
 
 [![Platform](https://img.shields.io/badge/Platform-Windows%20x64%20%7C%20Linux%20x64-blue.svg)](https://github.com/daristanapeyvan/emircode/releases)
-[![Engine](https://img.shields.io/badge/Local%20LLM-Ollama-purple.svg)](https://ollama.com)
-[![Security](https://img.shields.io/badge/Sandbox-Realpath%20Jail-emerald.svg)](./SECURITY.md)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
-[![Zero Telemetry](https://img.shields.io/badge/Telemetry-None-green.svg)](#-privacy)
 
-*Chat with local models, let an agent build and fix code in your project folder, and review every change — your code never leaves your machine.*
-
-**🇹🇷 Türkçe kullanım kılavuzu: [docs/KULLANIM.md](./docs/KULLANIM.md)**
+Türkçe kullanım kılavuzu: [docs/KULLANIM.md](./docs/KULLANIM.md)
 
 </div>
 
 ---
 
-## ✨ What can you do with Emir Code?
+## What Emir Code does
 
-Emir Code has two modes: **Chat** for questions and **Code** (the agent) for work inside a project folder. You can write in Turkish or English — answers follow your language.
+The app has two modes, switched at the top of the sidebar: **Chat** for questions and **Code** for an agent that works inside a project folder. The interface is available in English and Turkish; you can write requests in any language your model understands.
 
-### 💬 Chat with a local model
-- Ask coding questions and get explanations and code with syntax highlighting and one-click copy.
-- Attach a text/code file or an image and ask about it (images need a vision-capable model).
-- Switch on **Web** and ask about people, news, prices or the weather — Emir Code searches the web and answers with numbered sources:
-  > `şebnem ferah kimdir?` · `bugün İstanbul'da hava nasıl?` · `What changed in React 19?`
-- Choose a generation preset in Settings → Generation (Balanced, Precise, Creative, Coding) and system instructions from the button next to the message box (General assistant, Senior developer, Very concise), or write your own.
+### Chat
+- Ask coding questions; code blocks have syntax highlighting and a copy button.
+- Attach a text or code file, or an image, and ask about it. Images need a model that accepts image input.
+- With **Web** switched on (the globe button in the message box), questions about current information (people, news, prices, weather) are searched on DuckDuckGo first and answered from the results; the message shows what was searched. If a model still replies that it cannot go online, the app runs the search and generates the answer again.
+- Settings › Generation holds the sampling of the open chat, with the presets Balanced, Precise, Creative and Coding. The **System instructions** button in the message box offers General assistant, Senior developer and Very concise, or your own text.
 
-### 🤖 Let the agent do the work
-In the **Emir Code** tab, start a **New Project** (empty, or from one of the wizards — the folder is created for you under Documents › Emir Code Projects) or open a folder you already have, describe what you want, and follow the agent as it reads files, writes code, runs tests and reports back. The sidebar lists your tasks by project folder; the **+** next to a project starts a new task in it.
+### Code (the agent)
+Start a **New Project** in the sidebar or open a folder you already have, describe what you want, and follow the agent as it reads files, writes code and runs tests. The sidebar lists your tasks by project folder; the **+** next to a project starts a new task in it.
 
 | You want to… | Example request |
 | :--- | :--- |
-| Build a web page | `Bir kahve dükkanı için tek sayfalık modern bir web sitesi oluştur: menü (en az 6 ürün, fiyatlarıyla), hakkımızda ve iletişim bölümleri olsun. Responsive olsun ve iletişim formu JavaScript ile doğrulansın.` |
-| Change it afterwards | `başlıkların rengini koyu mavi yap ve sayfanın en altına telif yazısı olan bir footer ekle` |
-| Write a script or CLI tool | `Python ile komut satırından çalışan bir yapılacaklar listesi yaz: ekle, listele, tamamla ve sil komutları olsun; veriler todos.json dosyasında saklansın.` |
-| Fix a bug and prove it | `indirim uygulanınca sepet toplamı yanlış hesaplanıyor, düzelt ve npm test ile doğrula` |
-| Edit configuration safely | `package.json dosyasına 'start' script'i olarak 'node src/index.js' ekle` |
-| Repair a broken page | `Sitede script ve CSS etiketleri eksik kalmış, düzelt` |
-| Understand a codebase | `src klasöründeki ödeme akışını adım adım açıkla` |
+| Build a web page | `Create a modern one-page website for a coffee shop: a menu with at least 6 items and prices, an about section and a contact section. Make it responsive and validate the contact form with JavaScript.` |
+| Change it afterwards | `Make the headings dark blue and add a footer with a copyright notice.` |
+| Write a command-line tool | `Write a command-line to-do list in Python with add, list, done and delete commands. Store the data in todos.json.` |
+| Fix a bug and prove it | `The cart total is wrong after a discount is applied. Fix it and verify with npm test.` |
+| Edit configuration | `Add a "start" script to package.json that runs node src/index.js.` |
+| Repair a broken page | `The page lost its script and stylesheet tags. Fix it.` |
+| Understand a codebase | `Explain the payment flow in the src folder step by step.` |
 
-What happens behind the scenes:
-1. The agent looks at your folder and plans; a request with several parts becomes a checklist.
-2. Every file it writes is checked automatically (HTML, CSS, JS/TS, Python, JSON, YAML, Java, C#, Go, Rust…). Problems are sent back to the model with the exact line numbers until they are fixed.
-3. Web pages must pass real acceptance checks before the task can finish: actual CSS rules, working JavaScript, a mobile viewport tag, linked files that exist — and working menu links when you ask about links ("Home About Services Contact — get these working"). Existing tests are protected — a failing test is fixed in the code, never by editing the test.
-4. You see every change as a line-by-line diff; depending on the security profile you approve it or it is applied for you.
-5. **Undo changes (n)** in the project bar undoes everything the agent changed in the session.
-6. The next request in the same session knows what was asked and changed before, so "now add a footer" just works.
-7. A change that would break a working file is never applied — the model has to send a correct version instead of patching its own breakage.
+How a task runs:
+1. The agent looks at the folder and works step by step. A request written as a numbered or bulleted list, or with steps joined by "then" / "sonra", becomes a checklist that has to be completed in full. Any other request is treated as one task, however many sentences it has.
+2. Every file the agent writes is checked (HTML, CSS, JavaScript/TypeScript, Python, JSON, YAML, Java, C#, Go, Rust and more). Problems go back to the model with line numbers.
+3. A web page task is reported as completed only when the page has real CSS, working JavaScript where the request needs it, a mobile viewport tag and only links to files that exist; when you ask for working menu links, every menu link must also lead somewhere. Otherwise the model is sent back to fix it, and if it still fails the task ends as incomplete with the failing checks listed.
+4. An edit that would break a working file is not applied. Existing tests cannot be changed unless you ask for it, so a failing test has to be fixed in the code.
+5. You see each change as a line-by-line diff. Depending on the approval level you approve it, or it is applied for you.
+6. A follow-up request in the same session knows the previous request and the files it changed, so "now add a footer" works.
+7. **Undo changes (n)** in the project bar restores every file the agent changed in the session, including edits you made to those files afterwards. The previous contents are kept in memory, so undo is available only until Emir Code is closed.
 
-**Tip:** if a request has several separate jobs, write them as a numbered list (`1. … 2. …`) or join them with "sonra" / "then" — they become a checklist that must be completed in full. Everything else is treated as one task, however many sentences or lines it has.
+### Creation wizards
+**New Project** offers an empty project or one of three wizards. The project folder is created when you confirm the wizard.
+- **Website**: pages, sections, your own texts, contact details, interactions and a design theme. The app turns your answers into a detailed request with a page plan.
+- **Mini App**: 21 small single-file web tools in 5 categories (calculators, productivity, tracking, utilities, fun & learning), each with its own settings page.
+- **Script**: 13 command-line scripts in Python or Node.js in 3 categories (files & folders, data, text). Scripts only preview by default and change files only with `--apply`; they never delete or overwrite a file, back up files before changing them and log every action.
 
-### 🧭 Start from a wizard
-Choose one in **New Project** (the project folder is created when you confirm the wizard):
-- **Website Oluştur** — pick pages, sections, texts and a design theme; the app writes a precise request with a page plan.
-- **Mini Uygulama** — 21 single-file web tools (calculators, Pomodoro, to-do list, trackers, games) with their own settings page.
-- **Betik** — 13 Python / Node.js command-line scripts (bulk rename, folder organizer, CSV/JSON tools, search & replace). Scripts preview by default, change files only with `--uygula` / `--apply`, never delete or overwrite, keep backups and an action log.
+Confirming a wizard puts the request into the message box; nothing runs until you press send. New web pages the agent creates get one of 24 design themes after the agent has finished (Settings › Web design).
 
-Confirming a wizard puts the request into the message box — you read or edit it and press send. New web pages the agent builds get one of 24 hand-tuned design themes (Settings → Generation → Web Design).
+### Models
+The Model Manager (**Ctrl+Shift+M**) lists the Ollama library from ollama.com by category (Recommended, Coding, Agents & tools, Reasoning, Vision & audio, Lightweight, Chat & general, Embedding). You can pick a size and quantization, see whether it fits this computer's memory and download it. Tags are checked against the Ollama registry before and after the download, and installed models show whether an update is available. The window also shows which models are loaded in memory and lets you unload or delete them.
 
-### 🧩 Manage your models
-Browse the Ollama library by category (coding, agents & tools, reasoning, vision, lightweight, chat, embedding), pick any size and quantization, see whether it fits your computer, and download it — every tag is verified against the Ollama registry automatically, and installed models are checked for updates. See which models are loaded in memory, unload or delete them — no terminal needed (**Ctrl+Shift+M**).
+### Approvals and limits
+- **Approval** (project bar, or Settings › General › Agent approvals):
+  - *Strict* (default): you approve every file change, deletion and command.
+  - *Balanced*: file changes are applied without asking; commands and deletions need your approval.
+  - *Autonomous*: file changes and test commands (`npm test`, `pytest`, `cargo test`) run without asking, and the agent answers its own questions. Deleting a file still needs your approval.
+- The agent can only change files inside the project folder. `.env` files, `.git`, `node_modules`, build output folders and key or certificate files are off limits.
+- It can only run `npm test`, `npm run test|build|lint|typecheck|check`, `node`, `python`, `pytest` and `cargo`. `npx` and shell commands are blocked.
 
-### 🛡️ Stay in control
-- **Agent approvals** (security profile, in the project bar and Settings → General) — *Strict* (default): you approve every change and command. *Balanced*: file changes are applied automatically; commands and deletions need your approval. *Autonomous*: file changes and test commands (`npm test`, `pytest`, `cargo test`) run automatically and the agent does not stop to ask questions; deleting files always needs your approval.
-- The agent can only touch files inside the folder you picked. Writes go through one-time tokens checked by Electron's main process.
-- Only `npm test`/`npm run <test|build|lint|typecheck|check>`, `node`, `python`, `pytest` and `cargo` can be run — never `npx` or arbitrary shell commands.
-
-**Keyboard shortcuts:** Ctrl+N new chat (in the Code tab: a new task in the open project) · Ctrl+Shift+N new project · Ctrl+K command palette · Ctrl+Shift+M models · Ctrl+, settings.
+Keyboard shortcuts: Ctrl+N new chat (in the Code tab: new task in the open project) · Ctrl+Shift+N new project · Ctrl+K command palette · Ctrl+Shift+M models · Ctrl+, settings.
 
 ---
 
-## 🧪 Which model should I use?
+## Which model to use
 
-Measured with the built-in agent benchmark (`scripts/agent-e2e.ts`) on a CPU-only laptop (AMD Ryzen 5 7530U, 16 GB RAM, no GPU):
+Results of the agent benchmark (`scripts/agent-e2e.ts`) on a laptop without a GPU (AMD Ryzen 5 7530U, 16 GB RAM). Times depend on the hardware; with a GPU every step is much faster.
 
-| Model | Download | Agent results | Recommendation |
+| Model | Download | Results | Use it for |
 | :--- | :---: | :--- | :--- |
-| `qwen2.5-coder:7b` | 4.7 GB | Web page ✅ 3.5–10 min · follow-up edit ✅ 9 min · bug fix + `npm test` ✅ 3.3 min · `package.json` edit ✅ 4.7 min · Python CLI tested with real arguments ✅ 9.6 min | **Best balance** — recommended default |
-| `qwen3:8b` | 5.2 GB | Web page ✅ 14.5 min · bug fix ✅ 5.5 min · Python CLI ✅ 28 min | **Most thorough**, 2–3× slower on CPU; reasoning mode in Settings → Generation |
-| `gemma2:2b` | 1.6 GB | Page repair ✅ 2.3 min · new web page ✅ 3.7 min in the latest run, but inconsistent across runs | **Chat and small edits**; too small for reliable multi-step agent work |
+| `qwen2.5-coder:7b` | 4.7 GB | Web page 3.5–10 min · follow-up edit 9 min · bug fix with `npm test` 3.3 min · `package.json` edit 4.7 min · Python CLI tested with real arguments 9.6 min | Agent tasks (recommended) |
+| `qwen3:8b` | 5.2 GB | Web page 14.5 min · bug fix 5.5 min · Python CLI 28 min | Careful work; 2–3× slower on a CPU |
+| `gemma2:2b` | 1.6 GB | Page repair 2.3 min · new web page 3.7 min in the latest run, inconsistent across runs | Chat and small edits |
 
-With a GPU every step is many times faster. **Settings → Generation** controls the context window and the output limit; *Auto* picks values for your hardware.
+All listed runs passed their checks. Settings › Agent sets the context length, the maximum output per step and "Think before each step" for thinking models such as qwen3; *Auto* picks values for this computer.
 
 ---
 
-## 🚀 Getting Started
+## Installation
 
-### Prerequisites
-1. **Operating system**: Windows 10/11 (64-bit) or Linux (64-bit: Ubuntu 20.04+, Debian 11+, Fedora 38+, Linux Mint, Pop!_OS, openSUSE, Arch).
-2. **[Ollama](https://ollama.com)** installed with at least one model:
+### Requirements
+1. Windows 10 or 11 (64-bit), or 64-bit Linux.
+2. [Ollama](https://ollama.com) with at least one model, for example:
    ```bash
    ollama pull qwen2.5-coder:7b
    ```
-   Emir Code starts the local Ollama service automatically when it is installed but not running.
+   The setup wizard on first start checks Ollama and Node.js and can download and install them. If Ollama is installed but not running, Emir Code starts it.
+3. Node.js 18 or newer is optional; the agent needs it to run `npm` commands in your projects.
 
-### Installation
-Pre-built packages for every release are on the [GitHub Releases](https://github.com/daristanapeyvan/emircode/releases) page.
+### Packages
+Every release is on the [GitHub Releases](https://github.com/daristanapeyvan/emircode/releases) page.
 
-#### 🪟 Windows
+**Windows**
 
-| Package | File | Description |
-| :--- | :--- | :--- |
-| **Setup (recommended)** | `Emir.Code.Setup.X.Y.Z.exe` | Installer with folder selection, Desktop and Start Menu shortcuts. |
-| **Portable** | `Emir.Code.X.Y.Z.exe` | Single executable, no installation. |
+| Package | File |
+| :--- | :--- |
+| Installer (recommended; choose the folder, Desktop and Start Menu shortcuts) | `Emir.Code.Setup.X.Y.Z.exe` |
+| Portable, no installation | `Emir.Code.X.Y.Z.exe` |
 
-#### 🐧 Linux
+**Linux**
 
 | Package | Install |
 | :--- | :--- |
-| **Debian / Ubuntu / Mint / Pop!_OS** (`emir-code_X.Y.Z_amd64.deb`) | Double-click it, or `sudo apt install ./emir-code_X.Y.Z_amd64.deb` |
-| **Fedora / RHEL / openSUSE** (`emir-code-X.Y.Z.x86_64.rpm`) | Double-click it, or `sudo dnf install ./emir-code-X.Y.Z.x86_64.rpm` |
-| **AppImage, any distribution** (`Emir.Code-X.Y.Z.AppImage`) | `chmod +x Emir.Code-X.Y.Z.AppImage && ./Emir.Code-X.Y.Z.AppImage` — AppImages need FUSE 2: `sudo apt install libfuse2t64` (Ubuntu 24.04) or `libfuse2` (22.04) |
-| **Setup wizard** (`emir-code-setup-linux.sh`) | `bash emir-code-setup-linux.sh` — installs to `~/.local/share/emir-code` with menu entry, desktop shortcut, `emir-code` command and `uninstall.sh`. Downloads the matching `.tar.gz` automatically if it is not next to the script. |
-| **Archive** (`emir-code-X.Y.Z.tar.gz`) | Extract and run `./emir-code` |
+| Debian, Ubuntu and derivatives: `emir-code_X.Y.Z_amd64.deb` | `sudo apt install ./emir-code_X.Y.Z_amd64.deb` |
+| Fedora, openSUSE and other RPM systems: `emir-code-X.Y.Z.x86_64.rpm` | `sudo dnf install ./emir-code-X.Y.Z.x86_64.rpm` (or your package manager) |
+| AppImage: `Emir.Code-X.Y.Z.AppImage` | `chmod +x Emir.Code-X.Y.Z.AppImage && ./Emir.Code-X.Y.Z.AppImage`. AppImages need FUSE 2 (`libfuse2t64` on Ubuntu 24.04, `libfuse2` on 22.04). |
+| Setup script: `emir-code-setup-linux.sh` | `bash emir-code-setup-linux.sh` installs to `~/.local/share/emir-code` with a menu entry, a desktop shortcut, the `emir-code` command and `uninstall.sh`. It downloads the matching `.tar.gz` if it is not next to the script. |
+| Archive: `emir-code-X.Y.Z.tar.gz` | Extract it and run `./emir-code`. |
 
-When started from an AppImage or an extracted folder, **Settings → About → Create shortcuts** adds Emir Code to the application menu and desktop.
+On Linux, Settings › About › Create shortcuts adds Emir Code to the application menu, the desktop and `~/.local/bin`.
 
-On distributions that block Chromium's sandbox for normal users (Ubuntu 23.10+ restricts unprivileged user namespaces with AppArmor), the `emir-code` launcher starts the app without the sandbox automatically instead of failing to start. Every release is launched in CI from each Linux package format (see [ARCHITECTURE.md §13](./ARCHITECTURE.md#13-packaging--release-pipeline)).
+Where Chromium's sandbox cannot start (AppImage and archive copies on systems that restrict user namespaces, such as Ubuntu 23.10 and later), the `emir-code` launcher starts the app with `--no-sandbox` instead of failing. See [docs/SECURITY_MODEL.md](./docs/SECURITY_MODEL.md#linux-sandbox-fallback). The release workflow launches every Linux package on Ubuntu in a separate job, which reports problems without blocking the release.
 
 ### First steps
-1. Open Emir Code, pick a model in the model selector at the top.
-2. **Chat**: type a question. Turn on **Web** for questions about current information.
-3. **Code tab**: choose a project folder (an empty folder is fine for new projects), pick the approval level and describe your task.
-4. Follow the task as it runs; the **Logs** panel (panel icon in the project bar) shows the agent's events and the model's raw output.
+1. Open Emir Code and pick a model in the model selector in the title bar.
+2. Chat: type a question. Switch on **Web** for questions about current events.
+3. Code: create a project with **New Project** or open a folder, choose the approval level in the project bar and describe the task.
+4. The **Logs** panel (button in the project bar) shows the agent's events and the model's raw output.
 
 ### Troubleshooting
-- **The first agent step is slow** — the model is loaded and the whole task is read once (on CPU this can take 1–3 minutes). Later steps reuse Ollama's cache and are much faster.
-- **The agent stopped with "DÖNGÜ TESPİT EDİLDİ" / "İLERLEME YOK"** — the model repeated itself; rephrase the request more concretely or try a larger model.
-- **The taskbar still shows an old icon after updating** — Windows caches icons; unpin and re-pin the app, or sign out and back in.
-- **No answer from Ollama** — check that `ollama serve` is running and that the endpoint in Settings → Ollama is `http://localhost:11434`.
+- **The first agent step is slow.** The model is loaded and reads the whole task once; on a CPU this can take 1–3 minutes. Later steps reuse Ollama's cache.
+- **The task stopped because the model repeated itself or made no progress.** These messages currently appear in Turkish in both languages: "DÖNGÜ TESPİT EDİLDİ" (loop detected) and "İLERLEME YOK" (no progress). Write the request more concretely (file names, expected result) or try a larger model.
+- **The task ended with an amber card.** The agent finished, but some automatic checks did not pass; the card lists them. Continue in the same session, for example "also fix: …".
+- **The taskbar shows an old icon after an update.** Windows caches icons; unpin and pin the app again, or sign out and back in.
+- **No answer from Ollama.** Check that Ollama is running and that Settings › Ollama › Ollama address is correct (default `http://localhost:11434`).
 
 ---
 
-## 🏛️ Architecture Overview
+## Privacy
 
-```mermaid
-flowchart TD
-    subgraph UI["Renderer (React 19 + Zustand)"]
-        UI_Chat["Chat (web search, attachments)"]
-        UI_Agent["Agent workspace: timeline, diffs, approvals"]
-        UI_Models["Model manager"]
-    end
-
-    subgraph AgentEngine["Agent Engine (renderer)"]
-        AE_Protocol["AgentProtocol: static prompt + JSON-schema tool calls"]
-        AE_Loop["Tool loop with loop / no-progress guards"]
-        AE_Checks["FileSanity checks + TaskValidator acceptance checks"]
-        AE_Runtime["ModelRuntime: context window, sampling, reasoning mode"]
-    end
-
-    subgraph Ollama["Local LLM server (Ollama)"]
-        OLLAMA_Model["qwen2.5-coder / qwen3 / gemma …"]
-    end
-
-    subgraph MainProcess["Electron main process (privileged)"]
-        MP_Jail["Realpath workspace jail"]
-        MP_Token["One-time mutation tokens + SHA-256 base hashes"]
-        MP_Atomic["Atomic temp-file writes + rollback snapshots"]
-        MP_Cmd["Command allowlist runner"]
-        MP_Web["Web search/fetch with SSRF shield"]
-    end
-
-    Disk["Project folder"]
-    Net["DuckDuckGo / web pages (only when Web is on)"]
-
-    UI_Agent --> AgentEngine
-    UI_Chat <-->|stream| Ollama
-    AgentEngine <-->|/api/chat with format schema| Ollama
-    AE_Loop -->|request token + apply| MP_Token
-    MP_Token --> MP_Jail --> MP_Atomic --> Disk
-    AE_Loop -->|approved commands| MP_Cmd --> Disk
-    UI_Chat -->|web:search / web:fetchUrl| MP_Web --> Net
-```
-
-The full technical description — reliability layer, security model and release pipeline — is in [ARCHITECTURE.md](./ARCHITECTURE.md).
+- No telemetry, analytics or accounts. Chats, settings and tasks are stored on this computer (`emir_code_data.json` in the app's data folder).
+- Prompts and code go only to the Ollama address in Settings (`http://localhost:11434` by default).
+- Emir Code connects to the internet only for:
+  - web access, which is on by default and can be switched off completely or separately for chat and the agent in Settings › Web access. Searches go to DuckDuckGo; the agent can also open web pages;
+  - the Model Manager, which reads the model list from ollama.com and checks tags with registry.ollama.ai (the source `ollama pull` uses) while its Discover or Installed tab is open;
+  - the setup wizard, when you ask it to download Ollama or Node.js.
+- Pages the agent creates with a design theme load their fonts from Google Fonts unless Settings › Web design › Web fonts is off.
 
 ---
 
-## 🛠️ Building from Source
+## Building from source
 
-Requires Node.js 20+ (CI uses Node 22) and npm.
+Requires Node.js 20 or newer (CI uses Node.js 22) and npm.
 
 ```bash
 git clone https://github.com/daristanapeyvan/emircode.git
 cd emircode
 npm install
+npm run dev              # Vite + Electron in development mode
+npm test                 # all regression suites
+npm run build:installer  # Windows installer and portable exe in release/
+npm run build:linux      # Linux packages: deb, rpm, AppImage, tar.gz
+```
 
-# Development mode (Vite + Electron)
-npm run dev
+The agent benchmark runs against a local Ollama model; the scenarios are listed at the top of `scripts/agent-e2e.ts`:
 
-# Regression suites: functional, agent reliability, architecture, web access
-npm test
-
-# Windows installer + portable exe (release/)
-npm run build:installer
-
-# Linux packages: deb, rpm, AppImage, tar.gz
-npm run build:linux
-
-# Agent benchmark against a local Ollama model (see the file header for scenarios)
+```bash
 node ./scripts/run-ts-test.mjs scripts/agent-e2e.ts qwen2.5-coder:7b web-new
 ```
 
-Pushing a `vX.Y.Z` tag runs the release workflow, which builds all packages, launches the Linux packages in a virtual display and publishes the GitHub release.
+Pushing a `vX.Y.Z` tag starts the release workflow: it builds the Windows and Linux packages, launches the Linux packages in a virtual display and publishes the GitHub release.
 
 ---
 
-## 🔒 Privacy
+## Documentation
 
-- **No telemetry**: no analytics, no tracking, no accounts.
-- **Local inference**: prompts and code go only to your Ollama endpoint (`http://localhost:11434` by default).
-- **Web access** is switched on by default and can be turned off completely or per mode (chat / agent) in Settings → Web Access. Searches go to DuckDuckGo.
-- **Model library**: the Models window reads the model list from ollama.com and verifies tags with registry.ollama.ai (the source `ollama pull` uses) while its Discover or Installed tab is open. No personal data is sent.
+- [docs/KULLANIM.md](./docs/KULLANIM.md): Turkish user guide.
+- [docs/EXAMPLES.md](./docs/EXAMPLES.md): what happens during typical agent tasks.
+- [ARCHITECTURE.md](./ARCHITECTURE.md): processes, agent loop, checks, themes, wizards, model library, packaging.
+- [docs/SECURITY_MODEL.md](./docs/SECURITY_MODEL.md): what the app allows and blocks, and where the limits are.
+- [SECURITY.md](./SECURITY.md): how to report a vulnerability.
+- [CONTRIBUTING.md](./CONTRIBUTING.md): development setup, tests and conventions.
+- [CHANGELOG.md](./CHANGELOG.md): release history.
 
----
-
-## 📜 Documentation
-
-- **[Kullanım Kılavuzu (docs/KULLANIM.md)](./docs/KULLANIM.md)**: Türkçe kullanım rehberi ve örnek istekler.
-- **[Workflow Examples (docs/EXAMPLES.md)](./docs/EXAMPLES.md)**: step-by-step walkthroughs of typical tasks.
-- **[System Architecture (ARCHITECTURE.md)](./ARCHITECTURE.md)**: processes, agent loop, reliability layer, packaging.
-- **[Security Model (docs/SECURITY_MODEL.md)](./docs/SECURITY_MODEL.md)**: jail, tokens, profiles, web shield.
-- **[Security Policy (SECURITY.md)](./SECURITY.md)**: how to report vulnerabilities.
-- **[Contributing (CONTRIBUTING.md)](./CONTRIBUTING.md)**: development setup, tests and conventions.
-- **[Changelog (CHANGELOG.md)](./CHANGELOG.md)**: release history.
-- **[License (LICENSE)](./LICENSE)**: MIT.
-
----
-
-## 👥 Authors
-
-Created and maintained by **Agah Emir**. Built with Electron, React, TypeScript, Tailwind CSS and Ollama.
+Emir Code is written by Agah Emir and released under the [MIT License](./LICENSE).
