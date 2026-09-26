@@ -55,6 +55,14 @@ What happens behind the scenes:
 
 **Tip:** if a request has several separate jobs, write them as a numbered list (`1. … 2. …`) or join them with "sonra" / "then" — they become a checklist that must be completed in full. Everything else is treated as one task, however many sentences or lines it has.
 
+### 🧭 Start from a wizard
+In an empty folder, three suggestions appear above the message box:
+- **Website Oluştur** — pick pages, sections, texts and a design theme; the app writes a precise request with a page plan.
+- **Mini Uygulama** — 21 single-file web tools (calculators, Pomodoro, to-do list, trackers, games) with their own settings page.
+- **Betik** — 13 Python / Node.js command-line scripts (bulk rename, folder organizer, CSV/JSON tools, search & replace). Scripts preview by default, change files only with `--uygula` / `--apply`, never delete or overwrite, keep backups and an action log.
+
+Confirming a wizard puts the request into the message box — you read or edit it and press send. New web pages the agent builds get one of 24 hand-tuned design themes (Settings → Generation → Web Design).
+
 ### 🧩 Manage your models
 Download models from the built-in catalog or by name, see which models are loaded in memory, unload or delete them — no terminal needed (**Ctrl+Shift+M**).
 

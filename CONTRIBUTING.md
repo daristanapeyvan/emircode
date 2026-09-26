@@ -26,7 +26,7 @@ Thank you for your interest in contributing to **Emir Code**! Bug reports, featu
 4. **Type-check and run the regression suites**:
    ```bash
    npx tsc --noEmit
-   npm test              # functional, agent reliability, agent engine, architecture and web access suites
+   npm test              # functional, agent reliability, agent engine, architecture, web access, design theme and wizard suites
    npm run test:agent    # only the agent suites (unit checks + scripted-model engine tests)
    ```
 
@@ -34,7 +34,7 @@ Thank you for your interest in contributing to **Emir Code**! Bug reports, featu
    ```bash
    node ./scripts/run-ts-test.mjs scripts/agent-e2e.ts qwen2.5-coder:7b web-new
    ```
-   Scenarios: `web-new`, `web-followup`, `repair-corrupted`, `js-bugfix`, `python-cli`, `json-config`, `nav-links`, `six-products` (see the header of `scripts/agent-e2e.ts`).
+   Scenarios: `web-new`, `web-followup`, `repair-corrupted`, `js-bugfix`, `python-cli`, `json-config`, `nav-links`, `six-products`, `wizard-site`, `wizard-mini`, `wizard-script` (see the header of `scripts/agent-e2e.ts`).
 
 6. **Build packages**:
    ```bash
@@ -57,7 +57,10 @@ Thank you for your interest in contributing to **Emir Code**! Bug reports, featu
 | Chat, web search fallback | `src/stores/chatStore.ts`, `src/lib/web/` |
 | File jail, tokens, commands, web bridge | `electron/main.ts`, `electron/preload.ts` |
 | Packaging hooks | `scripts/afterPack.js` (Windows icon, Linux launcher), `scripts/postbuild.js` |
+| Creation wizards | `src/lib/wizard/` (requests, catalogs, script safety module), `src/components/agent/wizard/`, `src/stores/siteWizardStore.ts`, `src/stores/toolWizardStore.ts` |
+| Design themes | `src/lib/design/` |
 | Agent tests | `test_agent_reliability.ts` (unit), `test_agent_engine.ts` (scripted model), `scripts/agent-e2e.ts` (real model), `scripts/electron-api-mock.ts` |
+| Theme and wizard tests | `test_design_theme.ts`, `test_site_wizard.ts`, `test_tool_wizard.ts` |
 | Release pipeline | `.github/workflows/release.yml`, `scripts/linux-smoke-test.sh` |
 
 ---

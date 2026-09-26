@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.7.0] - 2026-09-26
 
 ### Added
 - **Design themes for web pages the agent creates**: whatever the model, generated sites looked copied from w3schools — Arial, a `#333` navbar, `#4CAF50` buttons, emoji icons, "© 2023". After the agent finished a new web page, the app now applies one of 24 hand-tuned themes in 8 categories (corporate, luxury, playful, tech, nature & health, food, creative, general). Each theme is a complete design direction — palette, type pairing, shape, depth, button style, texture and icon stroke — not a color swap. The model is never told about it while it works:
