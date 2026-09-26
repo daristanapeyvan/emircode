@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-09-26
+
 ### Added
 - **Online model library in Models → Discover**: the list comes from ollama.com (the 226 models that run on your own computer; cloud-only models are left out) and is sorted into categories by type and use — Recommended (the models of our own agent benchmark, with a note on each), Coding, Agents & tools, Reasoning, Vision & audio, Lightweight (4B or less), Chat & general, Embedding (search) and All — with a search box. Nothing to press: the list loads when the tab opens and is kept for 12 hours; without a connection the saved copy, or a short built-in list, is shown.
 - **Every size and quantization**: a model's page lists all its sizes (qwen3: 0.6B–235B) with the largest one that runs comfortably on this computer preselected, and the quantizations of its default build — Q4_K_M (default), Q5_K_M, Q6_K, Q8_0, FP16, QAT — each with its file size, a plain explanation and whether it fits this computer's memory. Rarer quantizations and other builds (base, text, instruct/thinking releases) are one click away; tags that are the same file are shown once.
