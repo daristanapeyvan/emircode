@@ -12,7 +12,8 @@
  *   node scripts/run-ts-test.mjs scripts/agent-e2e.ts <model> [scenario,scenario,...] [outDir]
  *   e.g. node scripts/run-ts-test.mjs scripts/agent-e2e.ts qwen2.5-coder:7b web-new,web-followup,js-bugfix
  * Scenarios: web-new, web-followup, repair-corrupted, js-bugfix, python-cli, json-config,
- *            nav-links, six-products (both replay requests from the in-app reports)
+ *            nav-links, six-products (both replay requests from the in-app reports),
+ *            wizard-site, wizard-mini, wizard-script (requests and run options of the wizards)
  */
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -24,6 +25,10 @@ import { DEFAULT_SETTINGS } from '../src/types/settings';
 import { checkFileSanity } from '../src/lib/agent/FileSanity';
 import { looksJsonEscaped, extractLocalScripts, extractLocalStylesheets } from '../src/lib/agent/TaskValidator';
 import { makeElectronApi, runNpm, IGNORED } from './electron-api-mock';
+import type { RunGoalOptions } from '../src/lib/agent/AgentEngine';
+import { compileSitePrompt, createWizardData } from '../src/lib/wizard/siteWizard';
+import { compileMiniAppPrompt, getMiniApp, CompiledTool } from '../src/lib/wizard/miniApps';
+import { compileScriptPrompt, getScript } from '../src/lib/wizard/scripts';
 
 const [model, scenarioArg, outDirArg] = process.argv.slice(2);
 if (!model) {
@@ -142,9 +147,80 @@ const SHOP_PAGE = `<!DOCTYPE html>
 interface Scenario {
   id: string;
   goal: string;
+  /** Run options a wizard sends with its request. */
+  options?: RunGoalOptions;
   seed?: (dir: string) => void;
   dependsOn?: string;
   verify: (dir: string) => { ok: boolean; notes: string[] };
+}
+
+const wizardOptions = (c: { displayGoal: string; checklist: string[]; design: any; contracts?: boolean; seedFiles?: RunGoalOptions['seedFiles']; scriptOutputs?: string[]; applyFlag?: string }): RunGoalOptions => ({
+  displayGoal: c.displayGoal,
+  checklist: c.checklist,
+  design: c.design,
+  contracts: c.contracts,
+  seedFiles: c.seedFiles,
+  scriptOutputs: c.scriptOutputs,
+  applyFlag: c.applyFlag,
+});
+
+const SITE_REQUEST = compileSitePrompt({
+  ...createWizardData('simple'),
+  siteName: 'Kahve Durağı',
+  siteType: 'Kafe',
+  description: 'Taze kavrulmuş kahve ve ev yapımı tatlılar sunan samimi bir mahalle kafesi.',
+});
+const MINI_REQUEST: CompiledTool = compileMiniAppPrompt(getMiniApp('pomodoro')!, {}, { title: '', language: 'tr', theme: 'auto' });
+const SCRIPT_REQUEST: CompiledTool = compileScriptPrompt(getScript('toplu-adlandir')!, {}, { language: 'python', fileName: '', test: true, requestLanguage: 'tr' });
+
+/** The theme the wizard asked for really reached the page. */
+function verifyThemed(dir: string) {
+  const theme = path.join(dir, 'theme', 'theme.css');
+  const marker = fs.existsSync(theme) ? fs.readFileSync(theme, 'utf8').match(/emir-theme (\{[^}]*\})/)?.[1] : undefined;
+  const page = fs.existsSync(path.join(dir, 'index.html')) ? fs.readFileSync(path.join(dir, 'index.html'), 'utf8') : '';
+  return { themed: !!marker && page.includes('theme/theme.css'), marker: marker || 'none' };
+}
+
+/** Syntax check of a page's inline scripts with node --check. */
+function inlineScriptsParse(page: string): { ok: boolean; note: string } {
+  const code = [...page.matchAll(/<script\b(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi)].map((m) => m[1]).join('\n;\n');
+  if (!code.trim()) return { ok: false, note: 'no inline script' };
+  const file = path.join(os.tmpdir(), `emir-e2e-inline-${Date.now()}.js`);
+  fs.writeFileSync(file, code, 'utf8');
+  const res = spawnSync('node', ['--check', file], { encoding: 'utf8' });
+  fs.rmSync(file, { force: true });
+  return { ok: res.status === 0, note: res.status === 0 ? 'inline JS parses' : `inline JS syntax error: ${(res.stderr || '').trim().split('\n').slice(0, 4).join(' | ')}` };
+}
+
+/** Runs the generated rename script on fresh sample files: preview must change nothing, --uygula must rename. */
+function verifyRenameScript(dir: string) {
+  const notes: string[] = [];
+  const script = path.join(dir, 'toplu_adlandir.py');
+  if (!fs.existsSync(script)) return { ok: false, notes: ['toplu_adlandir.py missing'] };
+  const parse = spawnSync('python', ['-c', 'import ast,sys; ast.parse(open(sys.argv[1],encoding="utf-8").read())', script], { encoding: 'utf8' });
+  notes.push(`ast.parse exit=${parse.status}`);
+  const box = fs.mkdtempSync(path.join(os.tmpdir(), 'emir-e2e-rename-'));
+  const names = ['Tatil 2.jpg', 'Tatil 10.jpg', 'deniz.JPG', 'notlar.txt'];
+  for (const n of names) fs.writeFileSync(path.join(box, n), `içerik ${n}`, 'utf8');
+  const list = () => fs.readdirSync(box).filter((f) => !f.startsWith('_') && !/islem_kaydi/i.test(f)).sort();
+  const env = { ...process.env, PYTHONIOENCODING: 'utf-8' };
+  const preview = spawnSync('python', [script, box], { encoding: 'utf8', env, timeout: 60000 });
+  const afterPreview = list();
+  const previewSafe = JSON.stringify(afterPreview) === JSON.stringify([...names].sort());
+  notes.push(`preview exit=${preview.status} unchanged=${previewSafe}`);
+  const apply = spawnSync('python', [script, box, '--uygula'], { encoding: 'utf8', env, timeout: 60000 });
+  const afterApply = list();
+  // The request states these names for the default settings (natural order, extensions kept).
+  const expected = ['Tatil 10_004.jpg', 'Tatil 2_003.jpg', 'deniz_001.JPG', 'notlar_002.txt'].sort();
+  const renamed = JSON.stringify(afterApply) === JSON.stringify(expected);
+  const contentsKept = afterApply.every((f) => /^içerik /.test(fs.readFileSync(path.join(box, f), 'utf8')));
+  const logged = fs.readdirSync(box).some((f) => /islem_kaydi/i.test(f)) || fs.existsSync(path.join(dir, 'islem_kaydi.csv'));
+  notes.push(`apply exit=${apply.status} files=${afterApply.join(', ')} expectedNames=${renamed} contentsKept=${contentsKept} log=${logged}`);
+  if (apply.status !== 0) notes.push(`stderr: ${(apply.stderr || '').trim().split('\n').slice(-3).join(' | ')}`);
+  const sanity = sanityErrorsIn(dir);
+  notes.push(...sanity);
+  fs.rmSync(box, { recursive: true, force: true });
+  return { ok: parse.status === 0 && preview.status === 0 && previewSafe && apply.status === 0 && renamed && contentsKept && logged && sanity.length === 0, notes };
 }
 
 const htmlFiles = (dir: string) => fs.readdirSync(dir).filter((f) => /\.html?$/i.test(f));
@@ -359,6 +435,37 @@ const SCENARIOS: Scenario[] = [
       };
     },
   },
+  {
+    id: 'wizard-site',
+    goal: SITE_REQUEST.prompt,
+    options: wizardOptions(SITE_REQUEST),
+    verify: (dir) => {
+      const base = verifyStyledPage(dir, false);
+      const themed = verifyThemed(dir);
+      base.notes.push(`themed=${themed.themed} marker=${themed.marker}`);
+      return { ok: base.ok && themed.themed, notes: base.notes };
+    },
+  },
+  {
+    id: 'wizard-mini',
+    goal: MINI_REQUEST.prompt,
+    options: wizardOptions(MINI_REQUEST),
+    verify: (dir) => {
+      const base = verifyStyledPage(dir, true);
+      const page = fs.existsSync(path.join(dir, 'index.html')) ? fs.readFileSync(path.join(dir, 'index.html'), 'utf8') : '';
+      const js = inlineScriptsParse(page);
+      const themed = verifyThemed(dir);
+      const extraFiles = fs.readdirSync(dir).filter((f) => !['index.html', 'theme', '_agent_log.txt'].includes(f));
+      base.notes.push(js.note, `themed=${themed.themed} marker=${themed.marker} extraFiles=${extraFiles.join(',') || 'none'}`);
+      return { ok: base.ok && js.ok && themed.themed && extraFiles.length === 0, notes: base.notes };
+    },
+  },
+  {
+    id: 'wizard-script',
+    goal: SCRIPT_REQUEST.prompt,
+    options: wizardOptions(SCRIPT_REQUEST),
+    verify: (dir) => verifyRenameScript(dir),
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -406,7 +513,7 @@ async function runScenario(s: Scenario, previousContext?: string, reuseDir?: str
     },
     'autonomous',
     60,
-    { previousContext }
+    { previousContext, ...(s.options || {}) }
   );
 
   const secs = Math.round((Date.now() - started) / 1000);

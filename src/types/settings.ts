@@ -31,6 +31,20 @@ export interface WebAccessConfig {
   codingEnabled: boolean;
 }
 
+/** How a new web page gets its design theme: off, by the site's topic, random, or one fixed theme. */
+export type DesignThemeMode = 'off' | 'topic' | 'random' | 'fixed';
+/** The component stylesheet (buttons, forms, tables, cards): automatic = on for models below 8B. */
+export type DesignBaseCssMode = 'auto' | 'on' | 'off';
+
+export interface DesignThemeConfig {
+  mode: DesignThemeMode;
+  /** Theme used when mode is 'fixed'. */
+  fixedThemeId: string;
+  baseCss: DesignBaseCssMode;
+  /** Load theme fonts from Google Fonts; off = system fonts only (no request leaves the page). */
+  webFonts: boolean;
+}
+
 export interface AppSettings {
   // General
   language: Language;
@@ -63,6 +77,9 @@ export interface AppSettings {
 
   // Agent Hardware Optimization & Synthesis Strategy (Open-source, configurable)
   agentOptimization: AgentOptimizationConfig;
+
+  // Design themes for web pages the agent creates
+  designTheme: DesignThemeConfig;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -94,5 +111,11 @@ export const DEFAULT_SETTINGS: AppSettings = {
     modificationStrategy: 'smart_injection',
     contextLength: CONTEXT_LENGTH_AUTO,
     agentThinking: false,
+  },
+  designTheme: {
+    mode: 'topic',
+    fixedThemeId: 'kum',
+    baseCss: 'auto',
+    webFonts: true,
   },
 };

@@ -522,7 +522,8 @@ export class ToolDispatcher {
           !EXTENSIONLESS_FILES.test(baseName) &&
           (String(p.content).trim().length < 40 || /klasör|dizin|folder|directory|mkdir/i.test(thought));
         if (looksLikeFolder) {
-          return `"${p.path}" looks like a folder, and folders cannot be created with write_file. Folders are created automatically: write the file with its full path, e.g. "${p.path}/index.js".`;
+          // No concrete example name: a 7B model copied "<folder>/index.js" literally and created a page nobody asked for.
+          return `"${p.path}" looks like a folder, and folders cannot be created with write_file. Folders are created automatically: write each file the task needs with its full path ("${p.path}/" followed by the file name the task gives).`;
         }
         return null;
       }

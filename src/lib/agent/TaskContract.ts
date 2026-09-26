@@ -45,13 +45,13 @@ export interface CompileContext {
   menuTexts?: string[];
 }
 
-const WEB_PATTERN = /web\s*sitesi|web\s*sayfa|website|web\s*page|landing|\bsite(?:si|sine|nin|de|ye)?\b|\bsayfa|\bhtml\b|frontend|arayüz|portfolyo|portfolio/i;
+export const WEB_PATTERN = /web\s*sitesi|web\s*sayfa|website|web\s*page|landing|\bsite(?:si|sine|nin|de|ye)?\b|\bsayfa|\bhtml\b|frontend|arayüz|portfolyo|portfolio/i;
 const CREATE_PATTERN = /oluştur|yap(?:ar|abilir|)\b|yap\b|kur\b|hazırla|yarat|tasarla|geliştir|üret|yaz\b|create|build|make|generate|design|develop|write/i;
 const STYLE_PATTERN = /\bstil|\bcss\b|tasarım|style|görünüm|renk|tema\b|theme|responsive|duyarlı/i;
 const SCRIPT_PATTERN = /\bscript|javascript|\bjs\b|kod\s+etiket|etkileşim|interaktif|interactive|dinamik|dynamic/i;
 const RESPONSIVE_PATTERN = /responsive|duyarlı|mobil|mobile|telefon|phone|tablet/i;
-const NO_STYLE_PATTERN = /stil\s*(?:olmasın|istemiyorum|yok)|stilsiz|css\s*(?:olmasın|istemiyorum|yok)|without\s+(?:css|styles?)|no\s+(?:css|styles?)|unstyled/i;
-const SINGLE_FILE_PATTERN = /başka\s+dosya\s+oluşturma|tek\s+(?:bir\s+)?dosya|single[\s-]+file|sadece\s+(?:bir\s+)?html|yalnızca\s+(?:bir\s+)?html|only\s+(?:one\s+)?html|inline|içinde\s+(?:stil|css|script)|gömülü/i;
+export const NO_STYLE_PATTERN = /stil\s*(?:olmasın|istemiyorum|yok)|stilsiz|css\s*(?:olmasın|istemiyorum|yok)|without\s+(?:css|styles?)|no\s+(?:css|styles?)|unstyled/i;
+export const SINGLE_FILE_PATTERN = /başka\s+dosya\s+oluşturma|tek\s+(?:bir\s+)?dosya|single[\s-]+file|sadece\s+(?:bir\s+)?html|yalnızca\s+(?:bir\s+)?html|only\s+(?:one\s+)?html|inline|içinde\s+(?:stil|css|script)|gömülü/i;
 
 /** Requests about links / navigation ("menü" alone is not enough: restaurant pages have menus). */
 const LINKS_PATTERN = /\blink(?:s|ler\w*|leri\w*)?\b|bağlantı\w*|\bnav(?:bar|igasyon|igation)?\b|yönlendir\w*|redirect\w*|\banchor/i;

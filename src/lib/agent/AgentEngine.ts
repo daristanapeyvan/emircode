@@ -28,10 +28,24 @@ import { useSettingsStore } from '@/stores/settingsStore';
 import {
   getModelRuntimeInfo,
   resolveRequestProfile,
+  resolveThinkParam,
   buildAgentSamplingOptions,
   estimateTokens,
   parameterSizeFromName,
+  ModelRuntimeInfo,
 } from '../ollama/ModelRuntime';
+import {
+  planDesignTheme,
+  needsModelCategory,
+  resolvePlanTheme,
+  applyDesign,
+  DesignPlan,
+  DesignChange,
+  DesignOverride,
+} from '../design/DesignTheme';
+import { buildCategoryPrompt, parseCategoryAnswer, CATEGORY_SCHEMA } from '../design/categorize';
+import { THEME_FILE, isThemeAsset } from '../design/themeCss';
+import { DesignCategory, categoryLabel, getTheme } from '../design/themes';
 import {
   AgentToolset,
   buildAgentSystemPrompt,
@@ -73,6 +87,39 @@ export interface AgentEngineCallbacks {
 export interface RunGoalOptions {
   /** Summary of the previous task in the same session, so follow-ups ("devam", "stil ekle") keep context. */
   previousContext?: string;
+  /** Short title shown instead of a long generated request (site wizard). */
+  displayGoal?: string;
+  /**
+   * An explicit checklist (site wizard: one item per page). Given = used as is, the request is not
+   * split; fewer than two items = one task.
+   */
+  checklist?: string[];
+  /** The user's design theme choice for this run (site wizard). */
+  design?: DesignOverride;
+  /**
+   * false = no automatic web page checks. Script requests mention HTML or "sayfa" (an HTML report,
+   * a page number) without being a web page, and a web contract would demand an index.html.
+   */
+  contracts?: boolean;
+  /**
+   * Files the app writes before the model's first step when they do not exist yet (script wizard:
+   * the tested starting code). They reach the model as current file contents, so it edits one
+   * function instead of copying a long skeleton — a 7B model spent its whole first reply copying
+   * 166 lines and left the function empty. Strict profile: the user approves them like any change.
+   */
+  seedFiles?: Array<{ path: string; content: string }>;
+  /**
+   * Files only the generated program may create (script wizard: its action log and backup
+   * folders; "name*" = any path part starting with name). A 7B model told to check that the log
+   * exists wrote the log by hand; writing these is refused and the model is sent back to the script.
+   */
+  scriptOutputs?: string[];
+  /**
+   * The flag that makes the generated script change files (script wizard: --uygula / --apply). The same
+   * command with it is not run twice without a file change in between: a 7B model applied its rename
+   * script to the sample folder five times, renaming the renamed files on every run.
+   */
+  applyFlag?: string;
 }
 
 export function findClosestPath(requestedPath: string, projectFiles: string[]): string | null {
@@ -563,6 +610,28 @@ export function applyLineRangeEdit(
   return { success: true, newContent: text, method: `lines ${startLine}-${end}` };
 }
 
+/**
+ * The replace_lines block shifted so its first line has the indentation of the first line it replaces,
+ * or null when it already has it or cannot be shifted as a whole. In the app, qwen2.5-coder:7b sent
+ * "    def add_options(parser):" for a top-level function, then re-sent the same edit three times.
+ */
+export function alignReplacementIndent(content: string, startLine: number, endLine: number, replacement: string): string | null {
+  const original = content.replace(/\r\n/g, '\n').split('\n').slice(startLine - 1, endLine).find((l) => l.trim());
+  const lines = stripLineNumberPrefixes((replacement ?? '').replace(/\r\n/g, '\n')).split('\n');
+  const first = lines.find((l) => l.trim());
+  if (original === undefined || first === undefined) return null;
+  const target = original.match(/^[ \t]*/)![0];
+  const current = first.match(/^[ \t]*/)![0];
+  if (current === target) return null;
+  if (current.length > target.length) {
+    const cut = current.length - target.length;
+    if (!lines.every((l) => !l.trim() || /^[ \t]*$/.test(l.slice(0, cut)))) return null;
+    return lines.map((l) => (l.trim() ? l.slice(cut) : l)).join('\n');
+  }
+  const add = target.startsWith(current) ? target.slice(current.length) : ' '.repeat(target.length - current.length);
+  return lines.map((l) => (l.trim() ? add + l : l)).join('\n');
+}
+
 /** Lines around the part of the file that changed, so the model sees the result of its edit. */
 function changedRegionExcerpt(before: string, after: string, context = 3, maxLines = 40): string {
   const a = before.replace(/\r\n/g, '\n').split('\n');
@@ -583,6 +652,20 @@ function changedRegionExcerpt(before: string, after: string, context = 3, maxLin
     lines = [...lines.slice(0, maxLines - 1), `... (${lines.length - maxLines + 1} more lines)`];
   }
   return `lines ${from + 1}-${to + 1} now read:\n${lines.join('\n')}`;
+}
+
+/**
+ * How many lines a change added when every one of them was already in the file (blank lines and
+ * indentation ignored); 0 when it added anything new. A 7B model "fixed" a page 16 times by appending
+ * the same empty <script> block: each append was a real change, but no progress.
+ */
+export function copiedLinesAdded(before: string, after: string): number {
+  const lines = (s: string) => s.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const a = lines(before);
+  const b = lines(after);
+  if (b.length <= a.length) return 0;
+  const known = new Set(a);
+  return b.every((l) => known.has(l)) ? b.length - a.length : 0;
 }
 
 function hashText(text: string): string {
@@ -800,6 +883,47 @@ export class AgentEngine {
     return { text: fullResponse, thinking: thinkingText, done, repetition };
   }
 
+  /**
+   * The one question the design theme asks the model: which kind of site is this? A short,
+   * grammar-constrained call made before the agent's first step (a call in the middle of the run
+   * would evict the agent's cached prompt on single-slot Ollama setups). Same model and num_ctx
+   * as the agent, so nothing is reloaded; null on any failure.
+   */
+  private async classifySiteCategory(
+    model: string,
+    goal: string,
+    runtime: ModelRuntimeInfo,
+    numCtx: number
+  ): Promise<DesignCategory | null> {
+    const controller = new AbortController();
+    const onAbort = () => controller.abort();
+    this.abortController?.signal.addEventListener('abort', onAbort, { once: true });
+    const timer = setTimeout(() => controller.abort(), 90000);
+    let text = '';
+    try {
+      await ollamaClient.chatStream(
+        {
+          model,
+          messages: [{ role: 'user', content: buildCategoryPrompt(goal) }],
+          options: { temperature: 0, num_ctx: numCtx, num_predict: runtime.supportsThinking ? 512 : 48 },
+          keep_alive: '30m',
+          format: CATEGORY_SCHEMA,
+          think: resolveThinkParam(runtime, false),
+        },
+        (chunk) => {
+          if (chunk.message?.content) text += chunk.message.content;
+        },
+        controller.signal
+      );
+    } catch {
+      // keywords / the general themes take over
+    } finally {
+      clearTimeout(timer);
+      this.abortController?.signal.removeEventListener('abort', onAbort);
+    }
+    return parseCategoryAnswer(text);
+  }
+
   async runGoal(
     goal: string,
     model: string,
@@ -926,12 +1050,21 @@ export class AgentEngine {
       }
     }
     const namedMenuLinks = menuLinks.filter((l) => l.text && mentionedMenuTexts(goal, [l.text]).length > 0);
-    let contracts: TaskContract[] = TaskCompiler.compile(goal, {
-      projectFiles,
-      singleFile: synthesisStrategy === 'single_file',
-      menuTexts: menuLinks.map((l) => l.text).filter(Boolean),
-    });
-    const subtasks = decomposeGoalIntoSubtasks(goal);
+    const contractsEnabled = runOptions.contracts !== false;
+    let contracts: TaskContract[] = contractsEnabled
+      ? TaskCompiler.compile(goal, {
+          projectFiles,
+          singleFile: synthesisStrategy === 'single_file',
+          menuTexts: menuLinks.map((l) => l.text).filter(Boolean),
+        })
+      : [];
+    const subtasks: TaskChecklistItem[] = runOptions.checklist
+      ? runOptions.checklist.filter((item) => item.trim()).length >= 2
+        ? runOptions.checklist
+            .filter((item) => item.trim())
+            .map((description, idx) => ({ id: `task_${idx + 1}`, description: description.trim(), status: idx === 0 ? 'in_progress' : 'pending' }))
+        : [{ id: 'task_1', description: (runOptions.displayGoal || goal).trim(), status: 'in_progress' }]
+      : decomposeGoalIntoSubtasks(goal);
     const ledger: AgentMemoryLedger = {
       goal,
       projectTree: projectFiles,
@@ -967,12 +1100,57 @@ export class AgentEngine {
       `Model profili: ${model}${runtime.parameterSizeB ? ` (${runtime.parameterSizeB}B)` : ''} · bağlam ${requestProfile.numCtx} token · maks. çıktı ${requestProfile.numPredict} token (ayar: ${requestedMaxTokens}) · düşünme: ${think === undefined ? 'desteklenmiyor' : String(think)} · yapılandırılmış JSON çıktı`
     );
 
+    // Design theme for new web pages: decided now (the model is asked at most one short question,
+    // before its first step), applied after the agent finished.
+    let designPlan: DesignPlan | null = null;
+    try {
+      let existingThemeCss: string | null = null;
+      if (projectFiles.some(isThemeAsset)) {
+        const themeRes = await window.electronAPI?.readWorkspaceFile(THEME_FILE);
+        existingThemeCss = themeRes?.success ? (themeRes.content ?? '') : null;
+      }
+      designPlan = planDesignTheme({
+        goal,
+        projectFiles,
+        config: settingsState.settings.designTheme,
+        modelSizeB: runtime.parameterSizeB,
+        existingThemeCss,
+        override: runOptions.design,
+      });
+      if (designPlan && needsModelCategory(designPlan)) {
+        const started = Date.now();
+        const category = await this.classifySiteCategory(model, goal, runtime, requestProfile.numCtx);
+        resolvePlanTheme(designPlan, category, 'model');
+        callbacks.onLog(
+          `Tasarım teması: site türünü model belirledi → ${category ? categoryLabel(category) : 'belirlenemedi (genel temalar)'} (${((Date.now() - started) / 1000).toFixed(1)} sn)`
+        );
+      } else if (designPlan && designPlan.kind === 'new' && designPlan.theme && designPlan.web) {
+        resolvePlanTheme(designPlan, designPlan.category, designPlan.categorySource || 'keywords');
+      }
+      if (designPlan) {
+        const theme = getTheme(designPlan.themeId);
+        callbacks.onLog(
+          designPlan.kind === 'continue'
+            ? `Tasarım teması: proje "${theme?.name || designPlan.themeId}" temasıyla devam ediyor.`
+            : `Tasarım teması: ${theme ? `"${theme.name}" (${categoryLabel(theme.category)})` : designPlan.theme ? 'sayfa oluşursa genel temalardan biri' : 'yalnızca temel stil'} · temel CSS ${designPlan.base ? 'açık' : 'kapalı'} · ajan bitince uygulanacak`
+        );
+      }
+    } catch (err: any) {
+      designPlan = null;
+      callbacks.onLog(`Tasarım teması atlandı: ${String(err?.message || err)}`);
+    }
+    if (!this.isRunning) return;
+
     if (subtasks.length > 1) {
       callbacks.onStep({
         id: `step_tasks_init_${Date.now()}`,
         timestamp: Date.now(),
         type: 'system_notice',
-        content: `📋 İstekteki liste kontrol listesine alındı (${subtasks.length} madde):\n${subtasks
+        content: `📋 ${
+          !runOptions.checklist ? `İstekteki liste kontrol listesine alındı (${subtasks.length} madde)`
+          : subtasks.every((t) => /^\S+\.html?\s—/.test(t.description)) ? `Sayfa planı kontrol listesine alındı (${subtasks.length} sayfa)`
+          : `Sihirbazın planı kontrol listesine alındı (${subtasks.length} adım)`
+        }:\n${subtasks
           .map((s, i) => `  ${i + 1}. ${s.description}`)
           .join('\n')}`,
         status: 'success',
@@ -985,6 +1163,19 @@ export class AgentEngine {
     // ---------------------------------------------------------------------
     const conversation: ConversationEntry[] = [];
     const seenActions = new Map<string, { step: number; entry?: ConversationEntry }>();
+    /** Output and run count of each successful command per model-change count, to spot repeats. */
+    const commandOutputs = new Map<string, string>();
+    const commandRuns = new Map<string, number>();
+    /** Successful runs with RunGoalOptions.applyFlag, by command without the flag and model-change count. */
+    const appliedRuns = new Map<string, { step: number; output: string }>();
+    /**
+     * The model-change count at which a file the model wrote last ran with exit code 0; -1 when none
+     * did, or a command failed since (see tryGracefulCompletion).
+     */
+    let programOkAt = -1;
+    /** Names of the files the model created or edited in this run (lower case, without folders). */
+    const writtenByModel = new Set<string>();
+    const baseName = (p: string) => (p.replace(/\\/g, '/').split('/').pop() || '').toLowerCase();
     const editFailures = new Map<string, number>();
     const openSanityIssues = new Map<string, SanityIssue[]>();
     /** Content of each file before the agent first changed it in this run (null = new file). */
@@ -998,6 +1189,10 @@ export class AgentEngine {
     /** Per file: the number of check errors after the last change, and how many changes in a row did not reduce it. */
     const errorCounts = new Map<string, number>();
     const unchangedErrorStreak = new Map<string, number>();
+    /** Changes in a row that only added copies of lines already in the file (see copiedLinesAdded). */
+    let copiesStreak = 0;
+    /** Files created or changed in this run (the design theme is applied to them at the end). */
+    const writtenFiles = new Set<string>();
     let treeVersion = 0;
     let lastAcceptance: { passed: number; total: number } | null = null;
     let lastMissing: string[] = [];
@@ -1076,9 +1271,30 @@ export class AgentEngine {
     };
 
     /** Firmer wording once the model starts repeating itself (small models need the explicit way out). */
+    const scriptOutputs = (runOptions.scriptOutputs || []).map((n) => n.toLowerCase());
+    /** True for a path only the generated program may create (see RunGoalOptions.scriptOutputs). */
+    const isScriptOutput = (p: string) => {
+      const parts = String(p || '').replace(/\\/g, '/').toLowerCase().split('/').filter(Boolean);
+      return scriptOutputs.some((name) =>
+        name.endsWith('*') ? parts.some((part) => part.startsWith(name.slice(0, -1))) : parts[parts.length - 1] === name
+      );
+    };
+
+    /**
+     * The next open checklist item as a concrete way out of a loop: a 7B model re-read a preloaded
+     * helper module three times instead of writing the script the first item named.
+     */
+    const nextItemHint = () => {
+      const list = ledger.subtasks || [];
+      const next = list.find((t) => t.status !== 'completed');
+      if (!next || list.length < 2) return '';
+      const file = next.description.match(/^(\S+\.\w+)\s+—/)?.[1];
+      const missing = !!file && !ledger.projectTree.some((f) => f.toLowerCase() === file.toLowerCase());
+      return ` Next checklist item: ${list.indexOf(next) + 1}. ${next.description}${missing ? ` — "${file}" does not exist yet: create it now with write_file.` : ''}`;
+    };
     const repeatNudge = () =>
       repeatStreak >= 1
-        ? ` Do NOT repeat this action again (repeat #${repeatStreak}). If the task is complete, reply with finish now; otherwise do a different, necessary step.`
+        ? ` Do NOT repeat this action again (repeat #${repeatStreak}). If the task is complete, reply with finish now; otherwise do a different, necessary step.${nextItemHint()}`
         : '';
 
     const pushExchange = (
@@ -1132,8 +1348,9 @@ export class AgentEngine {
     };
 
     /** Common bookkeeping after a successful create/edit. Returns the model-facing verdict. */
-    const afterMutation = async (filePath: string, finalContent: string): Promise<string> => {
+    const afterMutation = async (filePath: string, finalContent: string, previousContent?: string | null): Promise<string> => {
       mutationCount++;
+      writtenByModel.add(baseName(filePath));
       editFailures.delete(filePath);
       ledger.currentPhase = 'modification';
       ledger.knownFiles[filePath] = { size: finalContent.length, lastAction: 'yazıldı' };
@@ -1159,12 +1376,28 @@ export class AgentEngine {
       const errorStreak = stuck ? (unchangedErrorStreak.get(filePath) || 0) + 1 : 0;
       errorCounts.set(filePath, errorCount);
       unchangedErrorStreak.set(filePath, errorStreak);
-      if (stuck) stepsWithoutProgress++;
+      // A change that only repeats lines the file already had is no progress either, although the
+      // file changed; in a row it reaches the loop brake (the caller has just reset repeatStreak).
+      const copies = typeof previousContent === 'string' ? copiedLinesAdded(previousContent, finalContent) : 0;
+      copiesStreak = copies >= 2 ? copiesStreak + 1 : 0;
+      if (copiesStreak > 0) repeatStreak = copiesStreak;
+      if (stuck || copiesStreak > 0) stepsWithoutProgress++;
       else stepsWithoutProgress = 0;
+      if (copiesStreak > 0) {
+        parts.push(
+          `[COPIES ONLY]: this change only added ${copies} lines that were already in "${filePath}" — nothing new. Do not add them again; if a block is now there twice, remove the extra copy.${repeatNudge()}`
+        );
+      }
 
       if (issues.length > 0) {
         parts.push(
-          `Automatic check of ${filePath} found problems:\n${formatSanityIssues(issues)}${problemExcerpt(filePath)}\nFix them before finishing: change only the wrong line(s) with replace_lines (repeat the lines of the range that must stay), or rewrite the whole file with write_file.`
+          `Automatic check of ${filePath} found problems:\n${formatSanityIssues(issues)}${problemExcerpt(filePath)}\nFix them before finishing: ${
+            // Patching a short file line by line went wrong twice in the app (a stray indent, a deleted
+            // function); the whole file is cheap to write again.
+            lineCount(finalContent) <= 60
+              ? 'the file is short, so rewrite the whole file correctly with write_file (its complete content), or change only the wrong line(s) with replace_lines.'
+              : 'change only the wrong line(s) with replace_lines (repeat the lines of the range that must stay), or rewrite the whole file with write_file.'
+          }`
         );
         if (errorStreak >= 2) {
           parts.push(
@@ -1235,6 +1468,7 @@ export class AgentEngine {
         if (!applyRes?.success) {
           return { ok: false, error: explain(applyRes?.error || 'write failed') };
         }
+        writtenFiles.add(params.filePath);
         callbacks.onTransactionApplied?.({
           transactionId: tokenRes.token,
           relativePath: params.filePath,
@@ -1278,6 +1512,139 @@ export class AgentEngine {
         callbacks.onStatusChange('thinking');
       }
     };
+
+    /**
+     * End of run: theme the pages this run wrote (theme.css, color/font roles, icons) and fix
+     * stale copyright years / a missing viewport. Runs once, after the agent's last step, so the
+     * model's view of its files never changed under it. A change that would break a file is dropped.
+     */
+    let designDone = false;
+    const applyDesignTheme = async () => {
+      if (designDone) return;
+      designDone = true;
+      try {
+        const paths = Array.from(writtenFiles).filter((p) => /\.(?:html?|css)$/i.test(p) && !isThemeAsset(p));
+        if (paths.length === 0) return;
+        const files: Array<{ path: string; content: string }> = [];
+        const hashes = new Map<string, string>();
+        for (const p of paths) {
+          const res = await window.electronAPI?.readWorkspaceFile(p);
+          if (res?.success && typeof res.content === 'string') {
+            files.push({ path: p, content: res.content });
+            hashes.set(p, res.hash || '');
+          }
+        }
+        const themeRes = await window.electronAPI?.readWorkspaceFile(THEME_FILE);
+        const themeCss = themeRes?.success ? (themeRes.content ?? '') : null;
+        let result = applyDesign({ plan: designPlan, files, themeCss });
+        if (result.changes.length === 0) return;
+
+        const autoApprove = securityProfile === 'balanced' || securityProfile === 'autonomous';
+        const write = async (change: DesignChange): Promise<boolean> => {
+          if (change.before !== null && damageFromChange(change.path, change.before, change.after).length > 0) {
+            callbacks.onLog(`Tasarım teması "${change.path}" dosyasına uygulanmadı: dosyayı bozacaktı.`);
+            return false;
+          }
+          const item: ChangesetItem = {
+            id: `cs_theme_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+            operation: change.before === null ? 'create' : 'edit',
+            relativePath: change.path,
+            baseHash: hashes.get(change.path) || '',
+            proposedContentHash: '',
+            originalContent: change.before ?? '',
+            newContent: change.after,
+            reason: change.path === THEME_FILE ? 'Tasarım teması dosyası' : 'Sayfa tasarım temasına bağlandı',
+            selected: true,
+            status: 'pending',
+          };
+          if (!autoApprove) {
+            const approved = await requestApproval(item, 'Tasarım Teması', 'Tasarım Teması Teklifi', `"${change.path}" — tasarım teması / sayfa düzeltmesi.`);
+            if (!approved) return false;
+          }
+          const res = await applyMutation({
+            filePath: change.path,
+            exists: change.before !== null,
+            baseHash: hashes.get(change.path) || '',
+            newContent: change.after,
+          });
+          if (!res.ok) callbacks.onLog(`Tasarım teması "${change.path}" dosyasına yazılamadı: ${res.error}`);
+          return res.ok;
+        };
+
+        // The theme file comes first; without it the pages only get the plain fixes.
+        if (result.themeFileChanged) {
+          const themeChange = result.changes.find((c) => c.path === THEME_FILE)!;
+          if (!(await write(themeChange))) result = applyDesign({ plan: null, files, themeCss });
+        }
+        const done: string[] = result.themeFileChanged ? [THEME_FILE] : [];
+        for (const change of result.changes) {
+          if (change.path === THEME_FILE) continue;
+          if (await write(change)) done.push(change.path);
+        }
+        if (done.length === 0) return;
+        for (const p of done) ledger.appliedChanges.push(`Tasarım: "${p}"`);
+
+        const theme = result.theme;
+        const lines: string[] = [];
+        if (theme && designPlan) {
+          const source =
+            designPlan.categorySource === 'model' ? 'konuyu model belirledi'
+            : designPlan.categorySource === 'keywords' ? 'konu istekten anlaşıldı'
+            : designPlan.categorySource === 'fixed' ? 'ayarlardaki sabit tema'
+            : designPlan.categorySource === 'random' ? 'rastgele seçildi'
+            : designPlan.categorySource === 'existing' ? 'projenin mevcut teması'
+            : designPlan.categorySource === 'wizard' ? 'sihirbazda seçildi'
+            : 'genel temalardan';
+          lines.push(
+            designPlan.theme
+              ? `🎨 Tasarım teması: "${theme.name}" (${categoryLabel(theme.category)} · ${source})\n${theme.mood}`
+              : '🎨 Temel stil uygulandı (renk teması kapalı ya da istekte renkler belirtilmiş).'
+          );
+          const details = [
+            `${done.length} dosya`,
+            result.colorChanges > 0 ? `${result.colorChanges} renk/yazı tipi temaya bağlandı` : '',
+            result.icons > 0 ? `${result.icons} emoji çizgi simgeye çevrildi` : '',
+          ].filter(Boolean);
+          lines.push(`• ${details.join(' · ')}`);
+        }
+        if (result.fixedYears.length > 0) lines.push(`• Telif yılı ${new Date().getFullYear()} olarak güncellendi.`);
+        if (theme && designPlan) lines.push('Ayarlar › Üretim › Web Tasarımı bölümünden temayı değiştirebilir veya kapatabilirsiniz.');
+        notice(lines.join('\n') || `Sayfa düzeltmeleri uygulandı: ${done.join(', ')}`, 'success', theme ? 'Tasarım Teması' : 'Sayfa Düzeltmeleri');
+      } catch (err: any) {
+        callbacks.onLog(`Tasarım teması uygulanamadı: ${String(err?.message || err)}`);
+      }
+    };
+
+    // Starting files of a wizard: written once, before the first step, never over an existing file.
+    // They are listed but not preloaded: a model shown a ready module read it again and again.
+    const seeded = new Set<string>();
+    for (const seed of runOptions.seedFiles || []) {
+      const rel = seed.path.replace(/\\/g, '/');
+      if (!isSafePath(rel) || projectFiles.some((f) => f.toLowerCase() === rel.toLowerCase())) continue;
+      const item: ChangesetItem = {
+        id: `cs_seed_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        operation: 'create',
+        relativePath: rel,
+        baseHash: '',
+        proposedContentHash: '',
+        originalContent: '',
+        newContent: seed.content,
+        reason: 'Sihirbazın hazırladığı dosya',
+        selected: true,
+        status: 'pending',
+      };
+      const detail = `"${rel}" sihirbazın hazırladığı hazır kodla oluşturuluyor (${lineCount(seed.content)} satır).`;
+      if (!(await requestApproval(item, 'Sihirbaz Dosyası (Otomatik Onay)', 'Sihirbaz Dosyası Teklifi', detail))) continue;
+      const res = await applyMutation({ filePath: rel, exists: false, baseHash: '', newContent: seed.content });
+      if (res.ok) {
+        projectFiles.push(rel); // ledger.projectTree is the same list
+        seeded.add(rel);
+        treeVersion++;
+      } else {
+        callbacks.onLog(`Başlangıç dosyası yazılamadı "${rel}": ${res.error}`);
+      }
+    }
+    if (!this.isRunning) return;
 
     // ---------------------------------------------------------------------
     // Initial task message (static for the whole run)
@@ -1326,11 +1693,13 @@ export class AgentEngine {
     // requests ("stilleri ekle", "düzelt") modify the real content instead of rewriting blindly.
     // Bounded to ~25 % of the context window; larger projects are read with read_file.
     const preloaded: Array<{ path: string; hash: string }> = [];
-    if (projectFiles.length > 0 && projectFiles.length <= 6) {
+    // The design theme's stylesheet is not the model's work and would eat the context budget.
+    const preloadable = projectFiles.filter((f) => !isThemeAsset(f) && !seeded.has(f));
+    if (preloadable.length > 0 && preloadable.length <= 6) {
       const charBudget = Math.min(12000, Math.floor(requestProfile.numCtx * 0.25 * charsPerToken));
       let used = 0;
       const blocks: string[] = [];
-      for (const rel of projectFiles) {
+      for (const rel of preloadable) {
         if (!/\.(html?|css|scss|js|jsx|ts|tsx|mjs|cjs|py|json|md|txt|ya?ml|toml|go|rs|java|cs|php|rb|sh|vue|svelte)$/i.test(rel)) continue;
         const res = await window.electronAPI?.readWorkspaceFile(rel);
         if (!res?.success || res.content === undefined) continue;
@@ -1376,11 +1745,13 @@ export class AgentEngine {
         status: 'success',
       });
       ledger.userDecisions.push({ question: 'Kullanıcı Canlı Müdahalesi', answer: directive });
-      contracts = TaskCompiler.mergeDirective(contracts, directive, {
-        projectFiles: ledger.projectTree,
-        singleFile: synthesisStrategy === 'single_file',
-        menuTexts: menuLinks.map((l) => l.text).filter(Boolean),
-      });
+      if (contractsEnabled) {
+        contracts = TaskCompiler.mergeDirective(contracts, directive, {
+          projectFiles: ledger.projectTree,
+          singleFile: synthesisStrategy === 'single_file',
+          menuTexts: menuLinks.map((l) => l.text).filter(Boolean),
+        });
+      }
       ledger.subtasks.push({
         id: `task_steer_${Date.now()}`,
         description: `Kullanıcı talimatı: ${directive}`,
@@ -1433,13 +1804,31 @@ export class AgentEngine {
     /**
      * When the model gets stuck AFTER the work is verifiably done (acceptance checks pass and no
      * file problems are open), end the task as completed with a note instead of failing it.
-     * Tasks without acceptance checks cannot be verified and keep the honest failure status.
+     * Without acceptance checks (scripts) the evidence is the program itself: a file the model wrote
+     * ran with exit code 0 after its last change, and no command failed since. Anything else keeps the
+     * honest failure status.
      */
     const tryGracefulCompletion = async (why: string): Promise<boolean> => {
-      if (mutationCount === 0 || contracts.length === 0) return false;
+      if (mutationCount === 0) return false;
       if (Array.from(openSanityIssues.values()).some((list) => list.some((i) => i.severity === 'error'))) return false;
+      if (contracts.length === 0) {
+        // No acceptance checks (a script): the evidence is the program. When a file the model wrote ran
+        // with exit code 0 after its last change and no command failed since, a model that then loops
+        // (re-runs it, re-writes the same content) has finished its work, not failed it.
+        if (programOkAt !== mutationCount) return false;
+        await applyDesignTheme();
+        finalize(
+          'Görev tamamlandı.',
+          'finished',
+          undefined,
+          [],
+          `${why} Yazılan program son değişiklikten sonra hatasız çalıştı (çıkış kodu 0); görev tamamlandı olarak işaretlendi. Sonucu kontrol etmeniz önerilir.`
+        );
+        return true;
+      }
       const { missing } = await runAcceptanceChecks();
       if (missing.length > 0) return false;
+      await applyDesignTheme();
       finalize(
         'Görev tamamlandı.',
         'finished',
@@ -1780,6 +2169,17 @@ export class AgentEngine {
           pushExchange(assistantText, parsed.rawJson, `[BLOCKED]: "${payload.path}" is not a valid path inside the project. Use a relative path such as "src/app.js".`);
           continue;
         }
+        if ((parsed.type === 'propose_create' || parsed.type === 'propose_edit') && isScriptOutput(payload.path)) {
+          consecutiveErrors++;
+          repeatStreak++;
+          notice(`Engellendi: "${payload.path}" betiğin kendisinin üreteceği bir dosya; elle yazılamaz.`, 'rejected');
+          pushExchange(
+            assistantText,
+            parsed.rawJson,
+            `[BLOCKED]: "${payload.path}" is written by the script itself (its log / backups). Never create or fix it by hand: run the script, and if the file is missing or wrong, fix the script.${repeatNudge()}`
+          );
+          continue;
+        }
 
         // =========================================================
         // finish
@@ -1816,6 +2216,7 @@ export class AgentEngine {
             continue;
           }
 
+          await applyDesignTheme();
           if (problems.length > 0) {
             finalize(payload.summary, 'error', fullResponse, problems);
           } else {
@@ -2401,7 +2802,7 @@ export class AgentEngine {
           if (!originalSnapshots.has(filePath)) originalSnapshots.set(filePath, currentContent);
           // A full rewrite starts the file's edit history over.
           for (const sig of Array.from(appliedEdits.keys())) if (sig.startsWith(`${filePath}:`)) appliedEdits.delete(sig);
-          const verdict = await afterMutation(filePath, content);
+          const verdict = await afterMutation(filePath, content, currentContent);
           const baseline = originalSnapshots.get(filePath);
           const lostKeys = baseline ? jsonKeyLoss(filePath, baseline, content) : [];
           const lostDefinitions = baseline ? definitionLoss(filePath, baseline, content) : [];
@@ -2461,10 +2862,21 @@ export class AgentEngine {
             const around = payload.lineRange
               ? `\nCurrent lines ${Math.max(1, payload.startLine - 3)}-${payload.endLine + 3} of "${filePath}":\n${numberedLines(currentContent, payload.startLine - 3, payload.endLine + 3)}`
               : '';
+            // Re-sending the edit while the file is still broken means the model cannot see the fix:
+            // the whole file and a complete rewrite are the way out (patching failed already).
+            const openErrors = (openSanityIssues.get(filePath) || []).filter((i) => i.severity === 'error');
+            const help =
+              openErrors.length === 0
+                ? `${around}${openProblemsFor(filePath)}`
+                : `\n"${filePath}" still has this error:\n${formatSanityIssues(openErrors)}\nDo not send this edit again. ${
+                    currentContent.length <= 6000
+                      ? `Rewrite the WHOLE file correctly with write_file (its complete content). The current file:\n${wrapUntrustedFileContent(filePath, numberedLines(currentContent))}`
+                      : `Read the reported lines and fix them with a different edit.${problemExcerpt(filePath)}`
+                  }`;
             pushExchange(
               assistantText,
               parsed.rawJson,
-              `[REPEATED]: exactly this edit was already applied at step ${appliedAt}. Applying it again would change "${filePath}" again (line numbers shift after every edit), so nothing was changed.${around}${openProblemsFor(filePath)}${acceptanceNote()}${repeatNudge() || ' Do a different, necessary step or finish.'}`
+              `[REPEATED]: exactly this edit was already applied at step ${appliedAt}. Applying it again would change "${filePath}" again (line numbers shift after every edit), so nothing was changed.${help}${acceptanceNote()}${repeatNudge() || ' Do a different, necessary step or finish.'}`
             );
             continue;
           }
@@ -2504,6 +2916,17 @@ export class AgentEngine {
 
           let newFullContent = editResult.newContent;
           let editMergeNote = '';
+          // Python: a block indented differently from the lines it replaces is aligned to them when
+          // that removes errors (small models cannot see the stray indentation they keep re-sending).
+          if (payload.lineRange && /\.pyw?$/i.test(filePath)) {
+            const aligned = alignReplacementIndent(currentContent, payload.startLine, payload.endLine, replaceText);
+            const alignedResult = aligned === null ? null : applyLineRangeEdit(currentContent, payload.startLine, payload.endLine, aligned);
+            const errorCount = (content: string) => checkFileSanity(filePath, content).filter((i) => i.severity === 'error').length;
+            if (alignedResult?.success && errorCount(alignedResult.newContent) < errorCount(newFullContent)) {
+              newFullContent = alignedResult.newContent;
+              editMergeNote = 'Auto-fixed: your lines were indented differently from the lines they replace; they were aligned to them.';
+            }
+          }
           if (!REMOVAL_INTENT.test(userRequestText())) {
             const merged = mergeJsonPreservingKeys(filePath, currentContent, newFullContent);
             if (merged) {
@@ -2575,6 +2998,32 @@ export class AgentEngine {
             continue;
           }
 
+          // An edit that deletes a function or class the file still uses leaves it valid but broken: in the
+          // app, qwen2.5-coder:7b filled add_options() over a range that also held "def plan(...)", while
+          // run_tool(..., plan) stayed. Removing one on purpose removes its uses too, so this holds for
+          // any request (variables are left out: a removed local may share its name with a property).
+          const definedAt = (name: string) => new RegExp(`\\b(?:def|class|function\\*?)\\s+${name}\\b`);
+          const stillUsed = definitionLoss(filePath, currentContent, newFullContent).filter(
+            (name) => definedAt(name).test(currentContent) && new RegExp(`\\b${name}\\b`).test(newFullContent)
+          );
+          if (stillUsed.length > 0) {
+            consecutiveErrors++;
+            stepsWithoutProgress++;
+            const useLine = newFullContent.split('\n').findIndex((l) => new RegExp(`\\b${stillUsed[0]}\\b`).test(l)) + 1;
+            const defLine = currentContent.split('\n').findIndex((l) => definedAt(stillUsed[0]).test(l)) + 1;
+            notice(`"${filePath}" düzenlemesi uygulanmadı: hâlâ kullanılan "${stillUsed.join('", "')}" tanımını siliyordu.`, 'rejected', 'Dosya Denetimi');
+            pushExchange(
+              assistantText,
+              parsed.rawJson,
+              `[NOT APPLIED]: this edit deletes the definition of ${stillUsed.join(', ')}${defLine > 0 ? ` (line ${defLine})` : ''}, but "${filePath}" still uses it (line ${useLine} after your edit), so the file is unchanged. ${
+                payload.lineRange
+                  ? `replace_lines replaces EVERY line from start_line to end_line: choose a range that ends before line ${defLine || 'of that definition'}, or repeat the lines that must stay in "content".`
+                  : '"find" must not include that definition, or "replace" must repeat it.'
+              }${payload.lineRange ? `\nCurrent lines ${Math.max(1, payload.startLine - 1)}-${payload.endLine + 2} of "${filePath}":\n${numberedLines(currentContent, payload.startLine - 1, payload.endLine + 2)}` : ''}`
+            );
+            continue;
+          }
+
           const changesetItem: ChangesetItem = {
             id: `cs_edit_${Date.now()}`,
             operation: 'edit',
@@ -2641,7 +3090,7 @@ export class AgentEngine {
             status: 'success',
           });
           if (!originalSnapshots.has(filePath)) originalSnapshots.set(filePath, currentContent);
-          const verdict = await afterMutation(filePath, newFullContent);
+          const verdict = await afterMutation(filePath, newFullContent, currentContent);
           const editLostKeys = jsonKeyLoss(filePath, originalSnapshots.get(filePath) || currentContent, newFullContent);
           const observation = [
             `[OK]: edited "${filePath}" (${editResult.method}); ${changedRegionExcerpt(currentContent, newFullContent)}`,
@@ -2733,6 +3182,7 @@ export class AgentEngine {
               baseHash: authenticBaseHash,
             });
             ledger.projectTree = ledger.projectTree.filter((p) => p !== filePath);
+            writtenFiles.delete(filePath);
             ledger.appliedChanges.push(`Silindi: "${filePath}"`);
             delete ledger.knownFiles[filePath];
             openSanityIssues.delete(filePath);
@@ -2779,6 +3229,36 @@ export class AgentEngine {
               assistantText,
               parsed.rawJson,
               `[ALREADY TESTED]: "${binary} ${args.join(' ')}" was run at step ${usageRun.step} and printed its usage text. That is the correct behaviour of a command-line program started without arguments, so running it again shows nothing new. Run it WITH arguments that match its usage line to test a feature, or finish if the task is complete.${repeatNudge()}`
+            );
+            continue;
+          }
+          // A script that changes files does it again on every run: in the app, qwen2.5-coder:7b applied
+          // its rename script to the sample folder five times ("deniz_001_001_001_001_001.JPG"), each time
+          // calling it a preview. The same apply command is not run again until a file changes.
+          // Its preview of the same folder afterwards is misleading too: it proposes renaming the renamed
+          // files, which the model took for "not done yet" and started over in ornek_veri2, ornek_veri3...
+          const applyFlag = runOptions.applyFlag;
+          const applyKey = applyFlag ? `${binary}:${args.filter((a) => a !== applyFlag).join(' ')}:${mutationCount}` : '';
+          const earlierApply = applyFlag ? appliedRuns.get(applyKey) : undefined;
+          if (earlierApply) {
+            repeatStreak++;
+            stepsWithoutProgress++;
+            const again = args.includes(applyFlag!);
+            notice(
+              again
+                ? `Komut yeniden çalıştırılmadı: '${binary} ${args.join(' ')}' başarıyla çalıştı ve o zamandan beri dosya değişmedi; tekrar çalıştırmak örnek dosyaları yeniden değiştirirdi.`
+                : `Önizleme çalıştırılmadı: bu klasör ${earlierApply.step}. adımda ${applyFlag} ile zaten değiştirildi; önizleme yeniden adlandırılmış dosyaları tekrar adlandırmayı gösterirdi.`,
+              'rejected'
+            );
+            const shown = earlierApply.output.length > 1500 ? `...\n${earlierApply.output.slice(-1500)}` : earlierApply.output;
+            pushExchange(
+              assistantText,
+              parsed.rawJson,
+              `[NOT RUN]: ${
+                again
+                  ? `"${binary} ${args.join(' ')}" already ran successfully with ${applyFlag} and no file changed since. Running it again would change the files again (a rename renames the renamed files), so it was not run.`
+                  : `"${binary} ${args.join(' ')}" previews a folder that the same command with ${applyFlag} already changed at step ${earlierApply.step}, and no file changed since. A preview now would only propose changing the changed files again (renaming the renamed files), so it was not run.`
+              } The run with ${applyFlag} printed:\n${shown || '(no output)'}\nIf that is what the task expects, mark the checklist item done and finish now. If not, fix the script and test it on a fresh copy of the sample data.${repeatNudge()}`
             );
             continue;
           }
@@ -2846,10 +3326,34 @@ export class AgentEngine {
           const tail = output.length > 4000 ? `...\n${output.slice(-4000)}` : output;
           let observation: string;
           if (cmdRes?.success) {
+            // The same command printing exactly the same thing, with no file changed since, is no
+            // progress (a 7B model re-ran a finished script again and again instead of finishing).
+            const okKey = `cmdok:${cmdKey}:${mutationCount}`;
+            const sameOutput = commandOutputs.get(okKey) === output;
+            commandOutputs.set(okKey, output);
+            if (applyFlag && args.includes(applyFlag)) appliedRuns.set(applyKey, { step: stepCount, output });
+            // A script that changes files prints something new on every run, so the output alone does
+            // not catch a model that re-applies it over and over (one renamed its test files 30 times).
+            const runs = (commandRuns.get(okKey) || 0) + 1;
+            commandRuns.set(okKey, runs);
+            const rerun = runs >= 3;
             consecutiveErrors = 0;
-            repeatStreak = 0;
-            stepsWithoutProgress = 0;
-            observation = `[COMMAND OK] (exit code 0):\n${tail || '(no output)'}`;
+            // Evidence that the work runs only when the command runs a file the model wrote (not `dir`).
+            if ([binary, ...args].some((a) => writtenByModel.has(baseName(String(a))))) programOkAt = mutationCount;
+            if (sameOutput || rerun) {
+              repeatStreak++;
+              stepsWithoutProgress++;
+            } else {
+              repeatStreak = 0;
+              stepsWithoutProgress = 0;
+            }
+            observation = `[COMMAND OK] (exit code 0):\n${tail || '(no output)'}${
+              sameOutput
+                ? `\n[SAME OUTPUT]: the same command printed exactly this before and no file changed since.${repeatNudge()}`
+                : rerun
+                  ? `\n[ALREADY RUN]: you have run exactly this command ${runs} times since your last file change. Running it again only repeats it (a script that changes files changes them again). If the result is what the task expects, mark the checklist item done and finish now.${repeatNudge()}`
+                  : ''
+            }`;
             ledger.milestones.push({
               id: `m_cmd_${Date.now()}`,
               description: `Komut çalıştırıldı: ${binary} ${args.join(' ')}`,
@@ -2868,7 +3372,10 @@ export class AgentEngine {
             const usageText = looksLikeUsageText(output);
             const operands = args.filter((a) => !a.startsWith('-'));
             const bareUsage = usageText && (binary === 'python' || binary === 'node') && operands.length <= 1;
-            if (!bareUsage) consecutiveErrors++;
+            if (!bareUsage) {
+              consecutiveErrors++;
+              programOkAt = -1;
+            }
             seenActions.set(`cmdfail:${cmdKey}:${mutationCount}`, { step: stepCount });
             const errText = `${cmdRes?.error || ''}\n${cmdRes?.output || ''}`;
             const notFound =

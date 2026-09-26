@@ -1,12 +1,19 @@
 import React, { useState } from 'react';
-import { ChevronDown, ChevronRight, Sliders, Cpu, HardDrive, RefreshCw } from 'lucide-react';
+import { ChevronDown, ChevronRight, Sliders, Cpu, HardDrive, RefreshCw, Palette } from 'lucide-react';
 import { SettingsRow } from './SettingsRow';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useChatStore } from '@/stores/chatStore';
 import { storageService } from '@/lib/storage/StorageService';
 import { getTranslations } from '@/lib/localization/i18n';
 import { GenerationOptions } from '@/types/ollama';
-import { HardwareOptimizationProfile, DEFAULT_SETTINGS, WebSynthesisStrategy } from '@/types/settings';
+import {
+  HardwareOptimizationProfile,
+  DEFAULT_SETTINGS,
+  WebSynthesisStrategy,
+  DesignThemeMode,
+  DesignBaseCssMode,
+} from '@/types/settings';
+import { THEMES, DESIGN_CATEGORIES, getTheme } from '@/lib/design/themes';
 import { defaultContextForHardware } from '@/lib/ollama/ModelRuntime';
 import { Toggle } from '@/components/common/Toggle';
 import { cn } from '@/lib/utils/cn';
@@ -14,10 +21,12 @@ import { cn } from '@/lib/utils/cn';
 const CONTEXT_LENGTH_OPTIONS = [4096, 8192, 12288, 16384, 24576, 32768, 65536];
 
 export const GenerationSettings: React.FC = () => {
-  const { settings, updateSettings, setAgentOptimization, hardware, refreshHardware } = useSettingsStore();
+  const { settings, updateSettings, setAgentOptimization, setDesignTheme, hardware, refreshHardware } = useSettingsStore();
   const { activeChatId, updateChatOptions } = useChatStore();
   const t = getTranslations(settings.language);
   const agentOpt = settings.agentOptimization || DEFAULT_SETTINGS.agentOptimization;
+  const design = settings.designTheme || DEFAULT_SETTINGS.designTheme;
+  const fixedTheme = getTheme(design.fixedThemeId) || THEMES[0];
 
   const [showAdvanced, setShowAdvanced] = useState(false);
 
@@ -363,6 +372,88 @@ export const GenerationSettings: React.FC = () => {
             <option value="smart_injection">{t.settings.modSmartInjection}</option>
             <option value="full_overwrite">{t.settings.modFullOverwrite}</option>
           </select>
+        </SettingsRow>
+      </div>
+
+      {/* Web design themes for pages the agent creates */}
+      <div className="pt-4 border-t border-zinc-800/80 space-y-4">
+        <div>
+          <h3 className="text-xs font-semibold text-zinc-200 uppercase tracking-wider flex items-center gap-2">
+            <Palette size={15} className="text-blue-400" />
+            {t.settings.designTitle}
+          </h3>
+          <p className="text-xs text-zinc-400 mt-1">{t.settings.designDesc}</p>
+        </div>
+
+        <SettingsRow label={t.settings.designMode} description={t.settings.designModeDesc}>
+          <select
+            value={design.mode}
+            onChange={(e) => setDesignTheme({ mode: e.target.value as DesignThemeMode })}
+            className="h-8 px-2.5 rounded bg-zinc-900 border border-zinc-750 text-xs text-zinc-200 focus:outline-none focus:border-zinc-600 max-w-[220px]"
+          >
+            <option value="topic">{t.settings.designModeTopic}</option>
+            <option value="random">{t.settings.designModeRandom}</option>
+            <option value="fixed">{t.settings.designModeFixed}</option>
+            <option value="off">{t.settings.designModeOff}</option>
+          </select>
+        </SettingsRow>
+
+        {design.mode === 'fixed' && (
+          <>
+            <SettingsRow label={t.settings.designFixedTheme} description={t.settings.designFixedThemeDesc}>
+              <select
+                value={fixedTheme.id}
+                onChange={(e) => setDesignTheme({ fixedThemeId: e.target.value })}
+                className="h-8 px-2.5 rounded bg-zinc-900 border border-zinc-750 text-xs text-zinc-200 focus:outline-none focus:border-zinc-600 max-w-[220px]"
+              >
+                {DESIGN_CATEGORIES.map((cat) => (
+                  <optgroup key={cat.id} label={cat.label}>
+                    {THEMES.filter((th) => th.category === cat.id).map((th) => (
+                      <option key={th.id} value={th.id}>
+                        {th.name}
+                        {th.mode === 'dark' ? t.settings.designDarkSuffix : ''}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            </SettingsRow>
+            <div className="p-3 bg-zinc-900/80 border border-zinc-800 rounded-lg flex items-start gap-3">
+              <div className="flex shrink-0 rounded overflow-hidden border border-zinc-700" aria-hidden="true">
+                {[
+                  fixedTheme.colors.bg,
+                  fixedTheme.colors.surface2,
+                  fixedTheme.colors.inverse,
+                  fixedTheme.colors.accent,
+                  fixedTheme.colors.accent2,
+                ].map((color, i) => (
+                  <span key={i} className="w-5 h-9" style={{ backgroundColor: color }} />
+                ))}
+              </div>
+              <div className="text-[11px] leading-relaxed min-w-0">
+                <div className="text-zinc-200 font-medium">
+                  {fixedTheme.name} · {fixedTheme.fonts.heading.family || 'Sistem'} / {fixedTheme.fonts.body.family || 'Sistem'}
+                </div>
+                <div className="text-zinc-400">{fixedTheme.mood}</div>
+              </div>
+            </div>
+          </>
+        )}
+
+        <SettingsRow label={t.settings.designBaseCss} description={t.settings.designBaseCssDesc}>
+          <select
+            value={design.baseCss}
+            onChange={(e) => setDesignTheme({ baseCss: e.target.value as DesignBaseCssMode })}
+            className="h-8 px-2.5 rounded bg-zinc-900 border border-zinc-750 text-xs text-zinc-200 focus:outline-none focus:border-zinc-600 max-w-[220px]"
+          >
+            <option value="auto">{t.settings.designBaseAuto}</option>
+            <option value="on">{t.settings.designBaseOn}</option>
+            <option value="off">{t.settings.designBaseOff}</option>
+          </select>
+        </SettingsRow>
+
+        <SettingsRow label={t.settings.designWebFonts} description={t.settings.designWebFontsDesc}>
+          <Toggle checked={design.webFonts} onChange={(checked) => setDesignTheme({ webFonts: checked })} />
         </SettingsRow>
       </div>
     </div>

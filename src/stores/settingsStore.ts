@@ -8,6 +8,7 @@ import {
   WebAccessConfig,
   AgentOptimizationConfig,
   HardwareOptimizationProfile,
+  DesignThemeConfig,
 } from '@/types/settings';
 import { HardwareInfo } from '@/types/hardware';
 import { storageService } from '@/lib/storage/StorageService';
@@ -22,6 +23,7 @@ interface SettingsState {
   updateSettings: (partial: Partial<AppSettings>) => void;
   setWebAccess: (config: Partial<WebAccessConfig>) => void;
   setAgentOptimization: (config: Partial<AgentOptimizationConfig>) => void;
+  setDesignTheme: (config: Partial<DesignThemeConfig>) => void;
   setLanguage: (language: Language) => void;
   setTheme: (theme: Theme) => void;
   setFontSize: (size: FontSize) => void;
@@ -57,6 +59,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       agentOptimization: {
         ...DEFAULT_SETTINGS.agentOptimization,
         ...(data.settings?.agentOptimization || {}),
+      },
+      designTheme: {
+        ...DEFAULT_SETTINGS.designTheme,
+        ...(data.settings?.designTheme || {}),
       },
     };
 
@@ -193,6 +199,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     }
 
     get().updateSettings({ agentOptimization: newOpt });
+  },
+
+  setDesignTheme: (partialConfig) => {
+    const current = get().settings.designTheme || DEFAULT_SETTINGS.designTheme;
+    get().updateSettings({ designTheme: { ...current, ...partialConfig } });
   },
 
   setLanguage: (language) => {

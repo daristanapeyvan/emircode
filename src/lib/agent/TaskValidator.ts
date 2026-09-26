@@ -324,17 +324,21 @@ export class TaskValidator {
           }
           const inlineOnly = !!crit.params?.inlineOnly;
           // Validate real <script> block with actual JS code (excluding external src)
-          const scriptMatches = content.match(/<script(?![^>]*src=)[^>]*>([\s\S]*?)<\/script>/gi);
+          const scriptRe = /<script(?![^>]*src=)[^>]*>([\s\S]*?)<\/script>/gi;
           let hasValidJs = false;
           let markupInScript = false;
-          if (scriptMatches) {
-            for (const sm of scriptMatches) {
-              const body = sm.replace(/<script[^>]*>|<\/script>/gi, '').trim();
-              if (looksLikeJavaScript(body)) {
-                hasValidJs = true;
-                break;
-              }
-              if (/^<\/?[a-zA-Z!]/.test(body)) markupInScript = true;
+          /** Lines of inline <script> blocks that hold only comments or nothing. */
+          const emptyBlockLines: number[] = [];
+          let sm: RegExpExecArray | null;
+          while ((sm = scriptRe.exec(content)) !== null) {
+            const body = sm[1].trim();
+            if (looksLikeJavaScript(body)) {
+              hasValidJs = true;
+              break;
+            }
+            if (/^<\/?[a-zA-Z!]/.test(body)) markupInScript = true;
+            else if (!body.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').trim()) {
+              emptyBlockLines.push(content.slice(0, sm.index).split('\n').length);
             }
           }
 
@@ -368,6 +372,11 @@ export class TaskValidator {
                 ? `'${target}' harici script dosyasına (${externalScripts.join(', ')}) bağlanıyor ama bu dosya yok veya JavaScript içermiyor.`
                 : unlinked && !inlineOnly
                 ? `'${target}' JavaScript yüklemiyor: '${unlinked}' dosyası var ama sayfaya bağlanmamış. ${where} <script src="${unlinked}"></script> satırını ekleyin.`
+                : emptyBlockLines.length > 0
+                ? // "Add a <script> block" made a 7B model append a new empty block on every step.
+                  `'${target}' içindeki <script> bloğu (satır ${emptyBlockLines[0]}) boş: yalnızca yorum var, JavaScript kodu yok. Yeni <script> bloğu eklemeyin; çalışan kodu bu bloğun içine yazın.${
+                    emptyBlockLines.length > 1 ? ` Fazladan boş <script> bloklarını (satır ${emptyBlockLines.slice(1, 6).join(', ')}${emptyBlockLines.length > 6 ? ', …' : ''}) silin.` : ''
+                  }`
                 : `'${target}' dosyasında geçerli bir <script> bloğu veya JavaScript kodu bulunamadı. ${where} çalışan JavaScript içeren bir <script>...</script> bloğu ekleyin.`;
             fail(crit, errorMsg);
           }

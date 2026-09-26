@@ -25,6 +25,8 @@ import {
   isEmptyWrite,
   looksLikeUsageText,
   findErrorLocation,
+  copiedLinesAdded,
+  alignReplacementIndent,
   ConversationEntry,
 } from './src/lib/agent/AgentEngine';
 import {
@@ -602,6 +604,42 @@ async function run() {
     !report.passed && report.missingEvidence.some((m) => m.includes('index.js') && m.includes('<script src="index.js"></script>') && m.includes(`satır ${bodyLine}`)),
     'A script file that exists but is not linked is named with the exact tag and line to add (seen with gemma2:2b in E2E)',
     report.missingEvidence
+  );
+  // "Add a <script> block" made qwen2.5-coder:7b (in the app) append a new empty block on every step: 16 of them.
+  const emptyScripts = STYLED_PAGE.replace(
+    /<script>[\s\S]*?<\/script>/,
+    '<script>\n    // JavaScript kodu buraya gelecek\n  </script>\n  <script>\n    // JavaScript kodu buraya gelecek\n  </script>'
+  );
+  report = await TaskValidator.validate(inlineContract[0], async (p) => (p === 'index.html' ? emptyScripts : null));
+  const firstScriptLine = emptyScripts.slice(0, emptyScripts.indexOf('<script>')).split('\n').length;
+  check(
+    !report.passed &&
+      report.missingEvidence.some((m) => m.includes(`(satır ${firstScriptLine}) boş`) && m.includes('Yeni <script> bloğu eklemeyin') && m.includes(`(satır ${firstScriptLine + 3})`)),
+    'A <script> holding only a comment is named by line: write the code inside it, add no new block, remove the extra empty ones',
+    report.missingEvidence
+  );
+  const placeholderScript = checkFileSanity('index.html', emptyScripts);
+  check(
+    placeholderScript.some((i) => i.severity === 'error' && /placeholder/.test(i.message) && /buraya gelecek/.test(i.message)),
+    'File check: a <script> block holding only a placeholder comment is an error',
+    placeholderScript
+  );
+  check(
+    !checkFileSanity('index.html', STYLED_PAGE.replace('<script>', '<script>\n    // TODO: sayacı buraya ekle')).some((i) => /placeholder/.test(i.message)),
+    'File check: a leftover TODO comment above real code is not a placeholder'
+  );
+  check(
+    copiedLinesAdded('<a>\n  <b>\n', '<a>\n<b>\n\n<b>\n<a>\n') === 2 && copiedLinesAdded('<a>\n', '<a>\n<c>\n') === 0 && copiedLinesAdded('<a>\n<b>\n', '<a>\n') === 0,
+    'copiedLinesAdded: only lines the file already had count as copies; a new or a removed line does not'
+  );
+  const pyFile = 'import sys\n\n\ndef add_options(parser):\n    pass\n\n\nclass Tool:\n    def run(self):\n        pass\n';
+  check(
+    alignReplacementIndent(pyFile, 4, 5, "    def add_options(parser):\n        parser.add_argument('--kalip')") === "def add_options(parser):\n    parser.add_argument('--kalip')" &&
+      alignReplacementIndent(pyFile, 10, 10, 'return 1') === '        return 1' &&
+      alignReplacementIndent(pyFile, 10, 10, '        return 1') === null &&
+      alignReplacementIndent(pyFile, 4, 5, '    def add_options(parser):\nx = 1') === null,
+    'alignReplacementIndent: a block is shifted to the indentation of the lines it replaces, only as a whole',
+    alignReplacementIndent(pyFile, 4, 5, "    def add_options(parser):\n        parser.add_argument('--kalip')")
   );
 
   // =====================================================================

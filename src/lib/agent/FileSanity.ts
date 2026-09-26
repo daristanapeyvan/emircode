@@ -800,6 +800,11 @@ function emptyPlaceholderIssues(family: Family, content: string): SanityIssue[] 
       if (inner.length < 20) record(m.index, m[0]);
     }
 
+    // A <script> block that holds nothing but a placeholder comment ("// JavaScript kodu buraya gelecek").
+    const scriptRe = new RegExp(`<script(?![^>]*\\bsrc=)[^>]*>\\s*(?://${placeholder}[^\\n]*|/\\*${placeholder}[\\s\\S]*?\\*/)\\s*</script>`, 'gi');
+    let s: RegExpExecArray | null;
+    while ((s = scriptRe.exec(content)) !== null) record(s.index, s[0]);
+
     // Visible placeholder text instead of content ("SSS içeriği buraya gelecek", "coming soon").
     // Blanking keeps character offsets so reported line numbers stay correct.
     const blank = (s: string) => s.replace(/[^\n]/g, ' ');

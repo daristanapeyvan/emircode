@@ -76,6 +76,116 @@ Ajan hiçbir modda seçtiğiniz klasörün dışına dosya yazamaz; `npx` veya r
 
 ---
 
+## 🧭 Oluşturma sihirbazları: Website, Mini Uygulama, Betik
+
+Boş bir klasörde (ya da henüz klasör seçmeden) yeni bir görev açtığınızda metin kutusunun üstünde üç öneri görünür: **Website Oluştur**, **Mini Uygulama** ve **Betik**. İçinde dosya bulunan bir proje açıkken bu öneriler çıkmaz.
+
+**Hiçbir sihirbaz görevi kendiliğinden başlatmaz.** **Onayla**'ya bastığınızda hazırlanan istek metin kutusuna gelir; üstünde küçük bir etiket görünür. İsteği okuyabilir, istediğiniz gibi değiştirebilir ya da ek isteklerinizi yazabilirsiniz; ardından gönder tuşuna siz basarsınız. Etiketteki **Sihirbazı aç** sizi seçtiğiniz ayarlara geri götürür, **×** isteği kaldırır. İsteği düzenleseniz de seçtiğiniz tema, sayfa planı ve denetimler istekle birlikte gider. Metin kutusuna doğrudan istek yazmak eskisi gibi çalışır.
+
+### Website Oluştur
+
+Birkaç soruyla sitenizi tarif edersiniz. Cevaplarınızdan küçük modellerin en iyi anladığı biçimde ayrıntılı bir istek hazırlanır.
+
+**İki mod vardır** (sihirbazın üst kısmından istediğiniz an geçebilirsiniz):
+| Mod | Adımlar |
+| :--- | :--- |
+| **Basit** | Site (ad, tür, kısa tanım) → Tasarım (tema) → Yapı (tek sayfa veya çok sayfa, bölümler) → Özet |
+| **Kapsamlı** | Site (slogan, hedef kitle, sayfa dili, yazım tonu dahil) → Tasarım → Sayfalar & İçerik → İletişim → İşlevler → Özet |
+
+- **Sayfalar & İçerik:** Sayfa ekleyip çıkarabilir, adlarını değiştirebilir ve sıralayabilirsiniz. Her sayfaya bölüm ekleyebilirsiniz: Karşılama, Hakkımızda, Hizmetler, Menü, Galeri, Fiyatlar, Yorumlar, SSS, İletişim… Her bölüme **kendi metninizi** yazabilirsiniz. Yazdığınız metin sayfaya aynen konur; boş bıraktığınız bölümlerin metnini ajan yazar.
+- **Akıllı metin kutusu:**
+  - Araç çubuğunda kalın, italik, ara başlık, madde listesi, numaralı liste, alıntı ve bağlantı vardır.
+  - Kısayollar: Ctrl+B, Ctrl+I, Ctrl+K.
+  - Listede Enter'a basınca yeni madde açılır; boş maddede Enter listeyi bitirir.
+  - **Önizleme** ile sonucu görebilirsiniz.
+- **Tasarım:** Konunuza uygun temalar önerilir; 24 temanın tamamı küçük önizlemeleriyle listelenir. "Tema kullanma" seçeneğiyle modelin kendi tasarımı kalır.
+- **İşlevler:**
+  - Seçilebilenler: iletişim formu doğrulaması, mobil menü, açılır SSS, yukarı çık düğmesi, belirme animasyonları, açık/koyu düğmesi, WhatsApp düğmesi, harita, galeri büyütme ve bülten kutusu.
+  - Ayrıca görsel türünü, SEO başlığını ve SEO açıklamasını ayarlayabilirsiniz.
+- **Özet:** Seçimlerinizi ve proje klasörünü gösterir. Klasör boş değilse uyarı çıkar.
+
+Çok sayfalı sitelerde her sayfa kontrol listesinde ayrı bir madde olur. Metin kutusunda bir sayfayı istekten silerseniz o sayfa listeden de çıkar. Taslağınız otomatik kaydedilir: sihirbazı kapatsanız ya da uygulamadan çıksanız da yazdıklarınız kaybolmaz. "Sıfırla" ile baştan başlarsınız.
+
+### Mini Uygulama
+
+Tek dosyalık (`index.html`) küçük web araçları hazırlar. İnternet ya da harici kütüphane gerektirmezler; çift tıklayınca tarayıcıda açılırlar.
+
+1. Soldaki kategorilerden birini seçin.
+2. İstediğiniz aracın kartına tıklayın; aracın **kendi ayar sayfası** açılır.
+3. Açma/kapama anahtarlarını, seçimleri, sayıları ve listeleri ayarlayın.
+4. **Çıktı** bölümünde uygulamanın adını, arayüz dilini ve tasarım temasını seçin. Tema, varsayılan olarak aracın türüne uygun biri olur.
+5. **Geri** ile kataloğa dönersiniz; ayarlarınız kaybolmaz.
+
+| Kategori | Araçlar |
+| :--- | :--- |
+| Hesaplama | Hesap Makinesi, Birim Çevirici, Kredi Hesaplayıcı, Hesap Bölüşme, Tarih Hesaplayıcı |
+| Verimlilik | Pomodoro Zamanlayıcı, Yapılacaklar Listesi, Not Defteri, Geri Sayım & Kronometre |
+| Takip | Harcama Takibi, Alışkanlık Takibi, VKİ Hesaplayıcı |
+| Yardımcı Araçlar | Şifre Üretici, Renk Paleti Üretici, Metin Araçları, Rastgele Seçici |
+| Eğlence & Öğrenme | Bilgi Yarışması, Bilgi Kartları, Yazma Hızı Testi, Hafıza Oyunu, Yılan Oyunu |
+
+Her araç, küçük modellerin sık yaptığı hatalara karşı kurallarla gelir:
+- Hesap makinesinde `eval` kullanılmaz.
+- Şifreler ve çekilişler için güvenli rastgelelik kullanılır.
+- Zamanlayıcılar arka planda da doğru sayar.
+- Para ve tarih biçimi tarayıcının bölge ayarından gelir.
+
+### Betik
+
+Dosyalarınız üzerinde çalışan komut satırı araçları hazırlar. Betikler Python (yalnızca standart kütüphane) ya da Node.js (yalnızca yerleşik modüller) ile yazılır.
+
+| Kategori | Betikler |
+| :--- | :--- |
+| Dosya & Klasör | Toplu Yeniden Adlandırma, Klasör Düzenleyici, Yinelenen Dosya Bulucu, Klasör Yedekleme (ZIP), Klasör Boyutu Raporu |
+| Veri | CSV Birleştirme, CSV ↔ JSON Dönüştürücü, CSV Özet Raporu, JSON Doğrulayıcı & Biçimlendirici |
+| Metin | Toplu Bul & Değiştir, Dosyalarda Ara, E-posta & Bağlantı Ayıklayıcı, Kelime Sıklığı Analizi |
+
+**Güvenlik kuralları her betikte vardır:**
+- Betik varsayılan olarak yalnızca **önizleme** yapar: ne yapacağını listeler, hiçbir şeyi değiştirmez. Değişiklik için `--uygula` eklenir. İngilizce arayüzde bu seçenek `--apply` olur.
+- Hiçbir dosya silinmez. İçeriği değişecek dosyalar önce `_yedek_…` klasörüne kopyalanır.
+- Betik, verilen klasörün dışına çıkamaz.
+- Her işlem `islem_kaydi.csv` dosyasına yazılır. Taşıma ve adlandırma betiklerinde **Geri alma** ayarını açarsanız `--geri-al` ile son çalıştırma geri alınabilir.
+- Hatalar anlaşılır bir mesajla gösterilir.
+
+İsteği gönderdiğinizde uygulama, bu kuralları uygulayan denenmiş bir **güvenlik modülünü** (`guvenli_islem.py` ya da `.js`) betiğin yanına yazar. Sıkı profilde bunun için onayınız istenir; aynı adda bir dosya varsa dokunulmaz. Ajan yalnızca kısa betiği yazar: aracın seçeneklerini ve hangi dosyaya ne yapılacağının listesini. Dosyaları değiştiren kısım modüldeki hazır, denenmiş koddur; bu sayede küçük modeller de güvenlik kurallarını atlayamaz. Betiği başka bir yere taşırken modülü de yanında taşıyın.
+
+**Örnek veriyle dene** açıksa ajan betiği yazdıktan sonra küçük bir `ornek_veri` klasörü oluşturur. Betiği bu klasörde çalıştırır ve sonucu kontrol eder; komut çalıştırmak için izniniz istenir. Dosya değiştiren bir betik aynı klasöre yalnızca bir kez uygulanır: arada bir dosya değişmediyse uygulama komutu ve o klasörün yeni önizlemesi tekrar çalıştırılmaz, ajan ilk sonuca bakar. Toplu Yeniden Adlandırma'da kalıbın örnek dosya adlarına etkisini ayar sayfasında hemen görürsünüz. Kalıpta `{ad}`, `{uzanti}`, `{sayac:03}` ve `{tarih}` değişkenlerini kullanabilirsiniz.
+
+---
+
+## 🎨 Web tasarım temaları
+
+Yerel modeller, hangisi olursa olsun, siteleri hep aynı "w3schools" görünümüyle yazar: Arial yazı tipi, koyu gri menü, yeşil butonlar, emoji simgeler ve footer'da "© 2023". Emir Code, **yeni bir web sayfası** oluştuğunda, ajan işini bitirdikten sonra sayfaya özenle hazırlanmış bir tasarım teması uygular. Model bunun için hiçbir şey öğrenmek zorunda değildir.
+
+**Ne olur?**
+- Proje klasörüne `theme/theme.css` yazılır ve sayfaya bağlanır. Dosyanın içinde renkler, yazı tipleri ve temel bileşen stilleri (buton, form, tablo, kart, bölüm boşlukları) bulunur.
+- Sayfanın renkleri temadaki rollerine bağlanır. Koyu menü çubuğu temanın koyu şeridi, yeşil buton temanın vurgu rengi, beyaz kart temanın kart yüzeyi olur. Koyu ya da renkli bir alanın içindeki yazılar okunur kalır.
+- Özellik kartlarındaki ve iletişim satırlarındaki emojiler (☕ 📍 📞 🚀 …) temanın çizgi kalınlığında SVG simgelere dönüşür.
+- Footer'daki eski yıl ("© 2023", "2022-2023") güncel yılla değiştirilir. Bu düzeltme tema kapalıyken de yapılır.
+
+**24 tema, 8 kategori:** Kurumsal, Lüks, Eğlenceli, Teknoloji, Doğa & Sağlık, Yemek & Kafe, Yaratıcı ve Genel. Temalar yalnızca renk değişikliği değildir; her biri kendi yazı tipi eşleşmesi, köşe biçimi, gölge ve kenarlık tarzı, buton stili, arka plan dokusu ve simge çizgisiyle ayrı bir tasarım yönüdür. Tüm temalarda metin kontrastı WCAG AAA (7:1) seviyesindedir.
+
+**Tema nasıl seçilir?** Sitenin konusu isteğinizden anlaşılır (ör. "kafe" → Yemek & Kafe). Konu belirsizse ya da birden fazla konu varsa model, ilk adımından önce tek bir kısa soruyu cevaplar ("bu hangi tür site?"). Bu soru küçük modellerde birkaç saniye sürer. "Koyu tema" veya "dark mode" derseniz koyu temalardan biri seçilir.
+
+**Ne zaman devreye girmez?**
+- Klasörde zaten bir site varsa, çünkü mevcut tasarım korunur.
+- React, Tailwind, Bootstrap gibi bir framework istediyseniz.
+- "Tek dosya", "sadece HTML" gibi bir kısıt verdiyseniz.
+- Kendi renklerinizi belirttiyseniz ("mavi tonlarında", "#1e3a8a"). Bu durumda renk teması uygulanmaz, yalnızca temel stil kullanılır. Kendi yazı tipinizi belirttiyseniz yazı tiplerine dokunulmaz.
+
+**Ayarlar › Üretim › Web Tasarımı**
+| Ayar | Seçenekler |
+| :--- | :--- |
+| Tasarım Teması | Konuya göre (önerilen), Rastgele, Sabit tema (önizlemeli seçim), Kapalı |
+| Temel CSS | Otomatik (8B altındaki modellerde açık), Açık, Kapalı |
+| Web Yazı Tipleri | Açık: yazı tipleri Google Fonts'tan yüklenir. Kapalı: yalnızca cihazdaki yazı tipleri kullanılır, sayfa dışarıya bağlanmaz. |
+
+Tema ve Temel CSS ikisi birden kapalıyken sayfalara hiçbir şey eklenmez.
+
+> **İpucu:** Temanın renklerini değiştirmek için `theme/theme.css` dosyasının başındaki `:root` değişkenlerini düzenlemeniz yeterli (ör. `--theme-accent`). Sayfanın kendi CSS'i her zaman önceliklidir. `theme/theme.css` silinirse sayfa, modelin yazdığı orijinal renklere geri döner.
+
+---
+
 ## 🧠 Hangi modeli seçmeliyim?
 
 GPU'suz bir dizüstü bilgisayarda (Ryzen 5 7530U, 16 GB RAM) yerleşik ajan testleriyle ölçülen sonuçlar:

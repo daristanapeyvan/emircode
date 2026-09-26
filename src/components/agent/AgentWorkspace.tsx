@@ -4,6 +4,15 @@ import { FileTree } from './FileTree';
 import { ChangesetModal } from './ChangesetModal';
 import { DeleteApprovalModal } from './DeleteApprovalModal';
 import { CommandApprovalModal } from './CommandApprovalModal';
+import { SuggestionChips } from './SuggestionChips';
+import { SiteWizard } from './wizard/SiteWizard';
+import { ToolWizard } from './wizard/ToolWizard';
+import { WebsiteIcon } from './wizard/WebsiteIcon';
+import { MiniAppIcon, ScriptIcon } from './wizard/ToolIcons';
+import { countFiles } from './wizard/StepSummary';
+import { useSiteWizardStore } from '@/stores/siteWizardStore';
+import { useToolWizardStore } from '@/stores/toolWizardStore';
+import { composerRunOptions, WizardDraft } from '@/lib/wizard/composer';
 import {
   FolderOpen,
   FolderTree,
@@ -153,6 +162,31 @@ function parseAgentStream(rawText: string) {
   };
 }
 
+/** The request a generator (site wizard) prepared for the agent, collapsed by default. */
+const GeneratedRequestCard: React.FC<{ title: string; content: string }> = ({ title, content }) => {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="rounded-lg border border-zinc-800/70 bg-zinc-900/30 text-xs">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="w-full flex items-center gap-2 px-3 py-2 text-left text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer"
+      >
+        {open ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+        <FileCode size={13} className="text-zinc-500" />
+        <span className="font-medium">{title}</span>
+        <span className="ml-auto text-[10.5px] text-zinc-600 font-mono">{content.length.toLocaleString()} karakter</span>
+      </button>
+      {open && (
+        <pre className="mx-3 mb-3 max-h-80 overflow-auto rounded-md bg-zinc-950/80 border border-zinc-800/80 p-3 text-[11px] leading-relaxed text-zinc-300 whitespace-pre-wrap font-mono select-text">
+          {content}
+        </pre>
+      )}
+    </div>
+  );
+};
+
 export const AgentWorkspace: React.FC = () => {
   const {
     workspaceRoot,
@@ -191,12 +225,18 @@ export const AgentWorkspace: React.FC = () => {
     rollbackAll,
     clearSession,
     submitAnswer,
+    wizardDraft,
+    clearWizardDraft,
   } = useAgentStore();
 
   const { settings, updateSettings, setWebAccess } = useSettingsStore();
   const t = getTranslations(settings.language);
 
   const [goalInput, setGoalInput] = useState('');
+  const goalInputRef = useRef(goalInput);
+  goalInputRef.current = goalInput;
+  /** The wizard request currently shown in the composer. */
+  const appliedDraft = useRef<WizardDraft | null>(null);
   const [customAnswerText, setCustomAnswerText] = useState('');
   const [isExplorerOpen, setIsExplorerOpen] = useState(true);
   const [dumpTab, setDumpTab] = useState<'reasoning' | 'logs' | 'raw'>('reasoning');
@@ -226,14 +266,52 @@ export const AgentWorkspace: React.FC = () => {
     init();
   }, []);
 
-  // Auto-resize textarea height
+  // Auto-resize textarea height (a long wizard request gets more room to be read and edited)
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
       const scrollHeight = textareaRef.current.scrollHeight;
-      textareaRef.current.style.height = `${Math.min(scrollHeight, 180)}px`;
+      const limit = wizardDraft ? Math.min(440, Math.round(window.innerHeight * 0.45)) : 180;
+      textareaRef.current.style.height = `${Math.min(scrollHeight, limit)}px`;
     }
-  }, [goalInput]);
+  }, [goalInput, wizardDraft]);
+
+  // A wizard was confirmed: its request goes into the composer; the user reads, edits and sends it.
+  useEffect(() => {
+    if (!wizardDraft) {
+      appliedDraft.current = null;
+      return;
+    }
+    if (appliedDraft.current?.nonce === wizardDraft.nonce) return;
+    const previous = appliedDraft.current;
+    const text = goalInputRef.current;
+    const ownText = text.trim() !== '' && text !== previous?.prompt && text !== wizardDraft.prompt;
+    if (ownText && !window.confirm(t.toolWizard.replaceConfirm)) {
+      // Keep the user's text together with the request it belonged to.
+      useAgentStore.setState({ wizardDraft: previous });
+      return;
+    }
+    appliedDraft.current = wizardDraft;
+    setGoalInput(wizardDraft.prompt);
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(0, 0);
+      el.scrollTop = 0;
+    });
+  }, [wizardDraft]);
+
+  const openDraftWizard = () => {
+    if (!wizardDraft) return;
+    if (wizardDraft.kind === 'site') useSiteWizardStore.getState().openWizard();
+    else useToolWizardStore.getState().openWizard(wizardDraft.kind, wizardDraft.toolId);
+  };
+
+  const removeDraft = () => {
+    clearWizardDraft();
+    setGoalInput('');
+  };
 
   const timelineEndRef = useRef<HTMLDivElement>(null);
   const [creatingFolderIn, setCreatingFolderIn] = useState<string | null>(null);
@@ -289,6 +367,7 @@ export const AgentWorkspace: React.FC = () => {
     if (!goalInput.trim()) return;
     const text = goalInput.trim();
     setGoalInput('');
+    clearWizardDraft();
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
@@ -306,11 +385,14 @@ export const AgentWorkspace: React.FC = () => {
     }
     if (!goalInput.trim() || !workspaceRoot) return;
     const textToSend = goalInput;
+    // A wizard's request keeps its title, plan, theme and checks even after the user edited it.
+    const options = composerRunOptions(wizardDraft, textToSend);
     setGoalInput('');
+    clearWizardDraft();
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
-    startGoal(textToSend);
+    startGoal(textToSend, options);
   };
 
   const isBusy = agentStatus === 'thinking' || agentStatus === 'running_command';
@@ -835,8 +917,12 @@ export const AgentWorkspace: React.FC = () => {
                       );
                     }
 
+                    if (step.type === 'system_notice' && step.metadata?.kind === 'generated_request') {
+                      return <GeneratedRequestCard key={step.id} title={step.title || ''} content={step.content} />;
+                    }
+
                     return (
-                      <div key={step.id} className="text-xs text-zinc-400 italic">
+                      <div key={step.id} className="text-xs text-zinc-400 italic whitespace-pre-wrap">
                         {step.content}
                       </div>
                     );
@@ -1030,12 +1116,44 @@ export const AgentWorkspace: React.FC = () => {
 
           {/* Goal Composer Input Bar (Consistent with Chat Composer Identity) */}
           <div className="p-4 bg-transparent shrink-0">
+            {/* Suggestions for starting something new: empty session in an empty (or no) folder */}
+            {steps.length === 0 && !isBusy && !wizardDraft && countFiles(workspaceFiles || []) === 0 && <SuggestionChips />}
             <div
               className={cn(
                 'max-w-3xl mx-auto rounded-xl border bg-zinc-900/90 shadow-sm overflow-hidden transition-all duration-150',
                 'border-zinc-800/40 focus-within:border-zinc-700/60 focus-within:ring-1 focus-within:ring-zinc-700/30'
               )}
             >
+              {/* A wizard's request waiting to be sent */}
+              {wizardDraft && (
+                <div className="flex items-center gap-2 pl-3 pr-2 py-1.5 border-b border-zinc-800/60 animate-in fade-in duration-150">
+                  <span className="text-zinc-400 shrink-0">
+                    {wizardDraft.kind === 'site' ? <WebsiteIcon size={14} /> : wizardDraft.kind === 'mini' ? <MiniAppIcon size={14} /> : <ScriptIcon size={14} />}
+                  </span>
+                  <p className="min-w-0 flex-1 text-xs text-zinc-300 truncate" title={wizardDraft.label}>
+                    <span className="text-zinc-500">
+                      {wizardDraft.kind === 'site' ? t.toolWizard.badgeSite : wizardDraft.kind === 'mini' ? t.toolWizard.badgeMini : t.toolWizard.badgeScript}:
+                    </span>{' '}
+                    {wizardDraft.label}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={openDraftWizard}
+                    className="shrink-0 h-6 px-2 rounded text-[11px] text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/60 transition-colors cursor-pointer"
+                  >
+                    {t.toolWizard.badgeOpen}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={removeDraft}
+                    title={t.toolWizard.badgeRemove}
+                    aria-label={t.toolWizard.badgeRemove}
+                    className="shrink-0 w-6 h-6 inline-flex items-center justify-center rounded text-zinc-500 hover:text-zinc-100 hover:bg-zinc-800/60 transition-colors cursor-pointer"
+                  >
+                    <X size={13} strokeWidth={1.5} />
+                  </button>
+                </div>
+              )}
               {/* Input area */}
               <div className="flex items-end px-3 py-2 gap-2">
                 {/* Project Folder / Workspace Action Button */}
@@ -1086,7 +1204,13 @@ export const AgentWorkspace: React.FC = () => {
                 <textarea
                   ref={textareaRef}
                   value={goalInput}
-                  onChange={(e) => setGoalInput(e.target.value)}
+                  // A wizard's generated request is not the user's prose: no spell-check underlines all over it.
+                  spellCheck={!wizardDraft}
+                  onChange={(e) => {
+                    setGoalInput(e.target.value);
+                    // Emptying the box drops the wizard request with it.
+                    if (!e.target.value.trim() && wizardDraft) clearWizardDraft();
+                  }}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       if (settings.sendOnEnter ? !e.shiftKey : e.ctrlKey) {
@@ -1104,7 +1228,10 @@ export const AgentWorkspace: React.FC = () => {
                       ? t.agent.interruptPlaceholder
                       : t.agent.inputPlaceholder
                   }
-                  className="flex-1 bg-transparent border-0 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:ring-0 resize-none max-h-44 py-1.5 leading-relaxed font-sans selectable-text"
+                  className={cn(
+                    'flex-1 bg-transparent border-0 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:ring-0 resize-none py-1.5 leading-relaxed font-sans selectable-text',
+                    wizardDraft ? 'max-h-[45vh]' : 'max-h-44'
+                  )}
                 />
 
                 {/* Send / Stop / Interrupt Actions */}
@@ -1305,6 +1432,8 @@ export const AgentWorkspace: React.FC = () => {
       <ChangesetModal />
       <DeleteApprovalModal />
       <CommandApprovalModal />
+      <SiteWizard />
+      <ToolWizard />
     </div>
   );
 };

@@ -26,7 +26,7 @@
     "build:dir": "tsc && vite build && electron-builder --dir && node ./scripts/postbuild.js",
     "build:vite": "tsc && vite build",
     "preview": "vite preview",
-    "test": "node ./scripts/verify_functionality.js && node ./scripts/run-ts-test.mjs test_agent_reliability.ts && node ./scripts/run-ts-test.mjs test_agent_engine.ts && node ./scripts/run-ts-test.mjs test_production_architecture.ts && node ./scripts/run-ts-test.mjs test_web_access.ts",
+    "test": "node ./scripts/verify_functionality.js && node ./scripts/run-ts-test.mjs test_agent_reliability.ts && node ./scripts/run-ts-test.mjs test_agent_engine.ts && node ./scripts/run-ts-test.mjs test_production_architecture.ts && node ./scripts/run-ts-test.mjs test_web_access.ts && node ./scripts/run-ts-test.mjs test_design_theme.ts && node ./scripts/run-ts-test.mjs test_site_wizard.ts && node ./scripts/run-ts-test.mjs test_tool_wizard.ts",
     "test:agent": "node ./scripts/run-ts-test.mjs test_agent_reliability.ts && node ./scripts/run-ts-test.mjs test_agent_engine.ts"
   },
   "dependencies": {

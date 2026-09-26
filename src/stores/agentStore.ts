@@ -10,10 +10,14 @@ import {
 } from '@/types/agent';
 import { WorkspaceFileInfo } from '../../electron/preload';
 import { agentEngine } from '@/lib/agent/AgentEngine';
+import type { WizardDraft, WizardRunOptions } from '@/lib/wizard/composer';
 import { storageService } from '@/lib/storage/StorageService';
 import { useModelStore } from './modelStore';
 import { useChatStore } from './chatStore';
 import { useSettingsStore } from './settingsStore';
+
+/** Extras of a run started from a wizard (a request typed by hand sends none). */
+export type StartGoalOptions = WizardRunOptions;
 
 interface AgentState {
   workspaceRoot: string | null;
@@ -33,6 +37,8 @@ interface AgentState {
   activeStreamText: string;
   isStreamingResponse: boolean;
   inlineTranscriptOpen: boolean;
+  /** A wizard's request waiting in the composer for the user to send (with its run options). */
+  wizardDraft: WizardDraft | null;
 
   // Pending user approvals
   pendingChangeset: ChangesetItem[];
@@ -61,7 +67,10 @@ interface AgentState {
   setActiveTabId: (id: string) => void;
   closeFile: () => void;
 
-  startGoal: (goal: string) => Promise<void>;
+  startGoal: (goal: string, options?: StartGoalOptions) => Promise<void>;
+  /** Puts a wizard's request into the composer; nothing starts until the user sends it. */
+  setWizardDraft: (draft: Omit<WizardDraft, 'nonce'>) => void;
+  clearWizardDraft: () => void;
   stopGoal: () => void;
   interruptGoal: (directive: string) => void;
   clearSession: () => void;
@@ -110,6 +119,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   activeStreamText: '',
   isStreamingResponse: false,
   inlineTranscriptOpen: false,
+  wizardDraft: null,
 
   toggleReasoningDump: () => set((state) => ({ showReasoningDump: !state.showReasoningDump })),
   toggleInlineTranscript: () => set((state) => ({ inlineTranscriptOpen: !state.inlineTranscriptOpen })),
@@ -296,9 +306,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   closeFile: () => set({ activeFile: null, activeTabId: 'timeline' }),
 
-  startGoal: async (goal: string) => {
+  startGoal: async (goal: string, options: StartGoalOptions = {}) => {
     const trimmed = goal.trim();
     if (!trimmed || !get().workspaceRoot) return;
+    const label = options.displayGoal?.trim() || trimmed;
 
     const selectedModel = useModelStore.getState().selectedModel || 'qwen2.5-coder:7b';
 
@@ -324,27 +335,40 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
 
     if (!activeChat || activeChat.mode !== 'agent') {
-      chatStore.createNewChat(selectedModel, 'agent', trimmed.slice(0, 32));
+      chatStore.createNewChat(selectedModel, 'agent', label.slice(0, 32));
     } else if (!isFollowUp) {
-      chatStore.updateChatTitle(activeChatId!, trimmed.slice(0, 32));
+      chatStore.updateChatTitle(activeChatId!, label.slice(0, 32));
     }
 
     const startTime = Date.now();
+    const initialSteps: AgentStep[] = [
+      {
+        id: `step_init_${startTime}`,
+        timestamp: startTime,
+        type: 'system_notice',
+        content: `Görev Başlatıldı: "${label}" (Model: ${selectedModel})`,
+        status: 'success',
+      },
+    ];
+    if (options.displayGoal) {
+      // The generated request stays visible (collapsed) so the user can see what the agent got.
+      initialSteps.push({
+        id: `step_request_${startTime}`,
+        timestamp: startTime,
+        type: 'system_notice',
+        title: 'Sihirbazın hazırladığı istek',
+        content: trimmed,
+        status: 'success',
+        metadata: { kind: 'generated_request' },
+      });
+    }
     set({
       currentGoal: trimmed,
       subtasks: [],
       agentStatus: 'thinking',
       taskStartTime: startTime,
-      steps: [
-        {
-          id: `step_init_${startTime}`,
-          timestamp: startTime,
-          type: 'system_notice',
-          content: `Görev Başlatıldı: "${trimmed}" (Model: ${selectedModel})`,
-          status: 'success',
-        },
-      ],
-      executionLogs: [`[${new Date().toLocaleTimeString()}] Görev başlatıldı: ${trimmed}`],
+      steps: initialSteps,
+      executionLogs: [`[${new Date().toLocaleTimeString()}] Görev başlatıldı: ${label}`],
     });
     get().persistCurrentSession();
 
@@ -453,9 +477,21 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       },
       securityProfile,
       timeoutMinutes,
-      { previousContext }
+      {
+        previousContext,
+        displayGoal: options.displayGoal,
+        checklist: options.checklist,
+        design: options.design,
+        contracts: options.contracts,
+        seedFiles: options.seedFiles,
+        scriptOutputs: options.scriptOutputs,
+        applyFlag: options.applyFlag,
+      }
     );
   },
+
+  setWizardDraft: (draft) => set({ wizardDraft: { ...draft, nonce: Date.now() + Math.random() } }),
+  clearWizardDraft: () => set({ wizardDraft: null }),
 
   stopGoal: () => {
     agentEngine.stop();
