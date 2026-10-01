@@ -1,6 +1,6 @@
 {
   "name": "emir-code",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "description": "Desktop app for chatting with local Ollama models and running a coding agent in a project folder",
   "main": "dist-electron/main.js",
   "author": {

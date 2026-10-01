@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-10-02
+
 ### Added
 - Isolated commands (Settings › Agent, on by default): programs the agent runs work in the project folder, cannot open your other files and have no network unless "Internet for isolated commands" is on. On Linux every command runs in bubblewrap when it is installed.
 - Full isolation on Windows (Settings › Agent › Full isolation): after a one-time setup with administrator approval, every command, npm and cargo included, runs under a separate hidden Windows account with a restricted token whose network is blocked, also when the Windows firewall is switched off. The setup adds two local accounts, a group, two network filters and a firewall rule; **Remove** deletes them. Connections to this computer itself (localhost) are not blocked.
