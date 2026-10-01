@@ -6,6 +6,7 @@ import { useSettingsStore } from '@/stores/settingsStore';
 import { getTranslations } from '@/lib/localization/i18n';
 import { HardwareOptimizationProfile, DEFAULT_SETTINGS, WebSynthesisStrategy, ModificationStrategy } from '@/types/settings';
 import { defaultContextForHardware } from '@/lib/ollama/ModelRuntime';
+import { IsolationSettings } from './IsolationSettings';
 
 const CONTEXT_LENGTH_OPTIONS = [4096, 8192, 12288, 16384, 24576, 32768, 65536];
 const PROFILES: HardwareOptimizationProfile[] = ['auto', 'low', 'balanced', 'high', 'custom'];
@@ -86,6 +87,8 @@ export const AgentSettings: React.FC = () => {
           ]}
         />
       </SettingsRow>
+
+      <IsolationSettings />
     </div>
   );
 };

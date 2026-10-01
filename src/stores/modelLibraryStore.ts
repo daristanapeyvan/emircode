@@ -5,6 +5,10 @@
  * registry too. None of it waits for a button. Without a connection the built-in short list is used.
  */
 import { create } from 'zustand';
+import { format, getTranslations } from '@/lib/localization/i18n';
+import { useSettingsStore } from './settingsStore';
+
+const libraryTexts = () => getTranslations(useSettingsStore.getState().settings.language).library;
 import {
   CategoryId,
   LibraryModel,
@@ -118,7 +122,7 @@ export const useModelLibraryStore = create<LibraryState>((set, get) => ({
         const api = window.electronAPI?.modelLibrary;
         if (!api) throw new Error('offline');
         const parsed = parseLibraryHtml(await api());
-        if (parsed.length < MIN_LIBRARY_MODELS) throw new Error(`ollama.com listesi okunamadı (${parsed.length} model)`);
+        if (parsed.length < MIN_LIBRARY_MODELS) throw new Error(format(libraryTexts().errorListUnreadable, { count: parsed.length }));
         const now = Date.now();
         writeJson(LIBRARY_KEY, { fetchedAt: now, models: parsed });
         set({ models: parsed, fetchedAt: now, source: 'online', status: 'ready', error: null });
@@ -155,7 +159,7 @@ export const useModelLibraryStore = create<LibraryState>((set, get) => ({
         if (!api) throw new Error('offline');
         const html = await api(model);
         const variants = parseTagsHtml(model, html);
-        if (html && variants.length === 0) throw new Error('ollama.com etiket sayfası okunamadı');
+        if (html && variants.length === 0) throw new Error(libraryTexts().errorTagsUnreadable);
         const now = Date.now();
         const next = { ...cache, [model]: { fetchedAt: now, variants } };
         const keep = Object.entries(next).sort((a, b) => b[1].fetchedAt - a[1].fetchedAt).slice(0, MAX_CACHED_TAGS);
@@ -193,7 +197,7 @@ export const useModelLibraryStore = create<LibraryState>((set, get) => ({
       try {
         const api = window.electronAPI?.modelManifest;
         if (!api) throw new Error('offline');
-        if (!CHECKABLE_RE.test(model)) throw new Error('bu kaynak doğrulanamıyor');
+        if (!CHECKABLE_RE.test(model)) throw new Error(libraryTexts().errorNotCheckable);
         const res = await api(model, tag);
         check =
           res.status === 'found'

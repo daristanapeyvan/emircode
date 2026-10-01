@@ -65,7 +65,7 @@ export class AgentStateMachine {
     if (this.currentState === nextState) return;
 
     if (!this.canTransitionTo(nextState)) {
-      const errorMsg = `[STATE MACHINE İHLALİ]: '${this.currentState}' durumundan '${nextState}' durumuna geçiş YASAKTIR! (Sebep: ${reason || 'Belirtilmedi'})`;
+      const errorMsg = `Illegal state transition: '${this.currentState}' -> '${nextState}' (reason: ${reason || 'none given'})`;
       console.error(errorMsg);
       throw new Error(errorMsg);
     }
@@ -89,9 +89,9 @@ export class AgentStateMachine {
     this.history.push({
       from,
       to: 'PENDING',
-      reason: 'Durum makinesi manuel sıfırlandı.',
+      reason: 'reset',
       timestamp: Date.now(),
     });
-    this.onStateChangeCallback?.(from, 'PENDING', 'Sıfırlandı');
+    this.onStateChangeCallback?.(from, 'PENDING', 'reset');
   }
 }

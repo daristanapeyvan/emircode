@@ -8,7 +8,7 @@ import { getTranslations, resolveLanguage } from '@/lib/localization/i18n';
 import { MINI_APPS, MINI_APP_CATEGORIES, MiniAppDef, ToolCategory, CompiledTool, compileMiniAppPrompt } from '@/lib/wizard/miniApps';
 import { SCRIPTS, SCRIPT_CATEGORIES, ScriptDef, compileScriptPrompt, renamePreview, scriptFileName, scriptLanguage } from '@/lib/wizard/scripts';
 import { Lang, ParamValues, defaultValues, tx } from '@/lib/wizard/params';
-import { DESIGN_CATEGORIES, THEMES, getTheme } from '@/lib/design/themes';
+import { DESIGN_CATEGORIES, THEMES, getTheme, themeName } from '@/lib/design/themes';
 import { Toggle } from '@/components/common/Toggle';
 import { Button } from '@/components/common/Button';
 import { IconButton } from '@/components/common/IconButton';
@@ -320,7 +320,7 @@ const MiniOutput: React.FC<{ app: MiniAppDef; name: string; t: ToolText; lang: L
               label: categoryNames[c.id] || c.label,
               options: THEMES.filter((theme) => theme.category === c.id).map((theme) => ({
                 value: theme.id,
-                label: `${theme.name}${theme.mode === 'dark' ? ` (${t.dark})` : ''}`,
+                label: `${themeName(theme, lang)}${theme.mode === 'dark' ? ` (${t.dark})` : ''}`,
               })),
             })),
           ]}

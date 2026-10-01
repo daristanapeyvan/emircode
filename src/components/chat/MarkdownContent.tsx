@@ -39,29 +39,105 @@ export const MarkdownContent: React.FC<MarkdownContentProps> = ({ content }) => 
   return <div className="space-y-2 leading-relaxed text-sm">{elements}</div>;
 };
 
+// A list item line: "- x", "* x", "+ x", "1. x" or "1) x", with its indentation.
+const LIST_ITEM = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/;
+
+type ListType = 'ul' | 'ol';
+type ItemBlock = { kind: 'text'; key: string; text: string } | { kind: 'list'; list: ListBlock };
+interface ListItem {
+  key: string;
+  text: string;
+  blocks: ItemBlock[];
+}
+interface ListBlock {
+  key: string;
+  type: ListType;
+  /** The number of the first item of a numbered list ("3." after a code block starts at 3). */
+  start: number;
+  indent: number;
+  items: ListItem[];
+}
+
+function indentOf(line: string): number {
+  return line.match(/^\s*/)![0].replace(/\t/g, '    ').length;
+}
+
+function renderList(list: ListBlock, nested: boolean): React.ReactNode {
+  const items = list.items.map((item) => (
+    <li key={item.key}>
+      {renderInline(item.text)}
+      {item.blocks.map((block) =>
+        block.kind === 'text' ? (
+          <div key={block.key} className="mt-1">
+            {renderInline(block.text)}
+          </div>
+        ) : (
+          renderList(block.list, true)
+        )
+      )}
+    </li>
+  ));
+  const spacing = nested ? 'space-y-1 mt-1' : 'space-y-1 my-2 text-zinc-300';
+  return list.type === 'ul' ? (
+    <ul key={list.key} className={`list-disc pl-5 ${spacing}`}>
+      {items}
+    </ul>
+  ) : (
+    <ol key={list.key} start={list.start !== 1 ? list.start : undefined} className={`list-decimal pl-5 ${spacing}`}>
+      {items}
+    </ol>
+  );
+}
+
 function renderTextChunk(chunk: string, keyPrefix: string): React.ReactNode {
   const lines = chunk.split('\n');
   const renderedNodes: React.ReactNode[] = [];
-  let inList: { type: 'ul' | 'ol'; items: React.ReactNode[] } | null = null;
+  let inList: ListBlock | null = null;
   let inTable: string[] | null = null;
 
   const flushList = () => {
     if (inList) {
-      if (inList.type === 'ul') {
-        renderedNodes.push(
-          <ul key={`ul_${renderedNodes.length}`} className="list-disc pl-5 space-y-1 my-2 text-zinc-300">
-            {inList.items}
-          </ul>
-        );
-      } else {
-        renderedNodes.push(
-          <ol key={`ol_${renderedNodes.length}`} className="list-decimal pl-5 space-y-1 my-2 text-zinc-300">
-            {inList.items}
-          </ol>
-        );
-      }
+      renderedNodes.push(renderList(inList, false));
       inList = null;
     }
+  };
+
+  /**
+   * Adds a list item line to the open list. Items indented deeper than the list become a sub-list
+   * of its last item, so "1. Step / - detail / 2. Step" keeps counting 1, 2 instead of starting a
+   * new numbered list after the detail.
+   */
+  const addListItem = (line: string, i: number, marker: string, text: string) => {
+    const type: ListType = /\d/.test(marker) ? 'ol' : 'ul';
+    const indent = indentOf(line);
+    const start = type === 'ol' ? parseInt(marker, 10) : 1;
+    const item: ListItem = { key: `li_${i}`, text, blocks: [] };
+    const list = inList as ListBlock | null;
+    if (list && indent >= list.indent + 2 && list.items.length > 0) {
+      const parent = list.items[list.items.length - 1];
+      const last = parent.blocks[parent.blocks.length - 1];
+      if (last && last.kind === 'list' && last.list.type === type) {
+        last.list.items.push(item);
+      } else {
+        parent.blocks.push({ kind: 'list', list: { key: `sub_${i}`, type, start, indent, items: [item] } });
+      }
+      return;
+    }
+    if (!list || list.type !== type) {
+      flushList();
+      inList = { key: `list_${i}`, type, start, indent, items: [item] };
+      return;
+    }
+    list.items.push(item);
+  };
+
+  /** A blank line inside a list keeps it open when the list goes on after it. */
+  const listContinuesAfter = (i: number): boolean => {
+    for (let j = i + 1; j < lines.length; j++) {
+      if (!lines[j].trim()) continue;
+      return LIST_ITEM.test(lines[j]) || indentOf(lines[j]) >= 2;
+    }
+    return false;
   };
 
   const flushTable = () => {
@@ -124,30 +200,22 @@ function renderTextChunk(chunk: string, keyPrefix: string): React.ReactNode {
       continue;
     }
 
-    // Unordered list
-    const ulMatch = line.match(/^(\s*)[-*]\s+(.+)/);
-    if (ulMatch) {
-      if (!inList || inList.type !== 'ul') {
-        flushList();
-        inList = { type: 'ul', items: [] };
-      }
-      inList.items.push(
-        <li key={`li_${i}`}>{renderInline(ulMatch[2])}</li>
-      );
+    // Lists (bulleted and numbered, with nested items)
+    const itemMatch = line.match(LIST_ITEM);
+    if (itemMatch) {
+      addListItem(line, i, itemMatch[2], itemMatch[3]);
       continue;
     }
 
-    // Ordered list
-    const olMatch = line.match(/^(\s*)\d+\.\s+(.+)/);
-    if (olMatch) {
-      if (!inList || inList.type !== 'ol') {
-        flushList();
-        inList = { type: 'ol', items: [] };
+    if (inList) {
+      const list = inList as ListBlock;
+      // Blank line between items, or before an indented continuation: the list goes on.
+      if (!line.trim() && listContinuesAfter(i)) continue;
+      // Indented text under an item belongs to that item.
+      if (line.trim() && indentOf(line) >= 2 && list.items.length > 0) {
+        list.items[list.items.length - 1].blocks.push({ kind: 'text', key: `lt_${i}`, text: line.trim() });
+        continue;
       }
-      inList.items.push(
-        <li key={`li_${i}`}>{renderInline(olMatch[2])}</li>
-      );
-      continue;
     }
 
     flushList();

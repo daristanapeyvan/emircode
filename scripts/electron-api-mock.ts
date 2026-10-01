@@ -7,6 +7,9 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { checkCommand } from '../electron/commandPolicy';
+import { format } from '../src/lib/localization/i18n';
+import { en } from '../src/lib/localization/translations/en';
 
 export const IGNORED = new Set(['node_modules', '.git', 'dist', 'build', '__pycache__', '.venv']);
 export const sha = (s: string) => crypto.createHash('sha256').update(s, 'utf8').digest('hex');
@@ -113,24 +116,30 @@ export function makeElectronApi(root: string) {
       }
     },
     runApprovedCommand: async ({ binary, args, timeoutMs }: any) => {
-      // Mirrors electron/main.ts workspace:runApprovedCommand policy
-      const allowed = ['npm', 'node', 'cargo', 'pytest', 'python'];
-      if (!allowed.includes(binary)) return { success: false, exitCode: 1, output: '', error: `Güvenlik Politikası: "${binary}" yürütülebilir dosyasına izin verilmiyor.` };
-      if (args.some((a: string) => /[;&|`$<>\r\n]/.test(a))) return { success: false, exitCode: 1, output: '', error: 'Güvenlik Koruması: yasaklı karakter' };
-      if (binary === 'npm') {
-        const sub = (args[0] || '').toLowerCase();
-        if (!['test', 'run'].includes(sub)) return { success: false, exitCode: 1, output: '', error: `Güvenlik Politikası: npm altında sadece test ve tanımlı betikler çalıştırılabilir. Verilen: "${sub}"` };
-        if (!fs.existsSync(path.join(rootAbs, 'package.json'))) return { success: false, exitCode: 1, output: '', error: 'Proje klasöründe "package.json" dosyası mevcut değil. npm komutları çalıştırılamaz.' };
-        if (sub === 'run' && !['test', 'build', 'lint', 'typecheck', 'check'].includes((args[1] || '').toLowerCase())) {
-          return { success: false, exitCode: 1, output: '', error: `Güvenlik Politikası: "npm run ${args[1]}" izin verilen betikler (test, build, lint, typecheck) arasında değil.` };
-        }
+      // The same policy as electron/main.ts workspace:runApprovedCommand
+      const check = checkCommand(binary, args, { hasPackageJson: fs.existsSync(path.join(rootAbs, 'package.json')), platform: process.platform });
+      if (!check.ok) {
+        return {
+          success: false,
+          exitCode: 1,
+          output: '',
+          error: format(en.main[check.key], check.params),
+          code: check.code === 'no_package_json' ? 'no_package_json' : 'policy',
+        };
       }
       const res =
         binary === 'npm'
           ? runNpm(args, rootAbs, timeoutMs || 60000)
           : spawnSync(binary, args, { cwd: rootAbs, encoding: 'utf8', timeout: timeoutMs || 60000, env: { ...process.env, PYTHONIOENCODING: 'utf-8' } });
       const output = `${res.stdout || ''}${res.stderr || ''}`;
-      return { success: res.status === 0, exitCode: res.status, output, error: res.error ? String(res.error.message) : undefined };
+      const spawnFailed = !!res.error && res.status === null;
+      return {
+        success: res.status === 0,
+        exitCode: res.status,
+        output,
+        error: res.error ? String(res.error.message) : undefined,
+        code: res.status === 0 ? undefined : spawnFailed ? 'spawn_failed' : 'exit',
+      };
     },
     webSearch: async () => {
       throw new Error('web disabled in tests');

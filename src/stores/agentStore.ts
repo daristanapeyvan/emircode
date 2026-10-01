@@ -10,7 +10,9 @@ import {
   TaskChecklistItem,
 } from '@/types/agent';
 import { WorkspaceFileInfo, ProjectErrorCode } from '../../electron/preload';
-import { agentEngine } from '@/lib/agent/AgentEngine';
+import { agentEngine, PreviousTask } from '@/lib/agent/AgentEngine';
+import { et } from '@/lib/agent/engineText';
+import { isDefaultTaskTitle } from './chatStore';
 import type { WizardDraft, WizardRunOptions } from '@/lib/wizard/composer';
 import { storageService } from '@/lib/storage/StorageService';
 import { getTranslations } from '@/lib/localization/i18n';
@@ -248,7 +250,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
     // 2. Restore steps, logs, transactions, and goal
     set({
-      currentGoal: chat.agentGoal || (chat.title !== 'Yeni Görev' ? chat.title : ''),
+      currentGoal: chat.agentGoal || (isDefaultTaskTitle(chat.title) ? '' : chat.title),
       subtasks: chat.agentSubtasks || [],
       steps: chat.agentSteps || [],
       executionLogs: chat.executionLogs || [],
@@ -393,17 +395,14 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
     // A follow-up in the same session ("devam", "stilleri de ekle") must know what happened before;
     // previously every message started a blank run and the model had no idea what to continue.
-    let previousContext: string | undefined;
+    let previousTask: PreviousTask | undefined;
     if (isFollowUp) {
-      const prevSteps = get().steps;
-      const finalStep = [...prevSteps].reverse().find((s) => s.type === 'final_answer');
-      const changedFiles = Array.from(new Set(get().appliedTransactions.map((tx) => tx.relativePath)));
-      // Only the facts: failure details of a previous run pulled models back into that detour.
-      previousContext = [
-        `Previous request: ${get().currentGoal}`,
-        `Outcome: ${finalStep ? finalStep.content.slice(0, 800) : 'not finished'}`,
-        `Files changed in this session: ${changedFiles.length > 0 ? changedFiles.join(', ') : 'none'}`,
-      ].join('\n');
+      const finalStep = [...get().steps].reverse().find((s) => s.type === 'final_answer');
+      previousTask = {
+        request: get().currentGoal,
+        finished: finalStep?.status === 'success',
+        changedFiles: Array.from(new Set(get().appliedTransactions.map((tx) => tx.relativePath))),
+      };
     }
 
     if (!activeChat || activeChat.mode !== 'agent') {
@@ -423,7 +422,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         id: `step_init_${startTime}`,
         timestamp: startTime,
         type: 'system_notice',
-        content: `Görev Başlatıldı: "${label}" (Model: ${selectedModel})`,
+        content: et('taskStarted', { label, model: selectedModel }),
         status: 'success',
       },
     ];
@@ -433,7 +432,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         id: `step_request_${startTime}`,
         timestamp: startTime,
         type: 'system_notice',
-        title: 'Sihirbazın hazırladığı istek',
+        title: et('generatedRequestTitle'),
         content: trimmed,
         status: 'success',
         metadata: { kind: 'generated_request' },
@@ -445,7 +444,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       agentStatus: 'thinking',
       taskStartTime: startTime,
       steps: initialSteps,
-      executionLogs: [`[${new Date().toLocaleTimeString()}] Görev başlatıldı: ${label}`],
+      executionLogs: [`[${new Date().toLocaleTimeString()}] ${et('taskStartedLog', { label })}`],
     });
     get().persistCurrentSession();
 
@@ -477,12 +476,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           if (status === 'finished') {
             const start = get().taskStartTime;
             const durationMs = start ? Date.now() - start : 0;
-            // Bildirim sadece çok uzun süren Emir Code oturumlarında gönderilecek (>= 20 saniye)
+            // Only tasks that took a while (20 s or more) end with a system notification.
             if (durationMs >= 20000) {
               const seconds = Math.round(durationMs / 1000);
               window.electronAPI?.notifyUser?.({
-                title: 'Emir Code - Yanıt Tamamlandı',
-                body: `"${get().currentGoal || 'Görev'}" başarıyla tamamlandı (${seconds} sn).`,
+                title: et('notifyFinishedTitle'),
+                body: et('notifyFinishedBody', { goal: get().currentGoal || et('notifyTaskFallback'), seconds }),
                 flash: true,
               });
             }
@@ -514,8 +513,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         onRequestChangesetApproval: (items: ChangesetItem[]) => {
           if (!live()) return Promise.resolve(false);
           window.electronAPI?.notifyUser?.({
-            title: 'Emir Code - Kod Değişikliği Onayı',
-            body: `${items.length} dosya için değişiklik onayı bekleniyor.`,
+            title: et('notifyChangesTitle'),
+            body: et('notifyChangesBody', { count: items.length }),
             flash: true,
           });
           return new Promise<boolean>((resolve) => {
@@ -525,8 +524,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         onRequestDeleteApproval: (item: ChangesetItem) => {
           if (!live()) return Promise.resolve(false);
           window.electronAPI?.notifyUser?.({
-            title: 'Emir Code - Dosya Silme Onayı',
-            body: `"${item.relativePath}" dosyasını silmek için onay bekleniyor.`,
+            title: et('notifyDeleteTitle'),
+            body: et('notifyDeleteBody', { path: item.relativePath }),
             flash: true,
           });
           return new Promise<boolean>((resolve) => {
@@ -536,8 +535,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         onRequestCommandApproval: (item: CommandApprovalItem) => {
           if (!live()) return Promise.resolve(false);
           window.electronAPI?.notifyUser?.({
-            title: 'Emir Code - Komut Onayı',
-            body: `"${item.binary} ${item.args.join(' ')}" komutunu çalıştırmak için onay bekleniyor.`,
+            title: et('notifyCommandTitle'),
+            body: et('notifyCommandBody', { command: `${item.binary} ${item.args.join(' ')}` }),
             flash: true,
           });
           return new Promise<boolean>((resolve) => {
@@ -547,8 +546,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         onRequestClarification: (item: ClarificationItem) => {
           if (!live()) return Promise.resolve('');
           window.electronAPI?.notifyUser?.({
-            title: 'Emir Code - Soru Soruldu',
-            body: item.question || 'Ajan yanıtınızı bekliyor.',
+            title: et('notifyQuestionTitle'),
+            body: item.question || et('notifyQuestionBody'),
             flash: true,
           });
           return new Promise<string>((resolve) => {
@@ -565,7 +564,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       securityProfile,
       timeoutMinutes,
       {
-        previousContext,
+        previousTask,
         displayGoal: options.displayGoal,
         checklist: options.checklist,
         design: options.design,
@@ -830,7 +829,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   // Rollback Handlers
   rollbackTransaction: async (txId: string, force = false) => {
-    if (!window.electronAPI) return { success: false, error: 'API kullanılamıyor' };
+    if (!window.electronAPI) return { success: false, error: et('desktopOnly') };
     const res = await window.electronAPI.rollbackTransaction(txId, force);
     if (res.success) {
       set((state) => ({

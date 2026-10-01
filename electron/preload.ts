@@ -15,6 +15,43 @@ export interface RunCommandResult {
   exitCode: number | null;
   output: string;
   error?: string;
+  /** Why it failed; the error text is in the interface language, so code must not match on it. */
+  code?: 'policy' | 'no_package_json' | 'timeout' | 'spawn_failed' | 'exit' | 'sandbox';
+  /** True when the program ran in the isolated environment. */
+  sandboxed?: boolean;
+}
+
+export interface IsolationSettings {
+  enabled: boolean;
+  network: boolean;
+}
+
+export interface InterpreterIsolation {
+  path?: string;
+  isolated: boolean;
+  reason?: string;
+  reasonText?: string;
+}
+
+export interface SandboxStatus {
+  /** Commands run isolated now (supported and turned on in the settings). */
+  active: boolean;
+  /** The system supports it. */
+  supported: boolean;
+  /** How: 'appcontainer' (Windows), 'bubblewrap' (Linux) or 'none'. */
+  method: 'appcontainer' | 'bubblewrap' | 'none';
+  /** Why it is not active, when it is not (a key and its text in the interface language). */
+  reason?: string;
+  reasonText?: string;
+  /** Windows: whether Python and Node can run isolated on this computer. */
+  python?: InterpreterIsolation;
+  node?: InterpreterIsolation;
+}
+
+export interface CommandIsolationPlan {
+  isolated: boolean;
+  reason?: string;
+  reasonText?: string;
 }
 
 export interface PrerequisiteStatus {
@@ -110,15 +147,25 @@ export interface ElectronAPI {
     binary: string;
     args: string[];
     timeoutMs?: number;
+    /** The user's isolation settings. */
+    isolation?: IsolationSettings;
   }) => Promise<RunCommandResult>;
 
   // Transactional Hash-checked Rollback
   rollbackTransaction: (transactionId: string, force?: boolean) => Promise<{ success: boolean; conflict?: boolean; error?: string }>;
 
   // Emir Code: Zero-Trust Web Access & Search Bridge
-  webSearch: (query: string, options?: { limit?: number; timeoutMs?: number }) => Promise<Array<{ id: string; title: string; url: string; snippet: string; source: string }>>;
-  webFetch: (url: string, options?: { maxBytes?: number; timeoutMs?: number }) => Promise<{ title: string; url: string; content: string; status: number; sizeBytes: number }>;
+  webSearch: (query: string, options?: { limit?: number; timeoutMs?: number; requestId?: string }) => Promise<Array<{ id: string; title: string; url: string; snippet: string; source: string }>>;
+  webFetch: (url: string, options?: { maxBytes?: number; timeoutMs?: number; requestId?: string }) => Promise<{ title: string; url: string; content: string; status: number; sizeBytes: number; truncated?: boolean }>;
   webAbortAll?: () => Promise<boolean>;
+  webAbort?: (requestId: string) => Promise<boolean>;
+  setUiLanguage?: (language: 'tr' | 'en') => void;
+  /** Whether agent commands run in the isolated environment, and why not when they do not. */
+  getSandboxStatus?: (options: IsolationSettings) => Promise<SandboxStatus>;
+  /** Whether this command would run isolated (asked before the approval). */
+  planCommand?: (binary: string, args: string[], options: IsolationSettings) => Promise<CommandIsolationPlan>;
+  /** Windows: lets isolated programs read the Python folder (an administrator prompt). */
+  allowPythonIsolation?: () => Promise<{ ok: boolean; error?: string }>;
 
   // Model library (ollama.com list and tags, registry verification)
   modelLibrary?: () => Promise<string>;
@@ -194,6 +241,11 @@ const electronAPI: ElectronAPI = {
   webSearch: (query, options) => ipcRenderer.invoke('web:search', { query, options }),
   webFetch: (url, options) => ipcRenderer.invoke('web:fetchUrl', { url, options }),
   webAbortAll: () => ipcRenderer.invoke('web:abortAll'),
+  webAbort: (requestId) => ipcRenderer.invoke('web:abort', requestId),
+  setUiLanguage: (language) => ipcRenderer.send('app:setLanguage', language),
+  getSandboxStatus: (options) => ipcRenderer.invoke('sandbox:status', options),
+  planCommand: (binary, args, options) => ipcRenderer.invoke('sandbox:plan', { binary, args, options }),
+  allowPythonIsolation: () => ipcRenderer.invoke('sandbox:allowPython'),
 
   // Model Library Bridge
   modelLibrary: () => ipcRenderer.invoke('models:library'),

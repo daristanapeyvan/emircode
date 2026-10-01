@@ -25,6 +25,14 @@ export interface AgentOptimizationConfig {
 
 export const CONTEXT_LENGTH_AUTO = 0;
 
+/** The isolated environment of the agent's commands (see electron/sandbox.ts). */
+export interface CommandIsolationConfig {
+  /** Run commands isolated where the system allows it. */
+  enabled: boolean;
+  /** Isolated commands may use the internet (local services stay unreachable). */
+  network: boolean;
+}
+
 export interface WebAccessConfig {
   enabled: boolean;
   chatEnabled: boolean;
@@ -66,6 +74,9 @@ export interface AppSettings {
   // Web Access (Zero-Trust, user-configurable internet search & fetch)
   webAccess: WebAccessConfig;
 
+  // Isolated environment of the agent's commands
+  commandIsolation: CommandIsolationConfig;
+
   // Ollama
   ollamaEndpoint: string;
   ollamaTimeoutMs: number;
@@ -94,6 +105,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   showMetadata: true,
   autoGenerateTitles: true,
   streamResponse: true,
+  commandIsolation: { enabled: true, network: false },
   webAccess: {
     enabled: true,
     chatEnabled: true,

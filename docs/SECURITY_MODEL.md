@@ -10,14 +10,17 @@ An agent driven by a local model can be steered by text it reads (files, git out
 
 1. **Instructions hidden in content.** A file, commit message or web page tells the model to read secrets, change files elsewhere or run programs.
 2. **Paths outside the project.** The model asks for `../../`, an absolute path such as `C:\Windows\System32` or `~/.ssh/id_rsa`, or a symbolic link or junction that points outside the project folder.
-3. **Unwanted commands.** The model tries to install packages, run a shell or chain commands.
-4. **Half-written or unwanted changes.** A crash during a write, or a change the user did not want.
+3. **Unwanted commands.** The model tries to install packages, run a shell, chain commands or run code that is in no file.
+4. **Programs that do more than they should.** A program the agent wrote or a test it runs reads other files, uses the network or starts other programs.
+5. **Half-written or unwanted changes.** A crash during a write, or a change the user did not want.
 
 ---
 
 ## Where the boundary is
 
-The Electron main process owns all access to files, programs and the network. The window runs with `contextIsolation: true` and `nodeIntegration: false`; the interface and the agent engine reach the main process only through the functions of `window.electronAPI` (`electron/preload.ts`). Every file, command and web request is checked again in `electron/main.ts`, whatever the agent engine decided before.
+The Electron main process owns all access to files, programs and the network. The window runs with `contextIsolation: true` and `nodeIntegration: false`; the interface and the agent engine reach the main process only through the functions of `window.electronAPI` (`electron/preload.ts`). Every file, command and web request is checked again in the main process, whatever the agent engine decided before.
+
+The window shows only Emir Code's own interface: a link (in a chat answer, for example) opens in the system browser, and the window does not navigate to other pages.
 
 The agent engine's own guards (section "Content guards") protect the project from model mistakes. They are not a security boundary.
 
@@ -33,7 +36,8 @@ On top of that, `evaluateAccessPolicy` refuses:
 - `.env` files (only `.env.example` may be read),
 - anything inside `.git` (git information is available only through the read-only git channel),
 - anything inside `node_modules`, `dist`, `dist-electron`, `release`, `build`, `.next`, `.venv` and `__pycache__`,
-- files ending in `.pem`, `.key`, `.id_rsa`, `.pfx` or `.pkcs12`.
+- files ending in `.pem`, `.key`, `.id_rsa`, `.pfx` or `.pkcs12`,
+- package manager and credential settings: `.npmrc`, `.yarnrc`, `.yarnrc.yml`, `.pypirc`, `.netrc`, `_netrc`, `.git-credentials`, `pip.conf` and `pip.ini`. They can hold access tokens, and an `.npmrc` can make `npm test` run any program through its `script-shell` setting.
 
 Code search skips the same paths.
 
@@ -45,7 +49,7 @@ The agent's file changes use two steps in the main process:
 1. `workspace:requestMutationToken` checks the path and the access rules, compares the file's current SHA-256 hash with the hash the agent read, and returns a random single-use token (32 bytes) bound to the path and the operation (`create`, `edit` or `delete`). The token expires after 5 minutes.
 2. `workspace:applyApprovedMutation` accepts the change only with an unused, unexpired token for the same path and operation, and only if the file has not changed on disk since the token was issued. The token is then marked as used.
 
-This prevents stale writes (the file changed after the agent read it), replays and mix-ups between files. It is not an approval check: approval happens in the interface before the token is requested. If the interface itself were compromised, it could request tokens; the boundary against that is the folder check, the access rules and the command allowlist.
+This prevents stale writes (the file changed after the agent read it), replays and mix-ups between files. It is not an approval check: approval happens in the interface before the token is requested. If the interface itself were compromised, it could request tokens; the boundary against that is the folder check, the access rules and the command rules.
 
 **Writing.** The new content is written to a hidden temporary file next to the target (`.<name>.tmp.<uuid>`) and renamed over it, so an interrupted write does not leave a half-written file. The data is not flushed to disk explicitly, so a power loss right after a write can still lose it.
 
@@ -61,24 +65,55 @@ This prevents stale writes (the file changed after the agent read it), replays a
 | :--- | :---: | :---: | :---: |
 | Create or edit a file | Asks | Applied | Applied |
 | Delete a file | Asks | Asks | Asks |
-| Test commands (`npm test`, `npm run test`, `pytest`, `cargo test`) | Asks | Asks | Runs |
-| Other allowed commands (`node`, `python`, `npm run build`, …) | Asks | Asks | Asks |
+| A command that runs isolated | Asks | Asks | Runs |
+| A test command (`npm test`, `npm run test`, `pytest`, `cargo test`) that runs without isolation | Asks | Asks | Runs only while the task has written no code or command settings; otherwise asks |
+| Any other command that runs without isolation | Asks | Asks | Asks |
 | Questions to the user (`ask_user`) | Shown in the task | Shown in the task | Not offered |
 
-The folder check, the access rules, the token check and the command allowlist apply at every level.
+A test command runs the project's code. Without isolation, a test run after the agent wrote code (or `package.json`, `conftest.py`, `pytest.ini`, `pyproject.toml`, `Cargo.toml`, `build.rs` and similar) would run what the model just wrote, so in that case the user decides.
+
+The approval dialog shows the command, the `package.json` script that `npm` will really run, and whether the command runs isolated (or why it does not). The folder check, the access rules, the token check and the command rules apply at every level.
 
 ---
 
 ## Commands
 
-`workspace:runApprovedCommand` is the only way the agent can start a program:
-- **Allowlist.** `npm` (only `npm test` and `npm run test|build|lint|typecheck|check`, and only if the project has a `package.json`), `node`, `python`, `pytest` and `cargo`. `npx` is refused, also as part of an argument.
+`workspace:runApprovedCommand` is the only way the agent can start a program. The rules live in `electron/commandPolicy.ts`; the agent checks them before it asks for approval, so the user is never asked about a command that would be refused, and the main process checks them again.
+- **Programs.** `npm`, `node`, `python`, `pytest` and `cargo`. `npx` is refused, also as part of an argument.
+- **npm.** Only `npm test` and `npm run test|build|lint|typecheck|check`, and only if the project has a `package.json`. npm's own options (`--script-shell`, `--prefix` and the like) are refused; arguments for the script go after `--`.
+- **Code on the command line.** `node -e`, `node -p` (also combined, such as `-pe`), `--eval`, `--print` and `--import`/`--require`/`--loader` with a `data:` URL are refused, and so is `python -c`. Only the options before the script count; arguments of the script itself are free.
+- **Python modules.** `python -m` is allowed only for `pytest`, `unittest`, `doctest` and `py_compile` (so `python -m pip install` is refused).
+- **cargo.** Only `build`, `check`, `test`, `run`, `fmt`, `clippy`, `bench` and `doc`.
 - **Arguments.** Arguments containing `;`, `&`, `|`, `$`, `<`, `>`, backticks or line breaks are refused.
 - **No shell.** Programs are started directly with an argument list. The exception is `npm` on Windows: it is a `.cmd` script, which Node.js does not start without a shell (CVE-2024-27980), so it runs through `cmd.exe` as one command line after the arguments have also been checked for `"`, `%`, `^`, `!`, `(` and `)`.
 - **Environment.** Only `PATH`, the Windows system variables (`SystemRoot`, `COMSPEC`, `PATHEXT`), temporary folders, `HOME`, `USER`, `SHELL`, the locale and the XDG folders are passed on, plus `NODE_ENV=test` and `PYTHONIOENCODING=utf-8`. Other variables, such as tokens in your environment, are not.
-- **Limits.** A command runs in the project folder, is stopped after 60 seconds together with its child processes, and at most 2 MB of output is read.
+- **Limits.** A command runs in the project folder, is stopped after 60 seconds together with the programs it started, and at most 2 MB of output is read.
 
-**Git** has its own read-only channel that runs only `git status --porcelain=v1`, `git diff` and `git log -n 10 --oneline`. The agent's tools use status and diff.
+These rules decide what may start. What a started program does is limited by the isolated environment (next section) where it is available, and otherwise only by the user's approval: a program that runs without isolation has the same rights as the user.
+
+---
+
+## Isolated environment of commands
+
+Settings › Agent › **Isolated commands** (on by default) runs commands in an isolated environment where the system supports it. A program there sees the project folder (read and write) and the folders of the program itself (read). It does not see the user's other files and has no network unless **Internet for isolated commands** is turned on. With that setting, Windows still keeps local services such as Ollama out of reach; Linux does not (see below). The same settings page shows what this computer supports.
+
+**Windows: AppContainer.** `emir-sandbox.exe` (built from `native/windows/EmirSandbox.cs`, shipped in `resources/sandbox`) starts the program in the AppContainer `EmirCode.Sandbox`:
+- The container gets an access rule on the project folder (modify, inherited by its contents) and a read rule on the program's folder when that folder belongs to the user. These rules stay on the folders.
+- Folders under Program Files and Windows are readable by every AppContainer already. Python installed by an administrator elsewhere (`C:\Python3xx`) is not: Settings › Agent then shows a **Python** row whose **Allow** button gives that folder the read rule that Program Files has for isolated apps, after a Windows administrator prompt. Until then Python commands run without isolation.
+- Without the network setting the container has no network at all; with it, it gets the `internetClient` capability: the internet, but neither the local network nor `localhost`.
+- A job object limits the program and everything it starts to 64 processes and 4 GB of memory, and stops them all when the launcher is stopped (on the 60-second limit or when the task is stopped).
+- **What runs isolated:** `python` and `pytest` (as `python -m pytest`), and `node file.js`. Node cannot start other programs in an AppContainer (it needs named pipes there), so a small guard makes such calls fail at once with a clear message instead of waiting forever.
+- **What runs without isolation:** `npm` and `cargo`, which always start other programs, and Node's test runner (`node --test`, `--watch`, `--run`). The approval dialog says so.
+
+**Linux: bubblewrap.** When `bwrap` is installed and the system allows unprivileged user namespaces, every command runs in it: the whole system is mounted read-only, the home folders are replaced by empty private ones (only the project folder and the folders of language tools such as `.nvm`, `.pyenv`, `.cargo` and `.local/lib` come back, read-only), `/tmp` is private and the network is cut unless allowed. When it is allowed, the program uses this computer's network as it is, including local services such as Ollama on `localhost`. Programs may start other programs inside the isolation. Files outside the home folders that every user can read (for example under `/etc` or on another disk) stay readable.
+
+**Elsewhere** (macOS is not a target of Emir Code), when the tool is missing, or with the setting off, commands run as before, without isolation.
+
+---
+
+## Git
+
+The agent's git channel runs only `git status --porcelain=v1`, `git diff` and `git log -n 10 --oneline`, without approval. A repository's own settings can make git run programs: an `fsmonitor` command, hooks, external diff and textconv drivers, clean and smudge filters, signature checks. For these calls they are switched off (`core.fsmonitor=false`, an empty hooks folder, `--no-ext-diff`, `--no-textconv`, every configured filter emptied, `--no-optional-locks`, submodules ignored), so opening a downloaded project does not turn the agent's git calls into the project's commands.
 
 ---
 
@@ -90,16 +125,18 @@ File contents, code search results, git output, the project snapshot and web res
 
 ## Web access
 
-Web access is on by default. It can be switched off completely, or separately for chat and for the agent, in Settings › Web access. When it is off for the agent, the web tools are not offered to the model, and both `ToolDispatcher` and `AgentEngine` refuse a web call that appears anyway. Switching it off aborts requests that are still running.
+Web access is on by default. It can be switched off completely, or separately for chat and for the agent, in Settings › Web access. When it is off for the agent, the web tools are not offered to the model, and both `ToolDispatcher` and `AgentEngine` refuse a web call that appears anyway. Switching any of these off stops the requests that are still running; stopping a task or a chat answer stops its own requests.
 
-All web requests are made by the main process (`web:search`, `web:fetchUrl`, `web:abortAll`):
-- Only `http` and `https` addresses are allowed.
-- Refused host names: `localhost`, `*.localhost`, `*.local`, `*.internal`, `0.0.0.0`.
-- The host name is resolved to all its addresses, and the request is refused if any of them is private or reserved: IPv4 `0.0.0.0/8`, `10.0.0.0/8`, `100.64.0.0/10`, `127.0.0.0/8`, `169.254.0.0/16`, `172.16.0.0/12`, `192.168.0.0/16`, `224.0.0.0` and above; IPv6 `::`, `::1`, addresses starting with `fc`, `fd` or `fe80:`, and IPv4-mapped addresses of the ranges above.
+The chat searches before answering only when the question clearly needs current information (weather, prices, news, people and places, or an explicit request to search); a programming question is answered from the model, unless the user asks for a search. After a search the chat reads the first result page that has text, so the answer does not rest on short snippets alone.
+
+All web requests are made by the main process (`electron/web.ts`):
+- Only `http` and `https` addresses without a user name or password are allowed.
+- Refused host names: `localhost`, `*.localhost`, `*.local`, `*.internal`, `*.home.arpa`, `*.lan`.
+- Refused addresses: IPv4 `0.0.0.0/8`, `10.0.0.0/8`, `100.64.0.0/10`, `127.0.0.0/8`, `169.254.0.0/16`, `172.16.0.0/12`, `192.0.0.0/24`, `192.168.0.0/16`, `198.18.0.0/15`, `224.0.0.0` and above; IPv6 `::`, `::1`, `fc00::/7`, `fe80::/10`, `ff00::/8`, `2001:db8::/32`, and IPv4-mapped, IPv4-compatible, NAT64 and 6to4 addresses of the IPv4 ranges above.
+- The address check runs when the connection is made: every address the name resolves to must be public, and the connection uses one of exactly those addresses. A name cannot pass the check and then resolve to a private address for the request.
 - Redirects are followed manually, at most 3, and every target is checked the same way.
-- A page fetch stops after 10 seconds and reads at most 512 KB. Searches go to DuckDuckGo Lite; each result's address is checked before it is used.
-
-The request itself resolves the host name again. A DNS server that answers with a public address during the check and a private one for the request is therefore not caught.
+- A request stops after 10 seconds. The answer is read as a stream (and decompressed) and cut at the size limit (512 KB by default, 256 KB for the agent and the chat, never more than 2 MB); nothing larger is held in memory. Only text answers are read (HTML, plain text, XML, JSON).
+- Searches go to DuckDuckGo Lite; results with local addresses are dropped. If the search page cannot be read (its layout changed, or it shows a check for bots), the search fails with that message instead of reporting no results.
 
 The Model Manager's requests use separate functions (`models:library`, `models:tags`, `models:manifest`) that build fixed URLs on ollama.com and registry.ollama.ai from validated model names and reject responses that end on another host.
 
@@ -109,10 +146,10 @@ The Model Manager's requests use separate functions (`models:library`, `models:t
 
 Chromium's renderer sandbox needs either a root-owned SUID `chrome-sandbox` helper or unprivileged user namespaces. AppImage and `.tar.gz` copies cannot have the SUID helper, and Ubuntu 23.10 and later restrict user namespaces with AppArmor, so there the plain Electron binary exits at startup. The `emir-code` launcher (generated by `scripts/afterPack.js`) keeps the sandbox where it works and adds `--no-sandbox` only where it cannot start. Set `EMIR_CODE_FORCE_SANDBOX=1` to turn the fallback off, or install the `.deb` or `.rpm` package, which sets up the SUID helper.
 
-Without the sandbox, the file, command and network rules above still apply, because they are enforced in the main process. The main window loads only Emir Code's bundled interface. The app has no handler that sends links to the system browser, so a link in a chat answer opens in a new Electron window, and with the fallback that window also runs without the sandbox.
+Without the renderer sandbox, the file, command and network rules above still apply, because they are enforced in the main process. The window loads only Emir Code's bundled interface, and links open in the system browser. On such systems bubblewrap usually cannot start either, so commands run without isolation; Settings › Agent shows it.
 
 ---
 
 ## Content guards
 
-Before a file is written, the agent engine refuses content that would damage the project: empty files, placeholders instead of code ("rest of the code…"), status sentences written over a file, changes to existing tests the user did not ask for, edits that break a working file or make a broken one worse, invalid JSON over a valid config file, rewrites that would drop most of a file or existing `package.json` keys, and re-applying an edit that was already applied. After every write, per-language checks report problems back to the model with line numbers. These guards are about quality, not security.
+Before a file is written, the agent engine refuses content that would damage the project: empty files, placeholders instead of code ("rest of the code…"), status sentences written over a file, changes to existing tests the user did not ask for, edits that break a working file or make a broken one worse, invalid JSON over a valid config file, rewrites that would drop most of a file or existing `package.json` keys, and re-applying an edit that was already applied. The same change refused again for the same fault makes the agent show the model the file's current lines and a different way to make the change, and counts toward the loop limit. After every write, per-language checks report problems back to the model with line numbers. These guards are about quality, not security.

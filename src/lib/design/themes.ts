@@ -5,6 +5,8 @@
  * depth, button style, texture and icon stroke), not a color swap. Text pairs meet WCAG AAA
  * (7:1) — test_design_theme.ts verifies every pair listed in THEME_CONTRAST_PAIRS.
  */
+import { en } from '../localization/translations/en';
+import { tr } from '../localization/translations/tr';
 
 export type DesignCategory =
   | 'kurumsal'
@@ -609,8 +611,22 @@ export function themesInCategory(category: DesignCategory): ThemeDefinition[] {
   return THEMES.filter((t) => t.category === category);
 }
 
-export function categoryLabel(category: DesignCategory): string {
-  return DESIGN_CATEGORIES.find((c) => c.id === category)?.label || category;
+/** The interface languages; theme texts live in the translation files under `design`. */
+export type DesignLanguage = 'tr' | 'en';
+const designTexts = (language: DesignLanguage) => (language === 'en' ? en.design : tr.design);
+
+export function categoryLabel(category: DesignCategory, language: DesignLanguage = 'tr'): string {
+  return designTexts(language).categories[category] || DESIGN_CATEGORIES.find((c) => c.id === category)?.label || category;
+}
+
+/** A theme's name in the interface language. */
+export function themeName(theme: ThemeDefinition, language: DesignLanguage = 'tr'): string {
+  return designTexts(language).themes[theme.id]?.name || theme.name;
+}
+
+/** A theme's one-line description in the interface language. */
+export function themeMood(theme: ThemeDefinition, language: DesignLanguage = 'tr'): string {
+  return designTexts(language).themes[theme.id]?.mood || theme.mood;
 }
 
 /**

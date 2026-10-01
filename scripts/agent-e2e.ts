@@ -13,7 +13,8 @@
  *   e.g. node scripts/run-ts-test.mjs scripts/agent-e2e.ts qwen2.5-coder:7b web-new,web-followup,js-bugfix
  * Scenarios: web-new, web-followup, repair-corrupted, js-bugfix, python-cli, json-config,
  *            nav-links, six-products (both replay requests from the in-app reports),
- *            wizard-site, wizard-mini, wizard-script (requests and run options of the wizards)
+ *            wizard-site, wizard-mini, wizard-script (requests and run options of the wizards),
+ *            center-header, center-header-followup (replay two in-app reports on the same page)
  */
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -25,7 +26,7 @@ import { DEFAULT_SETTINGS } from '../src/types/settings';
 import { checkFileSanity } from '../src/lib/agent/FileSanity';
 import { looksJsonEscaped, extractLocalScripts, extractLocalStylesheets } from '../src/lib/agent/TaskValidator';
 import { makeElectronApi, runNpm, IGNORED } from './electron-api-mock';
-import type { RunGoalOptions } from '../src/lib/agent/AgentEngine';
+import type { RunGoalOptions, PreviousTask } from '../src/lib/agent/AgentEngine';
 import { compileSitePrompt, createWizardData } from '../src/lib/wizard/siteWizard';
 import { compileMiniAppPrompt, getMiniApp, CompiledTool } from '../src/lib/wizard/miniApps';
 import { compileScriptPrompt, getScript } from '../src/lib/wizard/scripts';
@@ -151,6 +152,8 @@ interface Scenario {
   options?: RunGoalOptions;
   seed?: (dir: string) => void;
   dependsOn?: string;
+  /** An earlier task of the same session (replays a follow-up without running it). */
+  previousTask?: PreviousTask;
   verify: (dir: string) => { ok: boolean; notes: string[] };
 }
 
@@ -163,6 +166,43 @@ const wizardOptions = (c: { displayGoal: string; checklist: string[]; design: an
   scriptOutputs: c.scriptOutputs,
   applyFlag: c.applyFlag,
 });
+
+/**
+ * A cafe page as the app left it after earlier runs (header: title, menu button and links in one
+ * flex row). Two in-app reports asked to center the title and put the links under it: one made the
+ * same breaking edit six times, the other resumed the previous task (the gallery) instead.
+ */
+const CAFE_PAGE = fs.readFileSync(path.resolve('test_fixtures/pages/cafe-header.html'), 'utf8');
+const CAFE_GALLERY = CAFE_PAGE.match(/<section id="galeri"[\s\S]*?<\/section>/)![0];
+/** The previous task of the second report. */
+const CAFE_PREVIOUS_TASK: PreviousTask = {
+  request: 'Galeri bölümüne 1.jpg, 2.jpg ve 3.jpg fotoğraflarını ekle ve yorumlar bölümünü grid düzenine getir',
+  finished: true,
+  changedFiles: ['index.html'],
+};
+
+/**
+ * The header is centered when a rule for the header, its title or its links gained a centering
+ * declaration; the gallery must be untouched (the task did not ask for it).
+ */
+function verifyCenteredHeader(dir: string) {
+  const page = fs.readFileSync(path.join(dir, 'index.html'), 'utf8');
+  const css = [...page.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)].map((m) => m[1]).join('\n');
+  const inlineHeader = page.match(/<div class="navbar"[\s\S]*?<\/nav>/)?.[0] || '';
+  const centering = /text-align\s*:\s*center|justify-content\s*:\s*center|flex-direction\s*:\s*column|margin\s*:\s*0\s+auto|align-items\s*:\s*center|place-items\s*:\s*center/i;
+  const headerRules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(([, selector]) => /navbar|centered|menu-bottom|\bh1\b|\bnav\b|header/i.test(selector));
+  const originalCss = [...CAFE_PAGE.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)].map((m) => m[1]).join('\n');
+  const newCentering = headerRules.some(([rule, , body]) => centering.test(body) && !originalCss.includes(rule.trim()));
+  const inlineCentering = centering.test(inlineHeader.match(/style="([^"]*)"/g)?.join(' ') || '');
+  const galleryKept = page.includes(CAFE_GALLERY);
+  const sections = ['giris', 'hakkimizda', 'menu', 'galeri', 'yorumlar'].filter((id) => page.includes(`id="${id}"`)).length;
+  const titleFirst = page.indexOf('Kahve Durağı</h1>') > -1 && page.indexOf('Kahve Durağı</h1>') < page.indexOf('href="#hakkimizda"');
+  const sanity = sanityErrorsIn(dir);
+  return {
+    ok: (newCentering || inlineCentering) && galleryKept && sections === 5 && titleFirst && sanity.length === 0,
+    notes: [`centering=${newCentering || inlineCentering} galleryKept=${galleryKept} sections=${sections}/5 titleBeforeLinks=${titleFirst}`, ...sanity],
+  };
+}
 
 const SITE_REQUEST = compileSitePrompt({
   ...createWizardData('simple'),
@@ -436,6 +476,25 @@ const SCENARIOS: Scenario[] = [
     },
   },
   {
+    // In-app report: the same breaking CSS edit was sent six times in a row.
+    id: 'center-header',
+    goal: 'h1 kahve durağı başlığı ortalanacak, hamburger menü başlığın aşağı kısmında duracak',
+    seed: (dir) => {
+      fs.writeFileSync(path.join(dir, 'index.html'), CAFE_PAGE, 'utf8');
+    },
+    verify: verifyCenteredHeader,
+  },
+  {
+    // In-app report: the follow-up resumed the previous task (the gallery) instead of the new one.
+    id: 'center-header-followup',
+    goal: 'kahve durağı yazısı ortalanacak ve navigasyon linkleri ortalanmış yazının altına gelecek',
+    previousTask: CAFE_PREVIOUS_TASK,
+    seed: (dir) => {
+      fs.writeFileSync(path.join(dir, 'index.html'), CAFE_PAGE, 'utf8');
+    },
+    verify: verifyCenteredHeader,
+  },
+  {
     id: 'wizard-site',
     goal: SITE_REQUEST.prompt,
     options: wizardOptions(SITE_REQUEST),
@@ -469,7 +528,7 @@ const SCENARIOS: Scenario[] = [
 ];
 
 // ---------------------------------------------------------------------------
-async function runScenario(s: Scenario, previousContext?: string, reuseDir?: string) {
+async function runScenario(s: Scenario, previousTask?: PreviousTask, reuseDir?: string) {
   const dir = reuseDir || path.join(outDir, `${model.replace(/[:/]/g, '_')}__${s.id}`);
   if (!reuseDir) {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -513,7 +572,7 @@ async function runScenario(s: Scenario, previousContext?: string, reuseDir?: str
     },
     'autonomous',
     60,
-    { previousContext, ...(s.options || {}) }
+    { previousTask, ...(s.options || {}) }
   );
 
   const secs = Math.round((Date.now() - started) / 1000);
@@ -531,7 +590,11 @@ async function runScenario(s: Scenario, previousContext?: string, reuseDir?: str
   };
   fs.writeFileSync(path.join(dir, '_agent_log.txt'), log.join('\n'), 'utf8');
   console.log(`\n=== RESULT ${model} ${s.id}: status=${finalStatus} verified=${verdict.ok} time=${secs}s steps=${modelSteps}\n${verdict.notes.map((n) => '    ' + n).join('\n')}\n`);
-  return { result, dir, previousContext: `Previous request: ${s.goal}\nOutcome: ${finalText.slice(0, 1200) || finalStatus}\nFiles changed in this session: ${steps.filter((x) => x.type === 'tool_result' && x.status === 'success' && /"([^"]+)"/.test(x.content)).map((x) => x.content.match(/"([^"]+)"/)[1]).filter((v, i, a) => a.indexOf(v) === i).join(', ')}` };
+  const changedFiles = steps
+    .filter((x) => x.type === 'tool_result' && x.status === 'success' && /"([^"]+)"/.test(x.content))
+    .map((x) => x.content.match(/"([^"]+)"/)[1])
+    .filter((v: string, i: number, a: string[]) => a.indexOf(v) === i);
+  return { result, dir, previousTask: { request: s.goal, finished: finalStatus === 'finished', changedFiles } as PreviousTask };
 }
 
 async function main() {
@@ -549,11 +612,11 @@ async function main() {
 
   const ids = (scenarioArg || 'web-new').split(',');
   const results: any[] = [];
-  const contexts: Record<string, { dir: string; previousContext: string }> = {};
+  const contexts: Record<string, { dir: string; previousTask: PreviousTask }> = {};
   for (const id of ids) {
     const s = SCENARIOS.find((x) => x.id === id);
     if (!s) throw new Error(`unknown scenario ${id}`);
-    let prev: { dir: string; previousContext: string } | undefined;
+    let prev: { dir: string; previousTask: PreviousTask } | undefined;
     if (s.dependsOn) {
       prev = contexts[s.dependsOn];
       if (!prev) {
@@ -562,8 +625,8 @@ async function main() {
       }
     }
     console.log(`\n######## ${model} :: ${id} ########`);
-    const out = await runScenario(s, prev?.previousContext, prev?.dir);
-    contexts[id] = { dir: out.dir, previousContext: out.previousContext };
+    const out = await runScenario(s, s.previousTask ?? prev?.previousTask, prev?.dir);
+    contexts[id] = { dir: out.dir, previousTask: out.previousTask };
     results.push(out.result);
     fs.writeFileSync(path.join(outDir, `results_${model.replace(/[:/]/g, '_')}.json`), JSON.stringify(results, null, 2));
   }

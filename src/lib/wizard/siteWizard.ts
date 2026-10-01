@@ -7,7 +7,7 @@
  * the interactive features and a short quality bar. Multi-page sites get one checklist item per
  * page; the chosen design theme is passed to the run directly (no topic question to the model).
  */
-import { DesignCategory, DESIGN_CATEGORIES, getTheme, categoryLabel } from '../design/themes';
+import { DesignCategory, DESIGN_CATEGORIES, getTheme, categoryLabel, themeName } from '../design/themes';
 import { categorizeByKeywords } from '../design/categorize';
 import type { DesignOverride } from '../design/DesignTheme';
 import { markdownToHtml, markdownTextLength } from './markdown';
@@ -626,10 +626,11 @@ export function compileSitePrompt(data: SiteWizardData, opts: { year?: number } 
   }
   if (!data.siteName.trim()) warnings.push(L('Site adı boş.', 'The site name is empty.'));
 
-  const themeName = design.enabled ? (design.themeId ? getTheme(design.themeId)?.name : L('konuya göre', 'by topic')) : L('yok', 'none');
+  const chosenTheme = design.enabled && design.themeId ? getTheme(design.themeId) : undefined;
+  const themeLabel = design.enabled ? (chosenTheme ? themeName(chosenTheme, en ? 'en' : 'tr') : L('konuya göre', 'by topic')) : L('yok', 'none');
   const displayGoal = L(
-    `Website Oluştur: "${name}" — ${pages.length} sayfa, ${sectionCount} bölüm · ${categoryLabel(category)} · tema: ${themeName}`,
-    `Create website: "${name}" — ${pages.length} page(s), ${sectionCount} sections · ${categoryLabel(category)} · theme: ${themeName}`
+    `Website Oluştur: "${name}" — ${pages.length} sayfa, ${sectionCount} bölüm · ${categoryLabel(category, 'tr')} · tema: ${themeLabel}`,
+    `Create website: "${name}" — ${pages.length} page(s), ${sectionCount} sections · ${categoryLabel(category, 'en')} · theme: ${themeLabel}`
   );
 
   return {

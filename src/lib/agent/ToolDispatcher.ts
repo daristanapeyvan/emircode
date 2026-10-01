@@ -247,7 +247,7 @@ export class ToolDispatcher {
         type: 'unknown',
         payload: null,
         rawJson: null,
-        error: 'Model yanıtındaki JSON eylemi ayrıştırılamadı (geçersiz JSON).',
+        error: 'the JSON action in the reply could not be parsed (invalid JSON)',
       };
     }
 
@@ -283,7 +283,7 @@ export class ToolDispatcher {
           payload: {
             path: cleanedPath,
             content: code,
-            reason: 'Coder modeli doğrudan kod bloğu aktarımı (Doğrulanmış hedef dosya)',
+            reason: '',
           },
           rawJson: { action: 'propose_create', path: cleanedPath, content: code },
         };
@@ -293,7 +293,7 @@ export class ToolDispatcher {
         payload: null,
         rawJson: null,
         error:
-          'Ham kod bloğu algılandı ancak hedef dosya yolu belirlenemedi. Güvenlik gereği tahmin yapılmadı. Lütfen dosya yolunu açıkça belirtin (ör. `// filepath: src/index.html`).',
+          'a code block without a target file (the path is not guessed); name the file, for example `// filepath: src/index.html`',
       };
     }
 
@@ -312,7 +312,7 @@ export class ToolDispatcher {
         payload: {
           path: cleanedPath,
           content: code,
-          reason: 'Doğrudan HTML belgesi aktarımı',
+          reason: '',
         },
         rawJson: { action: 'propose_create', path: cleanedPath, content: code },
       };
@@ -322,7 +322,7 @@ export class ToolDispatcher {
       type: 'unknown',
       payload: null,
       rawJson: null,
-      error: 'Model yanıtında geçerli bir JSON eylemi bulunamadı.',
+      error: 'no valid JSON action in the reply',
     };
   }
 
@@ -383,7 +383,7 @@ export class ToolDispatcher {
             path: resolvePath(['path', 'file', 'file_path', 'filename']),
             content: String(pickString(jsonContent, ['content', 'code', 'text', 'body']) ?? ''),
             hasContent: pickString(jsonContent, ['content', 'code', 'text', 'body']) !== undefined,
-            reason: String(pickString(jsonContent, ['reason', 'thought']) || 'Yeni dosya oluşturma'),
+            reason: String(pickString(jsonContent, ['reason', 'thought']) || ''),
           },
           rawJson: jsonContent,
         };
@@ -401,7 +401,7 @@ export class ToolDispatcher {
               new_chunk: String(replacement ?? ''),
               hasReplace: replacement !== undefined,
               lineRange: true,
-              reason: String(pickString(jsonContent, ['reason', 'thought']) || 'Satır aralığı güncellemesi'),
+              reason: String(pickString(jsonContent, ['reason', 'thought']) || ''),
             },
             rawJson: jsonContent,
           };
@@ -419,7 +419,7 @@ export class ToolDispatcher {
             hasReplace:
               pickString(jsonContent, ['replace', 'new_chunk', 'new', 'new_str', 'new_text', 'replacement']) !==
               undefined,
-            reason: String(pickString(jsonContent, ['reason', 'thought']) || 'Kod güncellemesi'),
+            reason: String(pickString(jsonContent, ['reason', 'thought']) || ''),
           },
           rawJson: jsonContent,
         };
@@ -429,7 +429,7 @@ export class ToolDispatcher {
           type,
           payload: {
             path: resolvePath(['path', 'file', 'file_path', 'filename']),
-            reason: String(pickString(jsonContent, ['reason', 'thought']) || 'Dosya silme'),
+            reason: String(pickString(jsonContent, ['reason', 'thought']) || ''),
           },
           rawJson: jsonContent,
         };
@@ -448,7 +448,7 @@ export class ToolDispatcher {
           payload: {
             binary,
             args,
-            reason: String(pickString(jsonContent, ['reason', 'thought']) || 'Test veya derleme çalıştırma'),
+            reason: String(pickString(jsonContent, ['reason', 'thought']) || ''),
           },
           rawJson: jsonContent,
         };
@@ -483,7 +483,7 @@ export class ToolDispatcher {
           type,
           payload: {
             summary: String(
-              pickString(jsonContent, ['summary', 'answer', 'message', 'result', 'response']) || 'Görev tamamlandı.'
+              pickString(jsonContent, ['summary', 'answer', 'message', 'result', 'response']) || ''
             ),
           },
           rawJson: jsonContent,
@@ -494,7 +494,7 @@ export class ToolDispatcher {
           type: 'unknown',
           payload: jsonContent,
           rawJson: jsonContent,
-          error: `Bilinmeyen eylem tipi: ${action || '(boş)'}`,
+          error: `unknown action type: ${action || '(empty)'}`,
         };
     }
   }

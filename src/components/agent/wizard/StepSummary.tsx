@@ -3,7 +3,7 @@ import { AlertTriangle } from 'lucide-react';
 import { useSiteWizardStore } from '@/stores/siteWizardStore';
 import { useAgentStore } from '@/stores/agentStore';
 import { compileSitePrompt, pageFiles, FEATURE_KEYS } from '@/lib/wizard/siteWizard';
-import { getTheme } from '@/lib/design/themes';
+import { getTheme, themeName } from '@/lib/design/themes';
 import { compactPath } from '@/lib/utils/projects';
 import { WorkspaceFileInfo } from '../../../../electron/preload';
 import { StepHeader, SettingRow, fill } from './wizardUi';
@@ -62,7 +62,7 @@ export const StepSummary: React.FC<{ w: WizardText; lang: 'tr' | 'en' }> = ({ w,
                   <i key={i} className="block w-2.5 h-4" style={{ backgroundColor: c }} />
                 ))}
               </span>
-              {theme.name} <span className="text-zinc-500">· {theme.fonts.heading.family} / {theme.fonts.body.family}</span>
+              {themeName(theme, lang)} <span className="text-zinc-500">· {theme.fonts.heading.family} / {theme.fonts.body.family}</span>
             </p>
           ) : (
             <p>

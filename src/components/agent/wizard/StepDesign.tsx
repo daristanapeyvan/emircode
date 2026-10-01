@@ -2,7 +2,8 @@ import React, { useEffect, useMemo } from 'react';
 import { Sparkles, Ban, Check } from 'lucide-react';
 import { useSiteWizardStore } from '@/stores/siteWizardStore';
 import { useSettingsStore } from '@/stores/settingsStore';
-import { THEMES, ThemeDefinition, themesInCategory } from '@/lib/design/themes';
+import { THEMES, ThemeDefinition, themesInCategory, themeName, themeMood } from '@/lib/design/themes';
+import { resolveLanguage } from '@/lib/localization/i18n';
 import { googleFontsUrlFor } from '@/lib/design/themeCss';
 import { resolveCategory } from '@/lib/wizard/siteWizard';
 import { StepHeader, Segmented } from './wizardUi';
@@ -87,6 +88,7 @@ const ThemeMiniature: React.FC<{ theme: ThemeDefinition; name: string; heading: 
 export const StepDesign: React.FC<{ w: WizardText }> = ({ w }) => {
   const { data, update } = useSiteWizardStore();
   const webFonts = useSettingsStore((s) => s.settings.designTheme?.webFonts ?? true);
+  const lang = resolveLanguage(useSettingsStore((s) => s.settings.language));
   usePreviewFonts(webFonts);
 
   const category = resolveCategory(data);
@@ -110,14 +112,14 @@ export const StepDesign: React.FC<{ w: WizardText }> = ({ w }) => {
       >
         <ThemeMiniature theme={theme} name={siteName} heading={w.previewHeading} />
         <div className="mt-2 flex items-center justify-between gap-2">
-          <span className="text-[13px] font-medium text-zinc-100 truncate">{theme.name}</span>
+          <span className="text-[13px] font-medium text-zinc-100 truncate">{themeName(theme, lang)}</span>
           <span className="flex items-center gap-1 shrink-0">
             {isRecommended && <span className="text-[11px] text-zinc-500">{w.recommended}</span>}
             {theme.mode === 'dark' && <span className="text-[11px] text-zinc-500">{w.darkBadge}</span>}
             {selected && <Check size={13} className="text-zinc-100" />}
           </span>
         </div>
-        <p className="text-[11px] text-zinc-500 mt-0.5 leading-snug line-clamp-2">{theme.mood}</p>
+        <p className="text-[11px] text-zinc-500 mt-0.5 leading-snug line-clamp-2">{themeMood(theme, lang)}</p>
       </button>
     );
   };
@@ -142,7 +144,7 @@ export const StepDesign: React.FC<{ w: WizardText }> = ({ w }) => {
           {value === 'auto' && (
             <span className="flex gap-1 mt-2">
               {recommended.map((t) => (
-                <span key={t.id} className="flex rounded overflow-hidden border border-zinc-700" title={t.name}>
+                <span key={t.id} className="flex rounded overflow-hidden border border-zinc-700" title={themeName(t, lang)}>
                   {[t.colors.bg, t.colors.inverse, t.colors.accent].map((col, i) => (
                     <i key={i} className="block w-3 h-3" style={{ backgroundColor: col }} />
                   ))}

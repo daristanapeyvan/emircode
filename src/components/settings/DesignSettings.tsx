@@ -3,14 +3,15 @@ import { Select } from '@/components/common/Select';
 import { SettingsRow } from './SettingsRow';
 import { Toggle } from '@/components/common/Toggle';
 import { useSettingsStore } from '@/stores/settingsStore';
-import { getTranslations } from '@/lib/localization/i18n';
+import { getTranslations, resolveLanguage } from '@/lib/localization/i18n';
 import { DEFAULT_SETTINGS, DesignThemeMode, DesignBaseCssMode } from '@/types/settings';
-import { THEMES, DESIGN_CATEGORIES, getTheme } from '@/lib/design/themes';
+import { THEMES, DESIGN_CATEGORIES, getTheme, categoryLabel, themeName, themeMood } from '@/lib/design/themes';
 
 /** The theme applied to web pages the agent creates. */
 export const DesignSettings: React.FC = () => {
   const { settings, setDesignTheme } = useSettingsStore();
   const t = getTranslations(settings.language);
+  const lang = resolveLanguage(settings.language);
   const design = settings.designTheme || DEFAULT_SETTINGS.designTheme;
   const fixedTheme = getTheme(design.fixedThemeId) || THEMES[0];
 
@@ -31,7 +32,7 @@ export const DesignSettings: React.FC = () => {
       </SettingsRow>
 
       {design.mode === 'fixed' && (
-        <SettingsRow label={t.settings.designFixedTheme} description={`${fixedTheme.fonts.heading.family || '—'} / ${fixedTheme.fonts.body.family || '—'} · ${fixedTheme.mood}`}>
+        <SettingsRow label={t.settings.designFixedTheme} description={`${fixedTheme.fonts.heading.family || '—'} / ${fixedTheme.fonts.body.family || '—'} · ${themeMood(fixedTheme, lang)}`}>
           <span className="flex mr-2 rounded-sm overflow-hidden border border-zinc-700" aria-hidden="true">
             {[fixedTheme.colors.bg, fixedTheme.colors.surface2, fixedTheme.colors.inverse, fixedTheme.colors.accent, fixedTheme.colors.accent2].map((color, i) => (
               <i key={i} className="block w-2.5 h-4" style={{ backgroundColor: color }} />
@@ -42,10 +43,10 @@ export const DesignSettings: React.FC = () => {
             value={fixedTheme.id}
             onChange={(v) => setDesignTheme({ fixedThemeId: v })}
             options={DESIGN_CATEGORIES.map((cat) => ({
-              label: cat.label,
+              label: categoryLabel(cat.id, lang),
               options: THEMES.filter((th) => th.category === cat.id).map((th) => ({
                 value: th.id,
-                label: `${th.name}${th.mode === 'dark' ? t.settings.designDarkSuffix : ''}`,
+                label: `${themeName(th, lang)}${th.mode === 'dark' ? t.settings.designDarkSuffix : ''}`,
               })),
             }))}
           />

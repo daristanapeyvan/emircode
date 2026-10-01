@@ -18,15 +18,16 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build && electron-builder --win && node ./scripts/postbuild.js",
-    "build:installer": "tsc && vite build && electron-builder --win && node ./scripts/postbuild.js",
+    "build": "tsc && vite build && node ./scripts/build-sandbox.cjs && electron-builder --win && node ./scripts/postbuild.js",
+    "build:installer": "tsc && vite build && node ./scripts/build-sandbox.cjs && electron-builder --win && node ./scripts/postbuild.js",
     "build:linux": "tsc && vite build && electron-builder --linux && node ./scripts/postbuild.js",
     "build:linux:installer": "tsc && vite build && electron-builder --linux deb AppImage tar.gz && node ./scripts/postbuild.js",
-    "build:all": "tsc && vite build && electron-builder -wl && node ./scripts/postbuild.js",
-    "build:dir": "tsc && vite build && electron-builder --dir && node ./scripts/postbuild.js",
+    "build:all": "tsc && vite build && node ./scripts/build-sandbox.cjs && electron-builder -wl && node ./scripts/postbuild.js",
+    "build:dir": "tsc && vite build && node ./scripts/build-sandbox.cjs && electron-builder --dir && node ./scripts/postbuild.js",
     "build:vite": "tsc && vite build",
     "preview": "vite preview",
-    "test": "node ./scripts/verify_functionality.js && node ./scripts/run-ts-test.mjs test_agent_reliability.ts && node ./scripts/run-ts-test.mjs test_agent_engine.ts && node ./scripts/run-ts-test.mjs test_production_architecture.ts && node ./scripts/run-ts-test.mjs test_web_access.ts && node ./scripts/run-ts-test.mjs test_design_theme.ts && node ./scripts/run-ts-test.mjs test_site_wizard.ts && node ./scripts/run-ts-test.mjs test_tool_wizard.ts && node ./scripts/run-ts-test.mjs test_model_library.ts && node ./scripts/run-ts-test.mjs test_projects.ts",
+    "test": "node ./scripts/verify_functionality.js && node ./scripts/run-ts-test.mjs test_agent_reliability.ts && node ./scripts/run-ts-test.mjs test_agent_engine.ts && node ./scripts/run-ts-test.mjs test_production_architecture.ts && node ./scripts/run-ts-test.mjs test_web_access.ts && node ./scripts/run-ts-test.mjs test_design_theme.ts && node ./scripts/run-ts-test.mjs test_site_wizard.ts && node ./scripts/run-ts-test.mjs test_tool_wizard.ts && node ./scripts/run-ts-test.mjs test_model_library.ts && node ./scripts/run-ts-test.mjs test_projects.ts && node ./scripts/run-ts-test.mjs test_markdown.ts && node ./scripts/run-ts-test.mjs test_security.ts",
+    "test:sandbox": "node ./scripts/build-sandbox.cjs && node ./scripts/run-ts-test.mjs test_sandbox.ts",
     "test:agent": "node ./scripts/run-ts-test.mjs test_agent_reliability.ts && node ./scripts/run-ts-test.mjs test_agent_engine.ts",
     "check:library": "node ./scripts/run-ts-test.mjs scripts/check-model-library.ts"
   },
@@ -76,6 +77,13 @@
       ],
       "executableName": "EmirCode",
       "icon": "build/icon.ico",
+      "extraResources": [
+        {
+          "from": "native/windows/bin",
+          "to": "sandbox",
+          "filter": ["emir-sandbox.exe", "node-guard.cjs"]
+        }
+      ],
       "signAndEditExecutable": false
     },
     "nsis": {

@@ -24,6 +24,10 @@ import { AgentStateMachine, AgentState } from './AgentStateMachine';
 import { TaskCompiler, TaskContract, findHtmlTarget, mentionedMenuTexts } from './TaskContract';
 import { TaskValidator, ValidationReport, looksJsonEscaped, extractMenuLinks, MenuLink } from './TaskValidator';
 import { WebAccessService } from '../web/WebAccessService';
+import { checkCommand } from '../../../electron/commandPolicy';
+import { format, getTranslations, resolveLanguage } from '../localization/i18n';
+import { renderCheck } from './checkTexts';
+import { en } from '../localization/translations/en';
 import { useSettingsStore } from '@/stores/settingsStore';
 import {
   getModelRuntimeInfo,
@@ -45,7 +49,7 @@ import {
 } from '../design/DesignTheme';
 import { buildCategoryPrompt, parseCategoryAnswer, CATEGORY_SCHEMA } from '../design/categorize';
 import { THEME_FILE, isThemeAsset } from '../design/themeCss';
-import { DesignCategory, categoryLabel, getTheme } from '../design/themes';
+import { DesignCategory, categoryLabel, getTheme, themeName, themeMood } from '../design/themes';
 import {
   AgentToolset,
   buildAgentSystemPrompt,
@@ -71,715 +75,79 @@ import {
   damageFromChange,
 } from './FileSanity';
 
-export interface AgentEngineCallbacks {
-  onStep: (step: AgentStep) => void;
-  onStatusChange: (status: AgentStatus) => void;
-  onLog: (msg: string) => void;
-  onStreamChunk?: (chunk: string, fullResponseSoFar: string) => void;
-  onRequestChangesetApproval: (items: ChangesetItem[]) => Promise<boolean>;
-  onRequestDeleteApproval: (item: ChangesetItem) => Promise<boolean>;
-  onRequestCommandApproval: (item: CommandApprovalItem) => Promise<boolean>;
-  onRequestClarification: (item: ClarificationItem) => Promise<string>;
-  onTransactionApplied?: (tx: AppliedTransaction) => void;
-  onSubtasksUpdated?: (subtasks: TaskChecklistItem[]) => void;
-}
+import {
+  findClosestPath,
+  ACTION_WORD,
+  REFERS_BACK,
+  CONTINUES_PREVIOUS,
+  continuesPreviousTask,
+  decomposeGoalIntoSubtasks,
+  isSmallLanguageModel,
+  toolsetFrom,
+  buildCompactSystemPrompt,
+  buildSystemPrompt,
+  formatLedgerBlock,
+  compressConversationContext,
+  findBestMatchRegion,
+  countOccurrences,
+  spliceReplace,
+  applyChunkEdit,
+  stripLineNumberPrefixes,
+  numberedLines,
+  applyLineRangeEdit,
+  alignReplacementIndent,
+  changedRegionExcerpt,
+  copiedLinesAdded,
+  hashText,
+  formatKb,
+  isSafePath,
+  GOAL_REQUIRES_CHANGES,
+  REMOVAL_INTENT,
+  REWRITE_INTENT,
+  EMPTY_FILE_OK,
+  EMPTY_FILE_INTENT,
+  isEmptyWrite,
+  TEST_FILE,
+  TEST_CHANGE_INTENT,
+  RUNS_WITH_COMMANDS,
+  runsWithCommands,
+  isProtectedTestFile,
+  STATUS_WORDS,
+  looksLikeStatusMessage,
+  looksLikeUsageText,
+  findErrorLocation,
+  hostPlatform,
+} from './engineHelpers';
+import type {
+  AgentEngineCallbacks,
+  PreviousTask,
+  RunGoalOptions,
+  LedgerExtras,
+  ConversationEntry,
+  DoneInfo,
+  StreamOutcome,
+} from './engineHelpers';
 
-export interface RunGoalOptions {
-  /** Summary of the previous task in the same session, so follow-ups ("devam", "stil ekle") keep context. */
-  previousContext?: string;
-  /** Short title shown instead of a long generated request (site wizard). */
-  displayGoal?: string;
-  /**
-   * An explicit checklist (site wizard: one item per page). Given = used as is, the request is not
-   * split; fewer than two items = one task.
-   */
-  checklist?: string[];
-  /** The user's design theme choice for this run (site wizard). */
-  design?: DesignOverride;
-  /**
-   * false = no automatic web page checks. Script requests mention HTML or "sayfa" (an HTML report,
-   * a page number) without being a web page, and a web contract would demand an index.html.
-   */
-  contracts?: boolean;
-  /**
-   * Files the app writes before the model's first step when they do not exist yet (script wizard:
-   * the tested starting code). They reach the model as current file contents, so it edits one
-   * function instead of copying a long skeleton — a 7B model spent its whole first reply copying
-   * 166 lines and left the function empty. Strict profile: the user approves them like any change.
-   */
-  seedFiles?: Array<{ path: string; content: string }>;
-  /**
-   * Files only the generated program may create (script wizard: its action log and backup
-   * folders; "name*" = any path part starting with name). A 7B model told to check that the log
-   * exists wrote the log by hand; writing these is refused and the model is sent back to the script.
-   */
-  scriptOutputs?: string[];
-  /**
-   * The flag that makes the generated script change files (script wizard: --uygula / --apply). The same
-   * command with it is not run twice without a file change in between: a 7B model applied its rename
-   * script to the sample folder five times, renaming the renamed files on every run.
-   */
-  applyFlag?: string;
-}
+import { et } from './engineText';
+export * from './engineHelpers';
+import { handleFinish } from './run/finishTool';
+import { handleListDir, handleReadFile, handleSearchCode, handleGit } from './run/readTools';
+import { handleWebSearch, handleFetchUrl } from './run/webTools';
+import { handleWriteFile } from './run/writeTool';
+import { handleEditFile } from './run/editTool';
+import { handleDeleteFile } from './run/deleteTool';
+import { handleRunCommand } from './run/commandTool';
+import { handleAskUser } from './run/askTool';
+import type { RunContext } from './run/context';
 
-export function findClosestPath(requestedPath: string, projectFiles: string[]): string | null {
-  if (!projectFiles || projectFiles.length === 0) return null;
-  const cleanReq = requestedPath.replace(/\\/g, '/').trim().toLowerCase();
-  const baseReq = cleanReq.split('/').pop() || '';
-  const nameWithoutExt = baseReq.replace(/\.[^/.]+$/, '');
-
-  // 1. Exact relative path match (case-insensitive)
-  for (const file of projectFiles) {
-    const cleanFile = file.replace(/\\/g, '/').toLowerCase();
-    if (cleanFile === cleanReq) return file;
-  }
-
-  // 2. Exact basename match (e.g. "App.tsx" matches "src/App.tsx")
-  for (const file of projectFiles) {
-    const cleanFile = file.replace(/\\/g, '/').toLowerCase();
-    const baseFile = cleanFile.split('/').pop() || '';
-    if (baseFile === baseReq) return file;
-  }
-
-  // 3. Basename without extension match (e.g. "App.js" matches "src/App.tsx")
-  for (const file of projectFiles) {
-    const cleanFile = file.replace(/\\/g, '/').toLowerCase();
-    const baseFile = cleanFile.split('/').pop() || '';
-    const fileWithoutExt = baseFile.replace(/\.[^/.]+$/, '');
-    if (fileWithoutExt === nameWithoutExt) return file;
-  }
-
-  // 4. Substring match (e.g. "AgentEngine" matches "src/lib/agent/AgentEngine.ts")
-  if (nameWithoutExt.length >= 3) {
-    for (const file of projectFiles) {
-      const cleanFile = file.replace(/\\/g, '/').toLowerCase();
-      if (cleanFile.includes(nameWithoutExt)) {
-        return file;
-      }
-    }
-  }
-
-  return null;
-}
-
-/** A clause that asks for something (Turkish or English verb, or a requirement such as "olsun"). */
-const ACTION_WORD = new RegExp(
-  '(?:^|[\\s,(\'"])(?:' +
-    'ekle|yaz|oluştur|güncelle|düzelt|sil|kaldır|çalıştır|yap|derle|kur|gönder|taşı|değiştir|ayarla|tasarla|hazırla|' +
-    'üret|incele|kontrol\\s+et|test\\s+et|bağla|çevir|dönüştür|göster|gizle|getir|kullan|uygula|koy|ayır|birleştir|' +
-    'sırala|listele|hesapla|doğrula|yönlendir|olsun|olmalı|olacak|olmasın|commit|push|' +
-    'add|create|make|build|fix|write|update|change|remove|delete|implement|get|set|move|link|style|test|run|' +
-    'ensure|use|show|hide|replace|rename|refactor|convert|display|include|should|must|need' +
-    ')',
-  'i'
-);
-/** A clause that only makes sense together with the previous one ("Get these working"). */
-const REFERS_BACK = /^(?:ve\s+|and\s+)?(?:these|those|them|it|this|that|bunlar|bunları|bunu|bunun|onlar|onları|onu|şunları|şunu|hepsi|hepsini|tümünü)\b/i;
-
-/**
- * Splits a request into a checklist only where the user clearly listed separate items: numbered
- * or bulleted lines, or clauses joined by sequencing words ("…, sonra …", "then"). Sentences,
- * commas, semicolons and line breaks alone never split a request — "Home About Services
- * Contact\n\nGet these working." is ONE task about those menu items. A split that would leave a
- * fragment without an action or a clause that points back ("these", "bunları") is not made.
- */
-export function decomposeGoalIntoSubtasks(goal: string): TaskChecklistItem[] {
-  const trimmed = goal.trim();
-  if (!trimmed) return [];
-  const single = (): TaskChecklistItem[] => [{ id: 'task_1', description: trimmed, status: 'in_progress' }];
-
-  const clean = (text: string) => text.replace(/^[,;.:\s]+|[,;.\s]+$/g, '').trim();
-  let items: string[] = [];
-  let explicitList = false;
-
-  const numbered = trimmed.split(/\n(?=\s*\d+[.)]\s+)/);
-  const bulleted = trimmed.split(/\n(?=\s*[-*•]\s+)/);
-  if (numbered.filter((p) => /^\s*\d+[.)]\s+/.test(p)).length >= 2) {
-    // "Şunları yap:\n1. …\n2. …" — the lead-in line stays context, the numbered lines are the items
-    items = numbered.filter((p) => /^\s*\d+[.)]\s+/.test(p)).map((p) => clean(p.replace(/^\s*\d+[.)]\s+/, '')));
-    explicitList = true;
-  } else if (bulleted.filter((p) => /^\s*[-*•]\s+/.test(p)).length >= 2) {
-    items = bulleted.filter((p) => /^\s*[-*•]\s+/.test(p)).map((p) => clean(p.replace(/^\s*[-*•]\s+/, '')));
-    explicitList = true;
-  } else if (/^(?:[^\n]*:\s*)?1[.)]\s+\S/.test(trimmed) && /\s2[.)]\s+\S/.test(trimmed)) {
-    // One-line list: "1) footer ekle 2) başlıkları mavi yap"
-    items = trimmed
-      .split(/\s(?=\d+[.)]\s+\S)/)
-      .filter((p) => /^\d+[.)]\s+/.test(p))
-      .map((p) => clean(p.replace(/^\d+[.)]\s+/, '')));
-    explicitList = true;
-  } else {
-    // Only explicit sequencing words split running text; parentheses are never split.
-    const masked = trimmed.replace(/\([^()]*\)/g, (m) => m.replace(/[,.]/g, (c) => (c === ',' ? '\u0001' : '\u0002')));
-    // A comma or sentence end is required before "sonra": "5 saniye sonra kapansın" is one clause.
-    const marked = masked
-      .replace(/,\s*(?:ve\s+)?(?:daha\s+sonra|ardından|sonrasında|en\s+son(?:unda)?|son\s+olarak|sonra|and\s+then|then|after\s+that|finally)\s+/gi, '\u0000')
-      .replace(/\s+(?:ve\s+(?:daha\s+sonra|sonra|en\s+son(?:unda)?|son\s+olarak)|and\s+then|and\s+finally)\s+/gi, '\u0000')
-      .replace(/[.!]\s+(?=(?:daha\s+sonra|ardından|sonrasında|en\s+son(?:unda)?|son\s+olarak|sonra|then|after\s+that|afterwards|finally)[\s,])/gi, '\u0000');
-    items = marked
-      .split('\u0000')
-      .map((s) =>
-        clean(
-          s
-            .replace(/\u0001/g, ',')
-            .replace(/\u0002/g, '.')
-            .replace(/^(?:daha\s+sonra|ardından|sonrasında|en\s+son(?:unda)?|son\s+olarak|sonra|then|after\s+that|afterwards|finally),?\s+/i, '')
-        )
-      );
-  }
-  items = items.filter((s) => s.length >= 2);
-
-  // A clause that points back belongs to the previous one.
-  const merged: string[] = [];
-  for (const item of items) {
-    if (merged.length > 0 && REFERS_BACK.test(item)) merged[merged.length - 1] += `. ${item}`;
-    else merged.push(item);
-  }
-  if (merged.length < 2) return single();
-  // Split running text only when every part is an instruction of its own.
-  if (!explicitList && !merged.every((item) => ACTION_WORD.test(item))) return single();
-
-  return merged.map((description, idx) => ({
-    id: `task_${idx + 1}`,
-    description,
-    status: idx === 0 ? 'in_progress' : 'pending',
-  }));
-}
-
-/**
- * Small models (<= ~4.5B parameters) get the leanest prompt and tool set.
- * The size is read from the tag (":1.5b", ":2b", ":30b-a3b" ...); the old substring checks
- * flagged 12b / 32b / 72b models ("2b") and every "coder" model as small.
- */
-export function isSmallLanguageModel(modelName: string): boolean {
-  if (!modelName) return false;
-  const size = parameterSizeFromName(modelName);
-  if (size !== null) return size <= 4.5;
-  return /tinyllama|smollm|phi3:mini|phi-3-mini|qwen2\.5:0\.5b/i.test(modelName);
-}
-
-function toolsetFrom(
-  gitAvailable: boolean,
-  securityProfile: SecurityProfile,
-  webAccessOrCapabilities: boolean | AgentCapabilities,
-  checklist = false
-): AgentToolset {
-  const web =
-    typeof webAccessOrCapabilities === 'object'
-      ? !!(webAccessOrCapabilities.webSearch || webAccessOrCapabilities.webFetch)
-      : !!webAccessOrCapabilities;
-  const git =
-    typeof webAccessOrCapabilities === 'object' && webAccessOrCapabilities.git !== undefined
-      ? !!webAccessOrCapabilities.git
-      : gitAvailable;
-  return { web, git, ask: securityProfile !== 'autonomous', commands: true, checklist };
-}
-
-/** Compact variant for small models (fewer tools, same rules). */
-export function buildCompactSystemPrompt(
-  gitAvailable: boolean,
-  securityProfile: SecurityProfile = 'strict',
-  webAccessOrCapabilities: boolean | AgentCapabilities = false,
-  webSynthesisStrategy: WebSynthesisStrategy = 'auto',
-  modificationStrategy: ModificationStrategy = 'smart_injection'
-): string {
-  return buildAgentSystemPrompt({
-    securityProfile,
-    toolset: toolsetFrom(gitAvailable, securityProfile, webAccessOrCapabilities),
-    webSynthesisStrategy,
-    modificationStrategy,
-    compact: true,
-  });
-}
-
-export function buildSystemPrompt(
-  gitAvailable: boolean,
-  securityProfile: SecurityProfile = 'strict',
-  webAccessOrCapabilities: boolean | AgentCapabilities = false,
-  webSynthesisStrategy: WebSynthesisStrategy = 'auto',
-  modificationStrategy: ModificationStrategy = 'smart_injection'
-): string {
-  return buildAgentSystemPrompt({
-    securityProfile,
-    toolset: toolsetFrom(gitAvailable, securityProfile, webAccessOrCapabilities),
-    webSynthesisStrategy,
-    modificationStrategy,
-    compact: false,
-  });
-}
-
-export interface LedgerExtras {
-  step?: number;
-  maxSteps?: number;
-  acceptance?: { passed: number; total: number } | null;
-}
-
-/**
- * OTURUM HAFIZA DEFTERİ (session memory ledger).
- * A short state line appended to each tool result instead of a large block inside the system
- * prompt: the system prompt stays byte-identical between steps, so Ollama can reuse its KV cache.
- */
-export function formatLedgerBlock(ledger: AgentMemoryLedger, extras: LedgerExtras = {}): string {
-  const parts: string[] = [];
-  if (extras.step) parts.push(`step ${extras.step}/${extras.maxSteps ?? '?'}`);
-
-  const changed = Array.from(
-    new Set(ledger.appliedChanges.map((c) => c.match(/"([^"]+)"/)?.[1]).filter(Boolean) as string[])
-  );
-  parts.push(changed.length > 0 ? `changed files: ${changed.slice(-8).join(', ')}` : 'no files changed yet');
-
-  if (ledger.subtasks && ledger.subtasks.length > 1) {
-    const done = ledger.subtasks.filter((t) => t.status === 'completed').length;
-    const current = ledger.subtasks.find((t) => t.status !== 'completed');
-    parts.push(
-      `checklist ${done}/${ledger.subtasks.length} done${current ? ` (next: #${ledger.subtasks.indexOf(current) + 1})` : ''}`
-    );
-  }
-  if (extras.acceptance && extras.acceptance.total > 0) {
-    parts.push(`acceptance checks ${extras.acceptance.passed}/${extras.acceptance.total} passing`);
-  }
-  if (ledger.userDecisions.length > 0) {
-    const last = ledger.userDecisions[ledger.userDecisions.length - 1];
-    parts.push(`last user decision: "${last.answer.slice(0, 80)}"`);
-  }
-  if (ledger.unavailableBinaries.length > 0) {
-    parts.push(`unavailable commands: ${ledger.unavailableBinaries.join(', ')}`);
-  }
-  if (ledger.invalidPaths.length > 0) {
-    parts.push(`missing paths: ${ledger.invalidPaths.slice(-5).join(', ')}`);
-  }
-  return `[STATE] ${parts.join(' · ')}`;
-}
-
-export interface ConversationEntry extends OllamaChatMessage {
-  meta?: {
-    kind: 'task' | 'action' | 'observation' | 'steer';
-    step?: number;
-    /** Replacement text used when the entry is compacted to save context. */
-    summary?: string;
-    compacted?: boolean;
-    raw?: any;
-  };
-}
-
-/**
- * Shrinks old tool results / big file bodies once the prompt exceeds the context budget.
- * Only entries older than the last `maxRecentVerbatim` exchanges are touched, and compaction
- * happens in one batch, so the prompt prefix stays stable (KV-cache friendly) for many steps.
- */
-export function compressConversationContext<T extends OllamaChatMessage>(
-  messages: T[],
-  maxRecentVerbatim: number = 4
-): T[] {
-  const protectFrom = Math.max(1, messages.length - maxRecentVerbatim * 2);
-  return messages.map((msg, index) => {
-    if (index === 0 || index >= protectFrom) return msg;
-    const entry = msg as unknown as ConversationEntry;
-    if (entry.meta?.compacted) return msg;
-    if (typeof msg.content !== 'string' || msg.content.length <= 600) return msg;
-
-    if (msg.role === 'assistant') {
-      const compacted = entry.meta?.raw ? summarizeActionForHistory(entry.meta.raw) : msg.content.slice(0, 400);
-      return { ...msg, content: compacted, meta: { ...(entry.meta || { kind: 'action' }), compacted: true } } as T;
-    }
-    const summary =
-      entry.meta?.summary ||
-      `${msg.content.slice(0, 240)}\n[... older result shortened to save context ...]`;
-    return { ...msg, content: summary, meta: { ...(entry.meta || { kind: 'observation' }), compacted: true } } as T;
-  });
-}
-
-/** Locates the region of `content` that most resembles `find` (used to explain failed edits). */
-export function findBestMatchRegion(
-  content: string,
-  find: string
-): { startLine: number; endLine: number; text: string } | null {
-  const lines = content.replace(/\r\n/g, '\n').split('\n');
-  const findLines = find
-    .replace(/\r\n/g, '\n')
-    .split('\n')
-    .map((l) => l.trim())
-    .filter(Boolean);
-  if (findLines.length === 0 || lines.length === 0) return null;
-
-  const window = Math.min(findLines.length, 30);
-  const findSet = new Set(findLines);
-  let bestIndex = -1;
-  let bestScore = 0;
-  for (let i = 0; i < lines.length; i++) {
-    let score = 0;
-    for (let j = 0; j < window && i + j < lines.length; j++) {
-      const t = lines[i + j].trim();
-      if (t && findSet.has(t)) score++;
-    }
-    if (score > bestScore) {
-      bestScore = score;
-      bestIndex = i;
-    }
-  }
-  if (bestIndex === -1) {
-    const probe = findLines[0].slice(0, 24);
-    bestIndex = lines.findIndex((l) => probe.length >= 6 && l.includes(probe));
-    if (bestIndex === -1) return null;
-  }
-  const start = Math.max(0, bestIndex - 2);
-  const end = Math.min(lines.length, bestIndex + window + 2);
-  return { startLine: start + 1, endLine: end, text: lines.slice(start, end).join('\n') };
-}
-
-function countOccurrences(haystack: string, needle: string): number {
-  if (!needle) return 0;
-  let count = 0;
-  let idx = haystack.indexOf(needle);
-  while (idx !== -1) {
-    count++;
-    idx = haystack.indexOf(needle, idx + needle.length);
-  }
-  return count;
-}
-
-/** Index-based splice: String.replace would interpret "$&", "$$", "$'" inside code. */
-function spliceReplace(haystack: string, needle: string, replacement: string): string {
-  const idx = haystack.indexOf(needle);
-  if (idx === -1) return haystack;
-  return haystack.slice(0, idx) + replacement + haystack.slice(idx + needle.length);
-}
-
-export function applyChunkEdit(
-  currentContent: string,
-  originalChunk: string,
-  newChunk: string
-): { success: boolean; newContent: string; method: string; error?: string } {
-  if (!currentContent) {
-    return { success: true, newContent: newChunk, method: 'empty_current' };
-  }
-  if (!originalChunk) {
-    return { success: false, newContent: currentContent, method: 'no_find', error: '"find" is empty' };
-  }
-
-  const hasCRLF = currentContent.includes('\r\n');
-  const toFileEol = (text: string) => (hasCRLF ? text.replace(/\r?\n/g, '\r\n') : text);
-  const normCurrent = currentContent.replace(/\r\n/g, '\n');
-  const normOriginal = originalChunk.replace(/\r\n/g, '\n');
-  const normNew = (newChunk ?? '').replace(/\r\n/g, '\n');
-
-  // Tier 1-2: exact match (after line-ending normalization); must be unique
-  const exactCount = countOccurrences(normCurrent, normOriginal);
-  if (exactCount === 1) {
-    return {
-      success: true,
-      newContent: toFileEol(spliceReplace(normCurrent, normOriginal, normNew)),
-      method: hasCRLF ? 'crlf_normalized' : 'exact_verbatim',
-    };
-  }
-  if (exactCount > 1) {
-    return {
-      success: false,
-      newContent: currentContent,
-      method: 'ambiguous',
-      error: `the "find" text occurs ${exactCount} times; include more surrounding lines so it is unique`,
-    };
-  }
-
-  // Tier 3: trimmed match (extra blank lines / spaces around the snippet)
-  const trimmedOrig = normOriginal.trim();
-  if (trimmedOrig && countOccurrences(normCurrent, trimmedOrig) === 1) {
-    return {
-      success: true,
-      newContent: toFileEol(spliceReplace(normCurrent, trimmedOrig, normNew.trim())),
-      method: 'trimmed_match',
-    };
-  }
-
-  // Tier 4: line-by-line match ignoring indentation and blank lines
-  const curLines = normCurrent.split('\n');
-  const origLines = normOriginal
-    .split('\n')
-    .map((l) => l.trim())
-    .filter(Boolean);
-  if (origLines.length > 0) {
-    const matches: Array<{ start: number; end: number }> = [];
-    for (let i = 0; i < curLines.length; i++) {
-      if (curLines[i].trim() !== origLines[0]) continue;
-      let j = i;
-      let k = 0;
-      while (j < curLines.length && k < origLines.length) {
-        const t = curLines[j].trim();
-        if (!t) {
-          j++;
-          continue;
-        }
-        if (t !== origLines[k]) break;
-        j++;
-        k++;
-      }
-      if (k === origLines.length) matches.push({ start: i, end: j });
-    }
-    if (matches.length === 1) {
-      const { start, end } = matches[0];
-      const baseIndent = curLines[start].match(/^\s*/)?.[0] || '';
-      let newLines = normNew.split('\n');
-      const firstNonEmpty = newLines.find((l) => l.trim().length > 0) || '';
-      const newIndent = firstNonEmpty.match(/^\s*/)?.[0] || '';
-      if (!newIndent && baseIndent) {
-        newLines = newLines.map((l) => (l.trim() ? baseIndent + l : l));
-      }
-      const replaced = [...curLines.slice(0, start), ...newLines, ...curLines.slice(end)].join('\n');
-      return { success: true, newContent: toFileEol(replaced), method: 'line_by_line_trimmed' };
-    }
-    if (matches.length > 1) {
-      return {
-        success: false,
-        newContent: currentContent,
-        method: 'ambiguous',
-        error: `the "find" text matches ${matches.length} places; include more surrounding lines so it is unique`,
-      };
-    }
-  }
-
-  // Tier 5: the replacement is a complete HTML document -> full rewrite
-  if (/<!doctype\s+html/i.test(normNew) && /<\/html>/i.test(normNew) && /<html[\s>]/i.test(normCurrent)) {
-    return { success: true, newContent: toFileEol(normNew), method: 'full_document_replacement' };
-  }
-
-  // Tier 6: a complete <style> / <script> block that should be added to an HTML page
-  if (/^\s*<style[\s>][\s\S]*<\/style>\s*$/i.test(normNew)) {
-    const idx = normCurrent.toLowerCase().lastIndexOf('</head>');
-    if (idx !== -1) {
-      const replaced = normCurrent.slice(0, idx) + normNew.trim() + '\n' + normCurrent.slice(idx);
-      return { success: true, newContent: toFileEol(replaced), method: 'smart_head_injection' };
-    }
-  }
-  if (/^\s*<script[\s>][\s\S]*<\/script>\s*$/i.test(normNew)) {
-    const idx = normCurrent.toLowerCase().lastIndexOf('</body>');
-    if (idx !== -1) {
-      const replaced = normCurrent.slice(0, idx) + normNew.trim() + '\n' + normCurrent.slice(idx);
-      return { success: true, newContent: toFileEol(replaced), method: 'smart_body_injection' };
-    }
-  }
-
-  return {
-    success: false,
-    newContent: currentContent,
-    method: 'not_found',
-    error: 'the "find" text was not found in the file',
-  };
-}
-
-/** Removes "  53| " prefixes when a model copied them from a numbered excerpt (all lines must have one). */
-export function stripLineNumberPrefixes(text: string): string {
-  const lines = (text ?? '').split('\n');
-  const nonEmpty = lines.filter((l) => l.trim());
-  if (nonEmpty.length === 0 || !nonEmpty.every((l) => /^\s*\d+\s?\|\s?/.test(l))) return text;
-  return lines.map((l) => l.replace(/^\s*\d+\s?\|\s?/, '')).join('\n');
-}
-
-/** Numbered view of a line range, for edit hints that point at line numbers. */
-export function numberedLines(content: string, start = 1, end = Number.MAX_SAFE_INTEGER): string {
-  const lines = content.replace(/\r\n/g, '\n').split('\n');
-  const from = Math.max(1, start);
-  const to = Math.min(lines.length, end);
-  const out: string[] = [];
-  for (let n = from; n <= to; n++) out.push(`${String(n).padStart(4)}| ${lines[n - 1]}`);
-  return out.join('\n');
-}
-
-/** replace_lines: replaces lines [startLine, endLine] (1-based, inclusive), keeping the file's line endings. */
-export function applyLineRangeEdit(
-  currentContent: string,
-  startLine: number,
-  endLine: number,
-  newText: string
-): { success: boolean; newContent: string; method: string; error?: string } {
-  const hasCRLF = currentContent.includes('\r\n');
-  const lines = currentContent.replace(/\r\n/g, '\n').split('\n');
-  const realCount = currentContent.endsWith('\n') ? lines.length - 1 : lines.length;
-  if (startLine < 1 || startLine > realCount + 1) {
-    return {
-      success: false,
-      newContent: currentContent,
-      method: 'line_range',
-      error: `start_line ${startLine} is outside the file (it has ${realCount} lines)`,
-    };
-  }
-  const end = Math.min(Math.max(endLine, startLine), realCount);
-  const replacement = stripLineNumberPrefixes((newText ?? '').replace(/\r\n/g, '\n')).replace(/\n$/, '');
-  const replacementLines = replacement === '' ? [] : replacement.split('\n');
-  let text = [...lines.slice(0, startLine - 1), ...replacementLines, ...lines.slice(end)].join('\n');
-  if (hasCRLF) text = text.replace(/\n/g, '\r\n');
-  return { success: true, newContent: text, method: `lines ${startLine}-${end}` };
-}
-
-/**
- * The replace_lines block shifted so its first line has the indentation of the first line it replaces,
- * or null when it already has it or cannot be shifted as a whole. In the app, qwen2.5-coder:7b sent
- * "    def add_options(parser):" for a top-level function, then re-sent the same edit three times.
- */
-export function alignReplacementIndent(content: string, startLine: number, endLine: number, replacement: string): string | null {
-  const original = content.replace(/\r\n/g, '\n').split('\n').slice(startLine - 1, endLine).find((l) => l.trim());
-  const lines = stripLineNumberPrefixes((replacement ?? '').replace(/\r\n/g, '\n')).split('\n');
-  const first = lines.find((l) => l.trim());
-  if (original === undefined || first === undefined) return null;
-  const target = original.match(/^[ \t]*/)![0];
-  const current = first.match(/^[ \t]*/)![0];
-  if (current === target) return null;
-  if (current.length > target.length) {
-    const cut = current.length - target.length;
-    if (!lines.every((l) => !l.trim() || /^[ \t]*$/.test(l.slice(0, cut)))) return null;
-    return lines.map((l) => (l.trim() ? l.slice(cut) : l)).join('\n');
-  }
-  const add = target.startsWith(current) ? target.slice(current.length) : ' '.repeat(target.length - current.length);
-  return lines.map((l) => (l.trim() ? add + l : l)).join('\n');
-}
-
-/** Lines around the part of the file that changed, so the model sees the result of its edit. */
-function changedRegionExcerpt(before: string, after: string, context = 3, maxLines = 40): string {
-  const a = before.replace(/\r\n/g, '\n').split('\n');
-  const b = after.replace(/\r\n/g, '\n').split('\n');
-  let start = 0;
-  while (start < a.length && start < b.length && a[start] === b[start]) start++;
-  let endA = a.length - 1;
-  let endB = b.length - 1;
-  while (endA >= start && endB >= start && a[endA] === b[endB]) {
-    endA--;
-    endB--;
-  }
-  const from = Math.max(0, start - context);
-  const to = Math.min(b.length - 1, Math.max(endB, start) + context);
-  // Numbered like the other excerpts, so a follow-up replace_lines uses the current numbers.
-  let lines = b.slice(from, to + 1).map((l, i) => `${String(from + 1 + i).padStart(4)}| ${l}`);
-  if (lines.length > maxLines) {
-    lines = [...lines.slice(0, maxLines - 1), `... (${lines.length - maxLines + 1} more lines)`];
-  }
-  return `lines ${from + 1}-${to + 1} now read:\n${lines.join('\n')}`;
-}
-
-/**
- * How many lines a change added when every one of them was already in the file (blank lines and
- * indentation ignored); 0 when it added anything new. A 7B model "fixed" a page 16 times by appending
- * the same empty <script> block: each append was a real change, but no progress.
- */
-export function copiedLinesAdded(before: string, after: string): number {
-  const lines = (s: string) => s.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-  const a = lines(before);
-  const b = lines(after);
-  if (b.length <= a.length) return 0;
-  const known = new Set(a);
-  return b.every((l) => known.has(l)) ? b.length - a.length : 0;
-}
-
-function hashText(text: string): string {
-  let h = 5381;
-  for (let i = 0; i < text.length; i++) h = ((h << 5) + h + text.charCodeAt(i)) | 0;
-  return (h >>> 0).toString(36);
-}
-
-function formatKb(chars: number): string {
-  return chars >= 1024 ? `${(chars / 1024).toFixed(1)} KB` : `${chars} B`;
-}
-
-function isSafePath(p: string): boolean {
-  if (!p) return false;
-  if (/^[a-zA-Z]:[\\/]/.test(p) || p.startsWith('/') || p.startsWith('\\')) return false;
-  return !p.split(/[\\/]/).includes('..');
-}
-
-const GOAL_REQUIRES_CHANGES = /oluştur|yap|ekle|düzelt|değiştir|güncelle|yaz|kur|sil|kaldır|taşı|refactor|create|build|make|add|fix|change|update|write|implement|remove|delete|rename|generate/i;
-/** The user asked to remove something, so a rewrite that drops keys/definitions may be intended. */
-const REMOVAL_INTENT = /\bsil|kaldır|çıkar|temizle|sadeleştir|remove|delete|drop|strip|clean\s*up|get\s+rid/i;
-/** The user asked for a rewrite / a much shorter file. */
-const REWRITE_INTENT = /baştan|sıfırdan|yeniden\s+yaz|tekrar\s+yaz|kısalt|küçült|minimal|rewrite|from\s+scratch|start\s+over|shorten|simplify/i;
-/** Files that are legitimately empty; any other empty write_file is a failed generation. */
-const EMPTY_FILE_OK = /(?:^|[\\/])(?:__init__\.py|py\.typed|\.gitkeep|\.keep|\.nojekyll)$/i;
-const EMPTY_FILE_INTENT = /\bboş\b[^.\n]{0,30}\bdosya|\bempty\s+(?:\w+\s+)?file/i;
-
-/** A write_file whose content is empty or whitespace (small models sometimes close the string at once). */
-export function isEmptyWrite(parsed: ParsedAction): boolean {
-  return (
-    parsed.type === 'propose_create' &&
-    typeof parsed.payload?.path === 'string' &&
-    !String(parsed.payload?.content ?? '').trim() &&
-    !EMPTY_FILE_OK.test(parsed.payload.path)
-  );
-}
-
-const TEST_FILE =
-  /(?:^|[\\/])(?:tests?|__tests__|specs?)[\\/]|\.(?:test|spec)\.[cm]?[jt]sx?$|(?:^|[\\/])test_[^\\/]*\.py$|_test\.(?:py|go)$|Tests?\.(?:java|cs|kt)$/i;
-const TEST_CHANGE_INTENT =
-  /test(?:lerini|leri|ler|ini|i)?\s+(?:düzelt|güncelle|ekle|yaz|değiştir|sil|kaldır)|(?:fix|update|add|write|change|remove|delete|adjust)\s+(?:the\s+|a\s+|new\s+|more\s+)?(?:unit\s+)?tests?\b|\btests?\s+for\b/i;
-
-/**
- * An existing test file the user did not ask to change. Tests define the expected behaviour: a
- * model that cannot fix the code must not "pass" by rewriting the assertions (seen in E2E).
- */
-export function isProtectedTestFile(path: string, userRequest: string): boolean {
-  return TEST_FILE.test(path) && !TEST_CHANGE_INTENT.test(userRequest);
-}
-
-const STATUS_WORDS =
-  /(?<!\p{L})(?:hazırlandı|oluşturuldu|tamamlandı|eklendi|güncellendi|yazıldı|kaydedildi|düzeltildi|değiştirildi|yapıldı|bitti|created|completed|done|added|updated|saved|written|finished|ready)(?:\s+successfully)?\s*[.!]*$/iu;
-
-/**
- * A short completion report written as file content ("Alışveriş listesi hazırlandı.", "File
- * created."). gemma2:2b "informed the user" this way and overwrote the list it had just written.
- */
-export function looksLikeStatusMessage(content: string, userRequest = ''): boolean {
-  const text = content.trim();
-  if (!text || text.length > 160 || text.split('\n').length > 2) return false;
-  if (userRequest.toLocaleLowerCase('tr').includes(text.toLocaleLowerCase('tr').replace(/[.!\s]+$/, ''))) return false;
-  return /\s/.test(text) && STATUS_WORDS.test(text);
-}
-
-/**
- * Output of a command-line program that printed its usage/help text ("usage: todo.py ...",
- * "Kullanım: python todo.py <komut>"). Tolerates a mis-decoded "ı" in "Kullanım".
- */
-export function looksLikeUsageText(output: string): boolean {
-  return /(?:^|[\s.:!>])(?:usage|kullan\S{1,2}m|kullanim)\s*:/im.test(output) || /the following arguments are required/i.test(output);
-}
-
-/**
- * The project file and line an error output points at: the innermost Python traceback frame
- * (`File "...", line 12`) or the first `path/file.js:12:5` style location that is a project file.
- */
-export function findErrorLocation(output: string, projectFiles: string[]): { path: string; line: number } | null {
-  const norm = (p: string) => p.replace(/\\/g, '/').replace(/^\.\//, '').toLowerCase();
-  const files = projectFiles.map((f) => ({ rel: f, key: norm(f) })).sort((a, b) => b.key.length - a.key.length);
-  const resolve = (raw: string) => {
-    const p = norm(raw.trim());
-    return files.find((f) => p === f.key || p.endsWith(`/${f.key}`))?.rel ?? null;
-  };
-  const python = [...output.matchAll(/File "([^"\n]+)", line (\d+)/g)]
-    .map((m) => ({ path: resolve(m[1]), line: Number(m[2]) }))
-    .filter((l): l is { path: string; line: number } => !!l.path);
-  if (python.length > 0) return python[python.length - 1];
-  for (const m of output.matchAll(/((?:[A-Za-z]:)?[\w.\\/ -]*?[\w-]+\.(?:m?js|cjs|jsx?|tsx?|py|rs|go|java|cs|rb|php|kt|swift|c|cc|cpp|h)):(\d+)/g)) {
-    const path = resolve(m[1]);
-    if (path) return { path, line: Number(m[2]) };
-  }
-  return null;
-}
-
-interface DoneInfo {
-  doneReason?: string;
-  evalCount: number;
-  promptEvalCount: number;
-  evalDurationNs: number;
-  promptEvalDurationNs: number;
-}
-
-interface StreamOutcome {
-  text: string;
-  thinking: string;
-  done: DoneInfo | null;
-  repetition: boolean;
-}
+/** The interface language, for theme and category names in the agent's messages. */
+const uiLanguage = () => resolveLanguage(useSettingsStore.getState().settings.language);
 
 export class AgentEngine {
-  private abortController: AbortController | null = null;
-  private stepAbortController: AbortController | null = null;
-  private isRunning: boolean = false;
-  private pendingInterruptDirective: string | null = null;
+  abortController: AbortController | null = null;
+  stepAbortController: AbortController | null = null;
+  isRunning: boolean = false;
+  pendingInterruptDirective: string | null = null;
 
   stop() {
     this.isRunning = false;
@@ -867,6 +235,7 @@ export class AgentEngine {
               promptEvalCount: chunk.prompt_eval_count || 0,
               evalDurationNs: chunk.eval_duration || 0,
               promptEvalDurationNs: chunk.prompt_eval_duration || 0,
+              loadDurationNs: chunk.load_duration || 0,
             };
           }
         },
@@ -974,7 +343,7 @@ export class AgentEngine {
     let finished = false;
 
     const stateMachine = new AgentStateMachine((from, to, reason) => {
-      callbacks.onLog(`[DURUM GEÇİŞİ]: ${from} ──► ${to} (${reason || 'Ajan döngüsü'})`);
+      callbacks.onLog(et('stateChange', { from, to, reason: reason || et('stateLoop') }));
     });
     const moveTo = (path: AgentState[], reason?: string) => {
       for (const state of path) {
@@ -1036,7 +405,7 @@ export class AgentEngine {
     const synthesisStrategy = agentOpt?.webSynthesisStrategy || 'auto';
     const modStrategy = agentOpt?.modificationStrategy || 'smart_injection';
 
-    stateMachine.transition('PLANNING', 'Hedef analiz ediliyor ve sözleşmeler derleniyor');
+    stateMachine.transition('PLANNING', et('statePlanning'));
     // The page's menu links: "Home About Services Contact — get these working" names them, and a
     // 7B model otherwise did not connect "these" to the menu (it built a modal instead).
     const menuPage = findHtmlTarget(projectFiles);
@@ -1097,7 +466,13 @@ export class AgentEngine {
     const actionSchema = buildActionSchema(toolset, runtime.isSmall);
 
     callbacks.onLog(
-      `Model profili: ${model}${runtime.parameterSizeB ? ` (${runtime.parameterSizeB}B)` : ''} · bağlam ${requestProfile.numCtx} token · maks. çıktı ${requestProfile.numPredict} token (ayar: ${requestedMaxTokens}) · düşünme: ${think === undefined ? 'desteklenmiyor' : String(think)} · yapılandırılmış JSON çıktı`
+      et('modelProfile', {
+        model: `${model}${runtime.parameterSizeB ? ` (${runtime.parameterSizeB}B)` : ''}`,
+        context: requestProfile.numCtx,
+        output: requestProfile.numPredict,
+        setting: requestedMaxTokens,
+        thinking: think === undefined ? et('thinkingUnsupported') : String(think),
+      })
     );
 
     // Design theme for new web pages: decided now (the model is asked at most one short question,
@@ -1122,7 +497,10 @@ export class AgentEngine {
         const category = await this.classifySiteCategory(model, goal, runtime, requestProfile.numCtx);
         resolvePlanTheme(designPlan, category, 'model');
         callbacks.onLog(
-          `Tasarım teması: site türünü model belirledi → ${category ? categoryLabel(category) : 'belirlenemedi (genel temalar)'} (${((Date.now() - started) / 1000).toFixed(1)} sn)`
+          et('designCategoryByModel', {
+            category: category ? categoryLabel(category, uiLanguage()) : et('designCategoryUnknown'),
+            seconds: ((Date.now() - started) / 1000).toFixed(1),
+          })
         );
       } else if (designPlan && designPlan.kind === 'new' && designPlan.theme && designPlan.web) {
         resolvePlanTheme(designPlan, designPlan.category, designPlan.categorySource || 'keywords');
@@ -1131,13 +509,20 @@ export class AgentEngine {
         const theme = getTheme(designPlan.themeId);
         callbacks.onLog(
           designPlan.kind === 'continue'
-            ? `Tasarım teması: proje "${theme?.name || designPlan.themeId}" temasıyla devam ediyor.`
-            : `Tasarım teması: ${theme ? `"${theme.name}" (${categoryLabel(theme.category)})` : designPlan.theme ? 'sayfa oluşursa genel temalardan biri' : 'yalnızca temel stil'} · temel CSS ${designPlan.base ? 'açık' : 'kapalı'} · ajan bitince uygulanacak`
+            ? et('designContinues', { theme: theme ? themeName(theme, uiLanguage()) : String(designPlan.themeId) })
+            : et('designPlanned', {
+                theme: theme
+                  ? `"${themeName(theme, uiLanguage())}" (${categoryLabel(theme.category, uiLanguage())})`
+                  : designPlan.theme
+                    ? et('designGeneralTheme')
+                    : et('designBaseOnly'),
+                base: designPlan.base ? et('on') : et('off'),
+              })
         );
       }
     } catch (err: any) {
       designPlan = null;
-      callbacks.onLog(`Tasarım teması atlandı: ${String(err?.message || err)}`);
+      callbacks.onLog(et('designSkipped', { error: String(err?.message || err) }));
     }
     if (!this.isRunning) return;
 
@@ -1146,10 +531,10 @@ export class AgentEngine {
         id: `step_tasks_init_${Date.now()}`,
         timestamp: Date.now(),
         type: 'system_notice',
-        content: `📋 ${
-          !runOptions.checklist ? `İstekteki liste kontrol listesine alındı (${subtasks.length} madde)`
-          : subtasks.every((t) => /^\S+\.html?\s—/.test(t.description)) ? `Sayfa planı kontrol listesine alındı (${subtasks.length} sayfa)`
-          : `Sihirbazın planı kontrol listesine alındı (${subtasks.length} adım)`
+        content: `${
+          !runOptions.checklist ? et('checklistFromRequest', { count: subtasks.length })
+          : subtasks.every((t) => /^\S+\.html?\s—/.test(t.description)) ? et('checklistPages', { count: subtasks.length })
+          : et('checklistWizard', { count: subtasks.length })
         }:\n${subtasks
           .map((s, i) => `  ${i + 1}. ${s.description}`)
           .join('\n')}`,
@@ -1173,8 +558,15 @@ export class AgentEngine {
      * did, or a command failed since (see tryGracefulCompletion).
      */
     let programOkAt = -1;
+    /**
+     * Changes the model re-sent although they were already in the file, since its last real change.
+     * A model that keeps re-sending its finished edit instead of calling finish has done the work.
+     */
+    let noopResends = 0;
     /** Names of the files the model created or edited in this run (lower case, without folders). */
     const writtenByModel = new Set<string>();
+    /** The run wrote code or command settings: test commands then need approval (see RUNS_WITH_COMMANDS). */
+    let wroteRunnableFile = false;
     const baseName = (p: string) => (p.replace(/\\/g, '/').split('/').pop() || '').toLowerCase();
     const editFailures = new Map<string, number>();
     const openSanityIssues = new Map<string, SanityIssue[]>();
@@ -1206,12 +598,15 @@ export class AgentEngine {
       }
     };
 
-    const runAcceptanceChecks = async (): Promise<{ report: ValidationReport | null; missing: string[] }> => {
+    /** The acceptance checks now: `missing` in English for the model, `missingUi` for the user. */
+    const runAcceptanceChecks = async (): Promise<{ report: ValidationReport | null; missing: string[]; missingUi: string[] }> => {
       if (contracts.length === 0) {
         lastAcceptance = null;
-        return { report: null, missing: [] };
+        return { report: null, missing: [], missingUi: [] };
       }
       const missing: string[] = [];
+      const missingUi: string[] = [];
+      const uiLanguage = resolveLanguage(useSettingsStore.getState().settings.language);
       let passed = 0;
       let total = 0;
       let lastReport: ValidationReport | null = null;
@@ -1221,10 +616,11 @@ export class AgentEngine {
         total += report.criterionResults.length;
         passed += report.criterionResults.filter((r) => r.passed).length;
         missing.push(...report.missingEvidence);
+        missingUi.push(...report.missingTexts.map((t) => renderCheck(t, uiLanguage)));
       }
       lastAcceptance = { passed, total };
       lastMissing = missing;
-      return { report: lastReport, missing };
+      return { report: lastReport, missing, missingUi };
     };
 
     /** Repeats what the acceptance checks still miss, for messages sent when the model stalls. */
@@ -1261,6 +657,33 @@ export class AgentEngine {
       const from = Math.max(1, line - 3);
       const to = Math.min(line + 5, lineCount(content));
       return `\n${label} lines ${from}-${to}:\n${numberedLines(content, from, to)}`;
+    };
+
+    /**
+     * How often a change to a file was refused for the same fault. The fault is compared without
+     * its line numbers, which move between attempts.
+     */
+    const refusalCounts = new Map<string, number>();
+    const countRefusal = (filePath: string, damage: SanityIssue[]) => {
+      const key = `${filePath}:${(damage[0]?.message || '').replace(/\d+/g, '#')}`;
+      const times = (refusalCounts.get(key) || 0) + 1;
+      refusalCounts.set(key, times);
+      return times;
+    };
+
+    /**
+     * After a repeated refusal the model gets the CURRENT lines (it kept patching from its own broken
+     * version) and one different way to do the change.
+     */
+    const repeatedRefusalHelp = (filePath: string, current: string, damage: SanityIssue[], times: number, kind: 'edit' | 'write') => {
+      const lines = lineCount(current);
+      const way =
+        kind === 'edit' && lines <= 150
+          ? `write the COMPLETE file with write_file (it has ${lines} lines) with the change made and every bracket and tag closed`
+          : kind === 'edit'
+            ? 'replace the whole block you are changing (for CSS: the complete rule from its selector to its closing }) in one replace_lines call, using the line numbers below'
+            : 'change only the part the task needs with edit_file or replace_lines instead of rewriting the file';
+      return `\nThis change was refused ${times} times for the same reason. Do not send it again; ${way}.${issueExcerpt(current, damage, `The current "${filePath}" (unchanged),`)}${repeatNudge()}`;
     };
 
     /** Restates a file's unresolved check failures where the model looks last (end of the context). */
@@ -1350,10 +773,12 @@ export class AgentEngine {
     /** Common bookkeeping after a successful create/edit. Returns the model-facing verdict. */
     const afterMutation = async (filePath: string, finalContent: string, previousContent?: string | null): Promise<string> => {
       mutationCount++;
+      noopResends = 0;
       writtenByModel.add(baseName(filePath));
+      if (runsWithCommands(filePath)) wroteRunnableFile = true;
       editFailures.delete(filePath);
       ledger.currentPhase = 'modification';
-      ledger.knownFiles[filePath] = { size: finalContent.length, lastAction: 'yazıldı' };
+      ledger.knownFiles[filePath] = { size: finalContent.length, lastAction: 'written' };
       if (!ledger.projectTree.includes(filePath)) {
         ledger.projectTree.push(filePath);
         treeVersion++;
@@ -1409,9 +834,9 @@ export class AgentEngine {
           );
         }
         notice(
-          `Otomatik denetim "${filePath}" dosyasında ${issues.length} sorun buldu:\n${issues.map((i) => `• ${i.message}`).join('\n')}`,
+          `${et('checkFoundProblems', { path: filePath, count: issues.length })}\n${issues.map((i) => `• ${i.message}`).join('\n')}`,
           issues.some((i) => i.severity === 'error') ? 'failed' : 'rejected',
-          'Dosya Denetimi'
+          et('fileCheckTitle')
         );
       }
 
@@ -1490,7 +915,7 @@ export class AgentEngine {
           timestamp: Date.now(),
           type: 'changeset_proposal',
           title: autoTitle,
-          content: `${detail} (${securityProfile === 'autonomous' ? 'Otonom' : 'Dengeli'} Profil)`,
+          content: `${detail} ${et(securityProfile === 'autonomous' ? 'autoApprovedAutonomous' : 'autoApprovedBalanced')}`,
           status: 'approved',
         });
         return true;
@@ -1542,7 +967,7 @@ export class AgentEngine {
         const autoApprove = securityProfile === 'balanced' || securityProfile === 'autonomous';
         const write = async (change: DesignChange): Promise<boolean> => {
           if (change.before !== null && damageFromChange(change.path, change.before, change.after).length > 0) {
-            callbacks.onLog(`Tasarım teması "${change.path}" dosyasına uygulanmadı: dosyayı bozacaktı.`);
+            callbacks.onLog(et('designWouldBreak', { path: change.path }));
             return false;
           }
           const item: ChangesetItem = {
@@ -1553,12 +978,12 @@ export class AgentEngine {
             proposedContentHash: '',
             originalContent: change.before ?? '',
             newContent: change.after,
-            reason: change.path === THEME_FILE ? 'Tasarım teması dosyası' : 'Sayfa tasarım temasına bağlandı',
+            reason: change.path === THEME_FILE ? et('designThemeFile') : et('designPageLinked'),
             selected: true,
             status: 'pending',
           };
           if (!autoApprove) {
-            const approved = await requestApproval(item, 'Tasarım Teması', 'Tasarım Teması Teklifi', `"${change.path}" — tasarım teması / sayfa düzeltmesi.`);
+            const approved = await requestApproval(item, et('designTitle'), et('designProposalTitle'), et('designChangeDetail', { path: change.path }));
             if (!approved) return false;
           }
           const res = await applyMutation({
@@ -1567,7 +992,7 @@ export class AgentEngine {
             baseHash: hashes.get(change.path) || '',
             newContent: change.after,
           });
-          if (!res.ok) callbacks.onLog(`Tasarım teması "${change.path}" dosyasına yazılamadı: ${res.error}`);
+          if (!res.ok) callbacks.onLog(et('designWriteFailed', { path: change.path, error: String(res.error) }));
           return res.ok;
         };
 
@@ -1582,46 +1007,47 @@ export class AgentEngine {
           if (await write(change)) done.push(change.path);
         }
         if (done.length === 0) return;
-        for (const p of done) ledger.appliedChanges.push(`Tasarım: "${p}"`);
+        for (const p of done) ledger.appliedChanges.push(`Design: "${p}"`);
 
         const theme = result.theme;
         const lines: string[] = [];
         if (theme && designPlan) {
+          const lang = uiLanguage();
           const source =
-            designPlan.categorySource === 'model' ? 'konuyu model belirledi'
-            : designPlan.categorySource === 'keywords' ? 'konu istekten anlaşıldı'
-            : designPlan.categorySource === 'fixed' ? 'ayarlardaki sabit tema'
-            : designPlan.categorySource === 'random' ? 'rastgele seçildi'
-            : designPlan.categorySource === 'existing' ? 'projenin mevcut teması'
-            : designPlan.categorySource === 'wizard' ? 'sihirbazda seçildi'
-            : 'genel temalardan';
+            designPlan.categorySource === 'model' ? et('designSourceModel')
+            : designPlan.categorySource === 'keywords' ? et('designSourceKeywords')
+            : designPlan.categorySource === 'fixed' ? et('designSourceFixed')
+            : designPlan.categorySource === 'random' ? et('designSourceRandom')
+            : designPlan.categorySource === 'existing' ? et('designSourceExisting')
+            : designPlan.categorySource === 'wizard' ? et('designSourceWizard')
+            : et('designSourceGeneral');
           lines.push(
             designPlan.theme
-              ? `🎨 Tasarım teması: "${theme.name}" (${categoryLabel(theme.category)} · ${source})\n${theme.mood}`
-              : '🎨 Temel stil uygulandı (renk teması kapalı ya da istekte renkler belirtilmiş).'
+              ? `${et('designApplied', { theme: themeName(theme, lang), category: categoryLabel(theme.category, lang), source })}\n${themeMood(theme, lang)}`
+              : et('designBaseApplied')
           );
           const details = [
-            `${done.length} dosya`,
-            result.colorChanges > 0 ? `${result.colorChanges} renk/yazı tipi temaya bağlandı` : '',
-            result.icons > 0 ? `${result.icons} emoji çizgi simgeye çevrildi` : '',
+            et('designFiles', { count: done.length }),
+            result.colorChanges > 0 ? et('designColors', { count: result.colorChanges }) : '',
+            result.icons > 0 ? et('designIcons', { count: result.icons }) : '',
           ].filter(Boolean);
           lines.push(`• ${details.join(' · ')}`);
         }
-        if (result.fixedYears.length > 0) lines.push(`• Telif yılı ${new Date().getFullYear()} olarak güncellendi.`);
+        if (result.fixedYears.length > 0) lines.push(`• ${et('designYear', { year: new Date().getFullYear() })}`);
         for (const b of result.buttons.filter((x) => done.includes(x.path))) {
-          lines.push(`• "${b.path}": stili olmayan ${b.count} butona sayfanın renginde bir görünüm verildi.`);
+          lines.push(`• ${et('designButtons', { path: b.path, count: b.count })}`);
         }
         for (const m of result.menus.filter((x) => done.includes(x.path))) {
           const what = [
-            m.repaired.includes('script') ? 'menü düğmesine aç/kapat eklendi' : m.repaired.includes('open') ? 'menü düğmesi artık menüyü açıyor' : '',
-            m.repaired.includes('close') ? 'bir bağlantı seçilince menü kapanıyor' : '',
+            m.repaired.includes('script') ? et('designMenuToggle') : m.repaired.includes('open') ? et('designMenuOpens') : '',
+            m.repaired.includes('close') ? et('designMenuCloses') : '',
           ].filter(Boolean);
-          lines.push(`• "${m.path}" mobil menüsü onarıldı: ${what.join(', ')}.`);
+          lines.push(`• ${et('designMenuRepaired', { path: m.path, what: what.join(', ') })}`);
         }
-        if (theme && designPlan) lines.push('Ayarlar › Üretim › Web Tasarımı bölümünden temayı değiştirebilir veya kapatabilirsiniz.');
-        notice(lines.join('\n') || `Sayfa düzeltmeleri uygulandı: ${done.join(', ')}`, 'success', theme ? 'Tasarım Teması' : 'Sayfa Düzeltmeleri');
+        if (theme && designPlan) lines.push(et('designSettingsHint'));
+        notice(lines.join('\n') || et('pageFixesApplied', { files: done.join(', ') }), 'success', theme ? et('designTitle') : et('pageFixesTitle'));
       } catch (err: any) {
-        callbacks.onLog(`Tasarım teması uygulanamadı: ${String(err?.message || err)}`);
+        callbacks.onLog(et('designFailed', { error: String(err?.message || err) }));
       }
     };
 
@@ -1639,19 +1065,19 @@ export class AgentEngine {
         proposedContentHash: '',
         originalContent: '',
         newContent: seed.content,
-        reason: 'Sihirbazın hazırladığı dosya',
+        reason: et('wizardFileReason'),
         selected: true,
         status: 'pending',
       };
-      const detail = `"${rel}" sihirbazın hazırladığı hazır kodla oluşturuluyor (${lineCount(seed.content)} satır).`;
-      if (!(await requestApproval(item, 'Sihirbaz Dosyası (Otomatik Onay)', 'Sihirbaz Dosyası Teklifi', detail))) continue;
+      const detail = et('wizardFileDetail', { path: rel, lines: lineCount(seed.content) });
+      if (!(await requestApproval(item, et('wizardFileAutoTitle'), et('wizardFileProposalTitle'), detail))) continue;
       const res = await applyMutation({ filePath: rel, exists: false, baseHash: '', newContent: seed.content });
       if (res.ok) {
         projectFiles.push(rel); // ledger.projectTree is the same list
         seeded.add(rel);
         treeVersion++;
       } else {
-        callbacks.onLog(`Başlangıç dosyası yazılamadı "${rel}": ${res.error}`);
+        callbacks.onLog(et('wizardFileFailed', { path: rel, error: String(res.error) }));
       }
     }
     if (!this.isRunning) return;
@@ -1659,14 +1085,26 @@ export class AgentEngine {
     // ---------------------------------------------------------------------
     // Initial task message (static for the whole run)
     // ---------------------------------------------------------------------
-    const taskParts: string[] = [`TASK:\n${goal}`];
+    const taskParts: string[] = [];
+    // The earlier task comes first and is marked as done, so the TASK is the last word. Its request is
+    // shown only when the new task continues it; the old run's own summary is never shown (a 7B model
+    // copied it as its first thought and went back to that work).
+    const previous = runOptions.previousTask;
+    if (previous) {
+      const files = previous.changedFiles.length > 0 ? previous.changedFiles.join(', ') : 'none';
+      if (continuesPreviousTask(goal)) {
+        taskParts.push(
+          `EARLIER IN THIS SESSION (background; the new TASK below continues it):\nThe user asked: "${previous.request.trim().slice(0, 1200)}"\nThat task ${previous.finished ? 'was completed' : 'was not finished'}. Files it changed: ${files}.`
+        );
+      } else {
+        taskParts.push(
+          `EARLIER IN THIS SESSION: another task changed these files: ${files}. That task is over; do not continue it. Work only on the new TASK below.`
+        );
+      }
+    }
+    taskParts.push(`TASK:\n${goal}`);
     if (/[çğıöşüÇĞİÖŞÜ]|\b(?:ve|bir|için|ile|olsun|yap|oluştur|ekle|düzelt|sayfa|dosya)\b/i.test(goal)) {
       taskParts.push('LANGUAGE: the user writes in Turkish. Write "thought" and "summary" in Turkish; page text follows the request.');
-    }
-    if (runOptions.previousContext && runOptions.previousContext.trim()) {
-      taskParts.push(
-        `CONTEXT FROM THE PREVIOUS TASK IN THIS SESSION (for reference only — the new TASK above may refer to it; do exactly what the new TASK asks and do not resume unrelated work from before):\n${runOptions.previousContext.trim().slice(0, 2000)}`
-      );
     }
     if (menuPage && namedMenuLinks.length >= 2) {
       const lines = namedMenuLinks.map((l) => l.line);
@@ -1737,7 +1175,7 @@ export class AgentEngine {
       seenActions.set(`read:${file.path}:${file.hash}:-`, { step: 0, entry: taskEntry });
     }
 
-    stateMachine.transition('EXECUTING', 'Ajan yürütme adımlarına başlandı');
+    stateMachine.transition('EXECUTING', et('stateExecuting'));
     callbacks.onStatusChange('thinking');
 
     const addSteeringDirective = (directive: string) => {
@@ -1745,16 +1183,16 @@ export class AgentEngine {
       repeatStreak = 0;
       stepsWithoutProgress = 0;
       finishPushbacks = 0;
-      callbacks.onLog(`[Kullanıcı Müdahalesi]: ${directive}`);
+      callbacks.onLog(et('steerLog', { directive }));
       callbacks.onStep({
         id: `step_steer_${Date.now()}`,
         timestamp: Date.now(),
         type: 'user_steering',
-        title: 'Kullanıcı Müdahalesi (Araya Girildi)',
+        title: et('steerTitle'),
         content: directive,
         status: 'success',
       });
-      ledger.userDecisions.push({ question: 'Kullanıcı Canlı Müdahalesi', answer: directive });
+      ledger.userDecisions.push({ question: 'Instruction sent during the run', answer: directive });
       if (contractsEnabled) {
         contracts = TaskCompiler.mergeDirective(contracts, directive, {
           projectFiles: ledger.projectTree,
@@ -1764,7 +1202,7 @@ export class AgentEngine {
       }
       ledger.subtasks.push({
         id: `task_steer_${Date.now()}`,
-        description: `Kullanıcı talimatı: ${directive}`,
+        description: et('steerChecklistItem', { directive }),
         status: ledger.subtasks.some((t) => t.status === 'in_progress') ? 'pending' : 'in_progress',
       });
       callbacks.onSubtasksUpdated?.(ledger.subtasks);
@@ -1784,26 +1222,26 @@ export class AgentEngine {
     ) => {
       finished = true;
       if (status === 'finished') {
-        moveTo(['VALIDATING', 'COMPLETED', 'DONE'], 'Görev tamamlandı');
+        moveTo(['VALIDATING', 'COMPLETED', 'DONE'], et('stateCompleted'));
         for (const t of ledger.subtasks) {
           t.status = 'completed';
           if (!t.completedAt) t.completedAt = Date.now();
         }
         callbacks.onSubtasksUpdated?.(ledger.subtasks);
       } else {
-        moveTo(['RETRYING', 'FAILED'], 'Görev doğrulanamadı');
+        moveTo(['RETRYING', 'FAILED'], et('stateNotVerified'));
         releaseSubtasks(ledger);
       }
       const changed = Array.from(new Set(ledger.appliedChanges.map((c) => c.match(/"([^"]+)"/)?.[1]).filter(Boolean)));
-      let content = summary.trim();
-      if (changed.length > 0) content += `\n\nDeğiştirilen dosyalar: ${changed.join(', ')}`;
-      if (warnings.length > 0) content += `\n\n⚠️ Doğrulanamayan maddeler:\n${warnings.map((w) => `• ${w}`).join('\n')}`;
+      let content = summary.trim() || et('taskCompleted');
+      if (changed.length > 0) content += `\n\n${et('changedFiles', { files: changed.join(', ') })}`;
+      if (warnings.length > 0) content += `\n\n${et('unverifiedItems')}\n${warnings.map((w) => `• ${w}`).join('\n')}`;
       if (note) content += `\n\nℹ️ ${note}`;
       callbacks.onStep({
         id: `step_fin_${Date.now()}`,
         timestamp: Date.now(),
         type: 'final_answer',
-        title: status === 'finished' ? 'Görev Tamamlandı' : 'Görev Eksik Tamamlandı',
+        title: status === 'finished' ? et('finishedTitle') : et('finishedIncompleteTitle'),
         content,
         status: status === 'finished' ? 'success' : 'failed',
         rawOutput,
@@ -1825,14 +1263,17 @@ export class AgentEngine {
         // No acceptance checks (a script): the evidence is the program. When a file the model wrote ran
         // with exit code 0 after its last change and no command failed since, a model that then loops
         // (re-runs it, re-writes the same content) has finished its work, not failed it.
-        if (programOkAt !== mutationCount) return false;
+        // Code is proven by running it; pages, styles and texts (nothing to run) by the model
+        // re-sending a change that is already in the file.
+        const programRan = programOkAt === mutationCount;
+        if (!programRan && (wroteRunnableFile || noopResends < 2)) return false;
         await applyDesignTheme();
         finalize(
-          'Görev tamamlandı.',
+          et('taskCompleted'),
           'finished',
           undefined,
           [],
-          `${why} Yazılan program son değişiklikten sonra hatasız çalıştı (çıkış kodu 0); görev tamamlandı olarak işaretlendi. Sonucu kontrol etmeniz önerilir.`
+          `${why} ${programRan ? et('gracefulProgramRan') : et('gracefulResent')}`
         );
         return true;
       }
@@ -1840,11 +1281,11 @@ export class AgentEngine {
       if (missing.length > 0) return false;
       await applyDesignTheme();
       finalize(
-        'Görev tamamlandı.',
+        et('taskCompleted'),
         'finished',
         undefined,
         [],
-        `${why} Tüm otomatik denetimler geçtiği için görev tamamlandı olarak işaretlendi; sonucu kontrol etmeniz önerilir.`
+        `${why} ${et('gracefulChecksPassed')}`
       );
       return true;
     };
@@ -1857,6 +1298,109 @@ export class AgentEngine {
       notice(message, 'failed');
       callbacks.onStatusChange('error');
     };
+    // The run as the tool handlers (./run/*) see it; `let` members are live views of the variables above.
+    const ctx: RunContext = {
+      engine: this,
+      MAX_READ_CHARS,
+      acceptanceNote,
+      afterMutation,
+      appliedEdits,
+      appliedRuns,
+      applyDesignTheme,
+      applyMutation,
+      baseName,
+      callbacks,
+      commandOutputs,
+      commandRuns,
+      get consecutiveErrors() {
+        return consecutiveErrors;
+      },
+      set consecutiveErrors(value: number) {
+        consecutiveErrors = value;
+      },
+      countRefusal,
+      editFailures,
+      finalize,
+      get finishPushbacks() {
+        return finishPushbacks;
+      },
+      set finishPushbacks(value: number) {
+        finishPushbacks = value;
+      },
+      goal,
+      issueExcerpt,
+      ledger,
+      moveTo,
+      get mutationCount() {
+        return mutationCount;
+      },
+      set mutationCount(value: number) {
+        mutationCount = value;
+      },
+      get noopResends() {
+        return noopResends;
+      },
+      set noopResends(value: number) {
+        noopResends = value;
+      },
+      notice,
+      openProblemsFor,
+      openSanityIssues,
+      originalSnapshots,
+      pauseTimer,
+      problemExcerpt,
+      get programOkAt() {
+        return programOkAt;
+      },
+      set programOkAt(value: number) {
+        programOkAt = value;
+      },
+      pushExchange,
+      rejectedWrites,
+      repeatNudge,
+      get repeatStreak() {
+        return repeatStreak;
+      },
+      set repeatStreak(value: number) {
+        repeatStreak = value;
+      },
+      repeatedRefusalHelp,
+      requestApproval,
+      resumeTimer,
+      runAcceptanceChecks,
+      runOptions,
+      securityProfile,
+      seenActions,
+      get stepCount() {
+        return stepCount;
+      },
+      set stepCount(value: number) {
+        stepCount = value;
+      },
+      get stepsWithoutProgress() {
+        return stepsWithoutProgress;
+      },
+      set stepsWithoutProgress(value: number) {
+        stepsWithoutProgress = value;
+      },
+      stillVisible,
+      get treeVersion() {
+        return treeVersion;
+      },
+      set treeVersion(value: number) {
+        treeVersion = value;
+      },
+      userRequestText,
+      writtenByModel,
+      writtenFiles,
+      get wroteRunnableFile() {
+        return wroteRunnableFile;
+      },
+      set wroteRunnableFile(value: boolean) {
+        wroteRunnableFile = value;
+      },
+    };
+
 
     // ---------------------------------------------------------------------
     // Main loop
@@ -1872,7 +1416,7 @@ export class AgentEngine {
 
       // Circuit Breaker: Max Active Time Check (ignoring paused user confirmation time)
       if (getActiveExecutionTime() > MAX_TASK_TIME_MS) {
-        notice(`Devre Kesici: Aktif çalışma süresi ${effectiveMinutes} dakikayı aştığı için durduruldu.`, 'failed');
+        notice(et('limitTime', { minutes: effectiveMinutes }), 'failed');
         releaseSubtasks(ledger);
         callbacks.onStatusChange('idle');
         break;
@@ -1880,24 +1424,24 @@ export class AgentEngine {
 
       // Circuit Breaker: Max Tool Calls Check
       if (toolCallCount >= MAX_TOOL_CALLS) {
-        notice(`Devre Kesici: Maksimum araç çağrısı sınırına (${MAX_TOOL_CALLS}) ulaşıldı.`, 'failed');
+        notice(et('limitToolCalls', { count: MAX_TOOL_CALLS }), 'failed');
         releaseSubtasks(ledger);
         callbacks.onStatusChange('idle');
         break;
       }
 
       if (repeatStreak >= MAX_REPEAT_STREAK) {
-        if (await tryGracefulCompletion('Model son adımlarını tekrar etmeye başladı.')) break;
+        if (await tryGracefulCompletion(et('whyRepeating'))) break;
         stopWithError(
-          `[DÖNGÜ TESPİT EDİLDİ]: Model aynı eylemleri art arda ${repeatStreak} kez tekrarladı ve ilerleme kaydetmedi. Zaman kaybını önlemek için görev durduruldu. İsteği daha net bir talimatla yeniden verebilir veya daha büyük bir model seçebilirsiniz.`,
+          et('stoppedLoop', { count: repeatStreak }),
           'BLOCKED'
         );
         break;
       }
       if (stepsWithoutProgress >= MAX_STEPS_WITHOUT_PROGRESS) {
-        if (await tryGracefulCompletion('Model son adımlarda ilerleme kaydetmedi.')) break;
+        if (await tryGracefulCompletion(et('whyNoProgress'))) break;
         stopWithError(
-          `[İLERLEME YOK]: Son ${stepsWithoutProgress} adımda hiçbir dosya değişmedi ve yeni bilgi edinilmedi. Görev durduruldu.`,
+          et('stoppedNoProgress', { count: stepsWithoutProgress }),
           'BLOCKED'
         );
         break;
@@ -1907,32 +1451,32 @@ export class AgentEngine {
       if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
         if (securityProfile === 'autonomous') {
           if (autonomousRecoveries >= 2) {
-            if (await tryGracefulCompletion('Model tamamlanmış işten sonra gereksiz ve hatalı adımlar denedi.')) break;
-            stopWithError(`[GÖREV BAŞARISIZ]: Model art arda hatalı adımlar üretmeye devam etti (${autonomousRecoveries} kurtarma denemesi).`);
+            if (await tryGracefulCompletion(et('whyErrorsAfterWork'))) break;
+            stopWithError(et('stoppedErrors', { count: autonomousRecoveries }));
             break;
           }
           autonomousRecoveries++;
           consecutiveErrors = 0;
-          callbacks.onLog('Art arda 3 hata oluştu; Otonom Mod gereği model yeni bir yaklaşıma yönlendiriliyor...');
+          callbacks.onLog(et('errorsAutonomousLog'));
           conversation.push({
             role: 'user',
             content: `[RECOVERY]: Several steps in a row failed. Re-read the task and the latest results, then choose a different approach (for example, rewrite the whole file with write_file instead of repeating a failing edit). If everything requested is done, call finish.\n\n${stateLine()}`,
             meta: { kind: 'steer', step: stepCount },
           });
         } else {
-          callbacks.onLog('Art arda 3 hata oluştu; kullanıcıya danışılıyor...');
+          callbacks.onLog(et('errorsAskLog'));
           pauseTimer();
           let userGuidance = '';
           try {
             userGuidance = await callbacks.onRequestClarification({
               id: `clar_err_${Date.now()}`,
-              question: 'Art arda 3 işlemde hata ile karşılaşıldı. Ajan nasıl devam etsin?',
-              options: ['Farklı bir yaklaşım dene', 'Görevi sonlandır'],
+              question: et('errorsQuestion'),
+              options: [et('errorsTryOther'), et('errorsStop')],
             });
           } finally {
             resumeTimer();
           }
-          if (userGuidance === 'Görevi sonlandır') {
+          if (userGuidance === et('errorsStop')) {
             releaseSubtasks(ledger);
             callbacks.onStatusChange('idle');
             break;
@@ -1996,11 +1540,11 @@ export class AgentEngine {
             );
             promptTokens = systemTokens + historyTokens();
           }
-          callbacks.onLog(`Bağlam sıkıştırıldı: istem ≈${promptTokens} token (pencere ${numCtx}).`);
+          callbacks.onLog(et('contextCompressed', { tokens: promptTokens, window: numCtx }));
         }
         const numPredict = Math.max(512, Math.min(desiredPredict, numCtx - promptTokens - 256));
 
-        callbacks.onLog(`Adım ${stepCount}/${MAX_STEPS}: Model yanıtı bekleniyor (istem ≈${promptTokens} token)...`);
+        callbacks.onLog(et('stepWaiting', { step: stepCount, max: MAX_STEPS, tokens: promptTokens }));
         const stepStart = Date.now();
 
         const messages: OllamaChatMessage[] = conversation.map((m) => ({ role: m.role, content: m.content }));
@@ -2027,19 +1571,19 @@ export class AgentEngine {
             const aborted = streamErr?.name === 'AbortError' || this.abortController?.signal.aborted;
             if (!aborted && formatSupported && /format|schema|grammar/i.test(msg)) {
               formatSupported = false;
-              callbacks.onLog(`Sunucu JSON şema çıktısını desteklemiyor (${msg}); serbest metin ayrıştırmaya geçiliyor.`);
+              callbacks.onLog(et('schemaUnsupported', { error: msg }));
               continue;
             }
             if (!aborted && think !== undefined && /think/i.test(msg)) {
               think = undefined;
-              callbacks.onLog(`Model düşünme parametresini desteklemiyor (${msg}); parametre kaldırıldı.`);
+              callbacks.onLog(et('thinkUnsupportedLog', { error: msg }));
               continue;
             }
             throw streamErr;
           }
           if (outcome.repetition && attempt < 1) {
             attempt++;
-            callbacks.onLog('Model aynı metni tekrar etmeye başladı; farklı örnekleme ayarlarıyla adım yeniden deneniyor...');
+            callbacks.onLog(et('retryRepetition'));
             continue;
           }
           // An empty write_file is a failed generation rather than a decision (gemma2:2b sometimes
@@ -2050,7 +1594,7 @@ export class AgentEngine {
             isEmptyWrite(ToolDispatcher.parseActionFromResponse(outcome.text))
           ) {
             attempt++;
-            callbacks.onLog('Model boş dosya içeriği üretti; adım farklı örnekleme ayarlarıyla yeniden deneniyor...');
+            callbacks.onLog(et('retryEmptyFile'));
             continue;
           }
           break;
@@ -2062,7 +1606,20 @@ export class AgentEngine {
         if (done) {
           const secs = Math.round((Date.now() - stepStart) / 100) / 10;
           const tps = done.evalDurationNs > 0 ? Math.round((done.evalCount / (done.evalDurationNs / 1e9)) * 10) / 10 : 0;
-          callbacks.onLog(`Adım ${stepCount}: ${done.evalCount} token üretildi (${tps} tok/sn), toplam ${secs} sn.`);
+          // Where the time goes: loading the model, reading the prompt (only its new part when Ollama
+          // reuses its cache) and writing the answer.
+          const seconds = (ns: number) => Math.round(ns / 1e8) / 10;
+          callbacks.onLog(
+            et('stepTiming', {
+              step: stepCount,
+              tokens: done.evalCount,
+              rate: tps,
+              seconds: secs,
+              promptTokens: done.promptEvalCount,
+              promptSeconds: seconds(done.promptEvalDurationNs),
+              loadSeconds: seconds(done.loadDurationNs),
+            })
+          );
           if (done.promptEvalCount > 50) {
             const promptChars = systemPrompt.length + conversation.reduce((s, m) => s + m.content.length, 0);
             const observed = promptChars / done.promptEvalCount;
@@ -2076,7 +1633,7 @@ export class AgentEngine {
         if (outcome.repetition) {
           consecutiveErrors++;
           stepsWithoutProgress++;
-          notice('Model aynı metni tekrar ederek takıldı; yanıt iptal edildi.', 'rejected');
+          notice(et('repetitionDiscarded'), 'rejected');
           conversation.push({
             role: 'user',
             content: `[ERROR]: Your previous reply got stuck repeating the same text and was discarded. Keep "thought" short. If you are writing a big file, write a complete but more compact version.\n\n${stateLine()}`,
@@ -2094,12 +1651,12 @@ export class AgentEngine {
           const ceiling = Math.max(desiredPredict, Math.floor(numCtx * 0.6));
           if (desiredPredict < ceiling) {
             desiredPredict = Math.min(ceiling, desiredPredict * 2);
-            callbacks.onLog(`Yanıt çıktı sınırında kesildi; sınır ${desiredPredict} tokene yükseltilip adım tekrarlanıyor.`);
+            callbacks.onLog(et('outputLimitRaised', { tokens: desiredPredict }));
             stepCount--;
             continue;
           }
           consecutiveErrors++;
-          notice(`Model yanıtı ${done.evalCount} token sınırında kesildi; hiçbir şey uygulanmadı.`, 'rejected');
+          notice(et('outputCutOff', { tokens: done.evalCount }), 'rejected');
           conversation.push({
             role: 'user',
             content: `[ERROR]: Your reply was cut off after ${done.evalCount} tokens (the output limit) before the JSON was complete, so nothing was executed. Make the next reply smaller: write a more compact version of the file, or split the work (create the file first, then extend it with edit_file in the next steps).\n\n${stateLine()}`,
@@ -2126,7 +1683,7 @@ export class AgentEngine {
           consecutiveErrors++;
           stepsWithoutProgress++;
           const unknownName = parsed.rawJson?.action ? `"${parsed.rawJson.action}" is not a tool. ` : '';
-          notice(`Model geçerli bir araç çağrısı üretemedi (${parsed.error || 'bilinmeyen format'}).`, 'rejected');
+          notice(et('invalidToolCall', { detail: parsed.error || et('unknownFormat') }), 'rejected');
           conversation.push({ role: 'assistant', content: fullResponse.slice(0, 1500) || '(empty reply)', meta: { kind: 'action', step: stepCount } });
           conversation.push({
             role: 'user',
@@ -2140,7 +1697,7 @@ export class AgentEngine {
         if (validationError) {
           consecutiveErrors++;
           stepsWithoutProgress++;
-          notice(`Eksik araç parametresi: ${validationError}`, 'rejected');
+          notice(et('missingToolParameter', { detail: validationError }), 'rejected');
           pushExchange(compactActionForHistory(parsed.rawJson), parsed.rawJson, `[ERROR]: ${validationError} Nothing was executed.`);
           continue;
         }
@@ -2155,34 +1712,34 @@ export class AgentEngine {
         // =========================================================
         if ((parsed.type === 'read_git_status' || parsed.type === 'read_git_diff') && ledger.unavailableBinaries.includes('git')) {
           consecutiveErrors++;
-          notice('Engellendi: Git bu çalışma alanında kullanılamıyor.', 'failed');
+          notice(et('blockedGit'), 'failed');
           pushExchange(assistantText, parsed.rawJson, `[BLOCKED]: git is not available in this folder. Continue with the file tools.`);
           continue;
         }
         if ((parsed.type === 'web_search' || parsed.type === 'fetch_url') &&
             !ToolDispatcher.isWebAccessAllowed('coding', useSettingsStore.getState().settings.webAccess)) {
           consecutiveErrors++;
-          notice(`Web Erişimi Engellendi: Web erişimi kapalı olduğu için '${parsed.type}' çağrısı reddedildi.`, 'rejected');
-          callbacks.onLog(`[WEB REDDEDİLDİ]: Web erişimi kapalı - ${describeAction(parsed.type, payload)} engellendi.`);
+          notice(et('blockedWeb', { action: parsed.type }), 'rejected');
+          callbacks.onLog(et('blockedWebLog', { action: describeAction(parsed.type, payload) }));
           pushExchange(assistantText, parsed.rawJson, `[BLOCKED]: web access is turned off by the user. Complete the task with the local project files.`);
           continue;
         }
         if (parsed.type === 'propose_command' && ledger.unavailableBinaries.includes(payload.binary)) {
           consecutiveErrors++;
-          notice(`Engellendi: '${payload.binary}' komutu kullanılamaz.`, 'failed');
+          notice(et('blockedCommand', { binary: String(payload.binary) }), 'failed');
           pushExchange(assistantText, parsed.rawJson, `[BLOCKED]: "${payload.binary}" is not available here. Do not call it again.`);
           continue;
         }
         if (['propose_create', 'propose_edit', 'propose_delete', 'read_file'].includes(parsed.type) && !isSafePath(payload.path)) {
           consecutiveErrors++;
-          notice(`Engellendi: "${payload.path}" çalışma alanı dışında veya geçersiz bir yol.`, 'failed');
+          notice(et('blockedPath', { path: String(payload.path) }), 'failed');
           pushExchange(assistantText, parsed.rawJson, `[BLOCKED]: "${payload.path}" is not a valid path inside the project. Use a relative path such as "src/app.js".`);
           continue;
         }
         if ((parsed.type === 'propose_create' || parsed.type === 'propose_edit') && isScriptOutput(payload.path)) {
           consecutiveErrors++;
           repeatStreak++;
-          notice(`Engellendi: "${payload.path}" betiğin kendisinin üreteceği bir dosya; elle yazılamaz.`, 'rejected');
+          notice(et('blockedScriptOutput', { path: String(payload.path) }), 'rejected');
           pushExchange(
             assistantText,
             parsed.rawJson,
@@ -2195,44 +1752,10 @@ export class AgentEngine {
         // finish
         // =========================================================
         if (parsed.type === 'finish') {
-          const { missing } = await runAcceptanceChecks();
-          const sanityProblems = Array.from(openSanityIssues.entries()).flatMap(([file, issues]) =>
-            issues.filter((i) => i.severity === 'error').map((i) => `${file}: ${i.message}`)
-          );
-          const problems = [...missing, ...sanityProblems];
-
-          if (problems.length > 0 && finishPushbacks < 2) {
-            finishPushbacks++;
-            consecutiveErrors = 0;
-            moveTo(['VALIDATING', 'RETRYING', 'EXECUTING'], 'Eksik kriterler mevcut');
-            notice(`Bitiş Reddedildi: ${problems.length} doğrulama sorunu var.\n${problems.map((p) => `• ${p}`).join('\n')}`, 'rejected');
-            pushExchange(
-              assistantText,
-              parsed.rawJson,
-              `[CANNOT FINISH YET]: automatic verification found problems:\n${problems.map((p) => `- ${p}`).join('\n')}\nFix them with the file tools, then call finish again.`
-            );
-            continue;
-          }
-
-          const looksLikeChangeTask = GOAL_REQUIRES_CHANGES.test(goal) || (runOptions.previousContext ? GOAL_REQUIRES_CHANGES.test(runOptions.previousContext) : false);
-          if (mutationCount === 0 && finishPushbacks === 0 && looksLikeChangeTask && stepCount <= 3) {
-            finishPushbacks++;
-            notice('Erken Bitirme Engellendi: henüz hiçbir dosya değiştirilmedi.', 'rejected');
-            pushExchange(
-              assistantText,
-              parsed.rawJson,
-              `[CHECK]: You have not changed any file yet, but the task asks for changes. Do the work first. If the task really needs no change (for example it was only a question), call finish again and put the answer in "summary".`
-            );
-            continue;
-          }
-
-          await applyDesignTheme();
-          if (problems.length > 0) {
-            finalize(payload.summary, 'error', fullResponse, problems);
-          } else {
-            finalize(payload.summary, 'finished', fullResponse);
-          }
-          break;
+          const flow = await handleFinish(ctx, { assistantText, fullResponse, parsed, payload });
+          if (flow === 'continue') continue;
+          if (flow === 'break') break;
+          if (flow === 'return') return;
         }
 
         // =========================================================
@@ -2260,7 +1783,7 @@ export class AgentEngine {
           if (seen && stillVisible(seen.entry)) {
             repeatStreak++;
             stepsWithoutProgress++;
-            notice(`Döngü Engellendi: ${describeAction(parsed.type, payload)} zaten adım ${seen.step}'de yapıldı.`, 'rejected');
+            notice(et('repeatedAction', { action: describeAction(parsed.type, payload), step: seen.step }), 'rejected');
             pushExchange(
               assistantText,
               parsed.rawJson,
@@ -2274,1231 +1797,83 @@ export class AgentEngine {
         // Read-only tools
         // =========================================================
         if (parsed.type === 'read_directory') {
-          const dirPath = payload.path || '';
-          callbacks.onStep({
-            id: `step_dir_${Date.now()}`,
-            timestamp: Date.now(),
-            type: 'tool_call',
-            toolName: 'read_directory',
-            toolArgs: { path: dirPath },
-            content: `"${dirPath || 'kök'}" dizini listeleniyor...`,
-          });
-          const listRes = await window.electronAPI?.listWorkspaceFiles({ subPath: dirPath, maxDepth: 2 });
-          let observation: string;
-          if (listRes?.success && listRes.files) {
-            consecutiveErrors = 0;
-            repeatStreak = 0;
-            const flat: string[] = [];
-            const walk = (items: WorkspaceFileInfo[]) => {
-              for (const f of items) {
-                flat.push(f.isDirectory ? `${f.relativePath}/` : `${f.relativePath}${f.size !== undefined ? ` (${formatKb(f.size)})` : ''}`);
-                if (!f.isDirectory && !ledger.projectTree.includes(f.relativePath)) ledger.projectTree.push(f.relativePath);
-                if (f.children) walk(f.children);
-              }
-            };
-            walk(listRes.files);
-            observation = flat.length === 0
-              ? `Folder "${dirPath || '.'}" is empty.`
-              : `Contents of "${dirPath || '.'}" (${flat.length} entries):\n${flat.slice(0, 200).join('\n')}${flat.length > 200 ? '\n... (truncated)' : ''}`;
-            callbacks.onStep({
-              id: `step_dir_res_${Date.now()}`,
-              timestamp: Date.now(),
-              type: 'tool_result',
-              toolName: 'read_directory',
-              content: `${flat.length} öğe listelendi.`,
-              status: 'success',
-            });
-          } else {
-            consecutiveErrors++;
-            stepsWithoutProgress++;
-            if (dirPath && !ledger.invalidPaths.includes(dirPath)) ledger.invalidPaths.push(dirPath);
-            observation = `[ERROR]: cannot list "${dirPath}": ${listRes?.error || 'folder not found'}. Use "" for the project root.`;
-            callbacks.onStep({
-              id: `step_dir_fail_${Date.now()}`,
-              timestamp: Date.now(),
-              type: 'tool_result',
-              toolName: 'read_directory',
-              content: `Dizin listelenemedi: ${listRes?.error || 'bulunamadı'}`,
-              status: 'failed',
-            });
-          }
-          const entry = pushExchange(assistantText, parsed.rawJson, observation, `[list_dir "${dirPath || '.'}" result shortened]`);
-          if (readOnlySignature) seenActions.set(readOnlySignature, { step: stepCount, entry });
-          continue;
+          const flow = await handleListDir(ctx, { assistantText, parsed, payload, readOnlySignature });
+          if (flow === 'continue') continue;
+          if (flow === 'break') break;
+          if (flow === 'return') return;
         }
 
         if (parsed.type === 'read_file') {
-          const filePath: string = payload.path;
-          callbacks.onStep({
-            id: `step_read_${Date.now()}`,
-            timestamp: Date.now(),
-            type: 'tool_call',
-            toolName: 'read_file',
-            toolArgs: { path: filePath },
-            content: `"${filePath}" dosyası okunuyor...`,
-          });
-          const readRes = await window.electronAPI?.readWorkspaceFile(filePath);
-          if (!(readRes?.success && readRes.content !== undefined)) {
-            consecutiveErrors++;
-            stepsWithoutProgress++;
-            if (!ledger.invalidPaths.includes(filePath)) ledger.invalidPaths.push(filePath);
-            const suggestion = findClosestPath(filePath, ledger.projectTree);
-            const observation = `[ERROR]: "${filePath}" does not exist.${
-              suggestion && suggestion !== filePath ? ` Did you mean "${suggestion}"?` : ''
-            } If it is a new file, create it with write_file.`;
-            callbacks.onStep({
-              id: `step_read_fail_${Date.now()}`,
-              timestamp: Date.now(),
-              type: 'tool_result',
-              toolName: 'read_file',
-              content: `"${filePath}" bulunamadı.${suggestion ? ` Öneri: ${suggestion}` : ''}`,
-              status: 'failed',
-            });
-            pushExchange(assistantText, parsed.rawJson, observation);
-            continue;
-          }
-
-          const content = readRes.content;
-          const totalLines = lineCount(content);
-          const hasRange = payload.startLine !== undefined || payload.endLine !== undefined;
-          const signature = `read:${filePath}:${readRes.hash || hashText(content)}:${payload.startLine ?? ''}-${payload.endLine ?? ''}`;
-          const seen = seenActions.get(signature);
-          if (seen && stillVisible(seen.entry)) {
-            repeatStreak++;
-            stepsWithoutProgress++;
-            notice(
-              seen.step === 0
-                ? `Döngü Engellendi: "${filePath}" içeriği görev mesajında zaten mevcut ve değişmedi.`
-                : `Döngü Engellendi: "${filePath}" adım ${seen.step}'de okundu ve o zamandan beri değişmedi.`,
-              'rejected'
-            );
-            pushExchange(
-              assistantText,
-              parsed.rawJson,
-              `[REPEATED]: ${
-                seen.step === 0
-                  ? `the content of "${filePath}" is already in the task message above and it has not changed.`
-                  : `you already read "${filePath}" at step ${seen.step} and it has not changed; its content is above.`
-              }${openProblemsFor(filePath)}${acceptanceNote()}${repeatNudge() || ' Continue with the next step (for example edit_file or write_file).'}`
-            );
-            continue;
-          }
-
-          consecutiveErrors = 0;
-          repeatStreak = 0;
-          stepsWithoutProgress = 0;
-          // Files broken by literal escape sequences are shown decoded so the model can repair
-          // them while keeping their content.
-          const escaped = looksJsonEscaped(content);
-          const source = escaped ? sanitizeFileContent(filePath, content).content : content;
-          const sourceLines = lineCount(source);
-          let shown = source;
-          let header = `"${filePath}" (${sourceLines} lines, ${formatKb(content.length)})${
-            escaped
-              ? ' — WARNING: stored with literal \\n and \\" escape sequences (broken in the browser); shown decoded. Rewrite it with write_file using real line breaks and quotes, keeping its content'
-              : ''
-          }`;
-          if (hasRange) {
-            const start = Math.max(1, payload.startLine ?? 1);
-            const end = Math.min(sourceLines, payload.endLine ?? start + 200);
-            shown = lineRangeExcerpt(source, start, end);
-            header = `"${filePath}" lines ${start}-${end} of ${sourceLines}`;
-          }
-          if (shown.length > MAX_READ_CHARS) {
-            const cut = shown.slice(0, MAX_READ_CHARS);
-            const shownLines = lineCount(cut);
-            shown = cut;
-            header += ` — only the first ${shownLines} lines are shown; call read_file with start_line/end_line for the rest`;
-          }
-          ledger.knownFiles[filePath] = { size: content.length, lastAction: 'okundu' };
-          const observation = `${header}:\n${wrapUntrustedFileContent(filePath, shown)}`;
-          callbacks.onStep({
-            id: `step_read_res_${Date.now()}`,
-            timestamp: Date.now(),
-            type: 'tool_result',
-            toolName: 'read_file',
-            content: `Dosya okundu (${totalLines} satır, ${formatKb(content.length)}).`,
-            status: 'success',
-            metadata: { filePath, size: content.length, hash: readRes.hash },
-          });
-          const entry = pushExchange(
-            assistantText,
-            parsed.rawJson,
-            observation,
-            `[read_file "${filePath}": ${totalLines} lines — content removed from history to save space; read it again if you need it]`
-          );
-          seenActions.set(signature, { step: stepCount, entry });
-          continue;
+          const flow = await handleReadFile(ctx, { assistantText, parsed, payload });
+          if (flow === 'continue') continue;
+          if (flow === 'break') break;
+          if (flow === 'return') return;
         }
 
         if (parsed.type === 'search_code') {
-          const query: string = payload.query;
-          callbacks.onStep({
-            id: `step_srch_${Date.now()}`,
-            timestamp: Date.now(),
-            type: 'tool_call',
-            toolName: 'search_code',
-            toolArgs: { query },
-            content: `"${query}" terimi aranıyor...`,
-          });
-          // A failing search is a tool error the model can work around, never the end of the run
-          // (the main process of v1.7.0 and earlier had no handler for it: every search_code crashed the task).
-          const searchRes = await Promise.resolve(window.electronAPI?.searchWorkspaceCode(query)).catch((err: any) => ({
-            success: false as const,
-            matches: undefined,
-            error: String(err?.message || err).replace(/^Error invoking remote method '[^']+': /, ''),
-          }));
-          let observation: string;
-          if (searchRes?.success && searchRes.matches) {
-            consecutiveErrors = 0;
-            repeatStreak = 0;
-            stepsWithoutProgress = 0;
-            const lines = searchRes.matches
-              .slice(0, 60)
-              .map((m) => `${m.relativePath}:${m.lineNumber}: ${m.lineContent.trim().slice(0, 200)}`);
-            observation = wrapUntrustedSearchResults(
-              query,
-              lines.length > 0
-                ? `${lines.join('\n')}${searchRes.matches.length > 60 ? `\n... ${searchRes.matches.length - 60} more matches` : ''}`
-                : 'No matches.'
-            );
-            callbacks.onStep({
-              id: `step_srch_res_${Date.now()}`,
-              timestamp: Date.now(),
-              type: 'tool_result',
-              toolName: 'search_code',
-              content: `${searchRes.matches.length} eşleşme bulundu.`,
-              status: 'success',
-            });
-          } else {
-            consecutiveErrors++;
-            stepsWithoutProgress++;
-            observation = `[ERROR]: search failed: ${searchRes?.error || 'unknown error'}. Use list_dir and read_file instead.`;
-          }
-          const entry = pushExchange(assistantText, parsed.rawJson, observation, `[search_code "${query}" result shortened]`);
-          if (readOnlySignature) seenActions.set(readOnlySignature, { step: stepCount, entry });
-          continue;
+          const flow = await handleSearchCode(ctx, { assistantText, parsed, payload, readOnlySignature });
+          if (flow === 'continue') continue;
+          if (flow === 'break') break;
+          if (flow === 'return') return;
         }
 
         if (parsed.type === 'read_git_status' || parsed.type === 'read_git_diff') {
-          const gitAction = parsed.type === 'read_git_status' ? 'status' : 'diff';
-          callbacks.onStep({
-            id: `step_git_${Date.now()}`,
-            timestamp: Date.now(),
-            type: 'tool_call',
-            toolName: parsed.type,
-            content: `Git ${gitAction} inceleniyor...`,
-          });
-          const gitRes = await window.electronAPI?.readGit(gitAction);
-          let observation: string;
-          if (gitRes?.success) {
-            consecutiveErrors = 0;
-            repeatStreak = 0;
-            observation = wrapUntrustedGitOutput(gitAction, (gitRes.output || '(clean working tree)').slice(0, 8000));
-            callbacks.onStep({
-              id: `step_git_res_${Date.now()}`,
-              timestamp: Date.now(),
-              type: 'tool_result',
-              toolName: parsed.type,
-              content: gitRes.output ? `Git ${gitAction} okundu.` : 'Temiz çalışma alanı.',
-              status: 'success',
-            });
-          } else {
-            consecutiveErrors++;
-            if (!ledger.unavailableBinaries.includes('git')) ledger.unavailableBinaries.push('git');
-            observation = `[ERROR]: git failed: ${gitRes?.error || 'unknown error'}. Do not call git tools again.`;
-          }
-          const entry = pushExchange(assistantText, parsed.rawJson, observation, `[git ${gitAction} result shortened]`);
-          if (readOnlySignature) seenActions.set(readOnlySignature, { step: stepCount, entry });
-          continue;
+          const flow = await handleGit(ctx, { assistantText, parsed, readOnlySignature });
+          if (flow === 'continue') continue;
+          if (flow === 'break') break;
+          if (flow === 'return') return;
         }
 
         if (parsed.type === 'web_search') {
-          const query: string = payload.query;
-          callbacks.onStep({
-            id: `step_search_${Date.now()}`,
-            timestamp: Date.now(),
-            type: 'tool_call',
-            toolName: 'web_search',
-            toolArgs: { query },
-            content: `Web'de aranıyor: "${query}"...`,
-          });
-          callbacks.onLog(`WEB SEARCH\nQuery: ${query}`);
-          let observation: string;
-          try {
-            const results = await WebAccessService.search(query, { limit: 5, signal: this.abortController?.signal });
-            consecutiveErrors = 0;
-            repeatStreak = 0;
-            stepsWithoutProgress = 0;
-            const formatted = results.length === 0
-              ? 'No results.'
-              : results.map((r) => `[${r.id}] ${r.title}\nURL: ${r.url}\nSnippet: ${r.snippet}\nSource: ${r.source}`).join('\n\n');
-            observation = `${wrapUntrustedWebResult('search', query, formatted)}\nUse fetch_url to read a page, or continue with the task.`;
-            callbacks.onStep({
-              id: `step_search_res_${Date.now()}`,
-              timestamp: Date.now(),
-              type: 'tool_result',
-              toolName: 'web_search',
-              content: `Web araması tamamlandı (${results.length} sonuç).`,
-              status: 'success',
-              metadata: { query, resultsCount: results.length },
-            });
-          } catch (err: any) {
-            consecutiveErrors++;
-            observation = `[ERROR]: web search failed: ${err?.message || 'unknown error'}`;
-            callbacks.onLog(`[WEB HATA]: ${err?.message}`);
-            callbacks.onStep({
-              id: `step_search_fail_${Date.now()}`,
-              timestamp: Date.now(),
-              type: 'tool_result',
-              toolName: 'web_search',
-              content: `Web araması başarısız: ${err?.message || 'bilinmeyen hata'}`,
-              status: 'failed',
-            });
-          }
-          const entry = pushExchange(assistantText, parsed.rawJson, observation, `[web_search "${query}" result shortened]`);
-          if (readOnlySignature) seenActions.set(readOnlySignature, { step: stepCount, entry });
-          continue;
+          const flow = await handleWebSearch(ctx, { assistantText, parsed, payload, readOnlySignature });
+          if (flow === 'continue') continue;
+          if (flow === 'break') break;
+          if (flow === 'return') return;
         }
 
         if (parsed.type === 'fetch_url') {
-          const targetUrl: string = payload.url;
-          callbacks.onStep({
-            id: `step_fetch_${Date.now()}`,
-            timestamp: Date.now(),
-            type: 'tool_call',
-            toolName: 'fetch_url',
-            toolArgs: { url: targetUrl },
-            content: `Web sayfası indiriliyor: "${targetUrl}"...`,
-          });
-          callbacks.onLog(`WEB FETCH\nURL: ${targetUrl}`);
-          let observation: string;
-          try {
-            const fetchResult = await WebAccessService.fetchUrl(targetUrl, {
-              maxBytes: 256 * 1024,
-              signal: this.abortController?.signal,
-            });
-            consecutiveErrors = 0;
-            repeatStreak = 0;
-            stepsWithoutProgress = 0;
-            const sizeKb = Math.round(fetchResult.sizeBytes / 1024);
-            observation = wrapUntrustedWebResult(
-              'fetch',
-              fetchResult.title,
-              `URL: ${fetchResult.url}\nTitle: ${fetchResult.title}\n\n${fetchResult.content.slice(0, 10000)}`
-            );
-            callbacks.onStep({
-              id: `step_fetch_res_${Date.now()}`,
-              timestamp: Date.now(),
-              type: 'tool_result',
-              toolName: 'fetch_url',
-              content: `Web sayfası okundu: "${fetchResult.title}" (${sizeKb} KB).`,
-              status: 'success',
-              metadata: { url: fetchResult.url, status: fetchResult.status, sizeKb },
-            });
-          } catch (err: any) {
-            consecutiveErrors++;
-            observation = `[ERROR]: could not fetch the page: ${err?.message || 'unknown error'}`;
-            callbacks.onLog(`[WEB FETCH HATA]: ${err?.message}`);
-            callbacks.onStep({
-              id: `step_fetch_fail_${Date.now()}`,
-              timestamp: Date.now(),
-              type: 'tool_result',
-              toolName: 'fetch_url',
-              content: `Web sayfası okunamadı: ${err?.message || 'bilinmeyen hata'}`,
-              status: 'failed',
-            });
-          }
-          const entry = pushExchange(assistantText, parsed.rawJson, observation, `[fetch_url "${targetUrl}" result shortened]`);
-          if (readOnlySignature) seenActions.set(readOnlySignature, { step: stepCount, entry });
-          continue;
+          const flow = await handleFetchUrl(ctx, { assistantText, parsed, payload, readOnlySignature });
+          if (flow === 'continue') continue;
+          if (flow === 'break') break;
+          if (flow === 'return') return;
         }
 
         // =========================================================
         // Mutations (human-in-the-loop approval)
         // =========================================================
         if (parsed.type === 'propose_create') {
-          const filePath: string = payload.path;
-          const sanitized = sanitizeFileContent(filePath, payload.content);
-          let content = sanitized.content;
-          const readRes = await window.electronAPI?.readWorkspaceFile(filePath);
-          const exists = !!(readRes?.success && readRes.content !== undefined);
-          const currentContent = exists ? readRes!.content! : null;
-
-          // Rejections share one path; resending content that was already rejected counts as a
-          // repeat (a model re-sending the same invalid package.json six times burned the run).
-          const rejectionSig = `${filePath}:${hashText(content)}`;
-          const rejectWrite = (noticeText: string, observation: string) => {
-            const previousStep = rejectedWrites.get(rejectionSig);
-            rejectedWrites.set(rejectionSig, stepCount);
-            stepsWithoutProgress++;
-            let text = observation;
-            if (previousStep !== undefined) {
-              repeatStreak++;
-              text += ` You already sent exactly this content at step ${previousStep} and it was rejected for the same reason.${repeatNudge()}`;
-            } else {
-              consecutiveErrors++;
-            }
-            notice(noticeText, 'rejected', 'Dosya Denetimi');
-            pushExchange(assistantText, parsed.rawJson, text);
-          };
-
-          if (exists && isProtectedTestFile(filePath, userRequestText())) {
-            rejectWrite(
-              `"${filePath}" yazılmadı: mevcut testler beklenen davranışı tanımlar, düzeltilmesi gereken koddur.`,
-              `[NOT WRITTEN]: "${filePath}" is an existing test file. The tests define the expected behaviour — change the code so that they pass; do not rewrite the tests (only the user may ask for that).`
-            );
-            continue;
-          }
-
-          if (isEmptyWrite(parsed) && !EMPTY_FILE_INTENT.test(userRequestText())) {
-            const pageHint = /\.html?$/i.test(filePath)
-              ? ' — the whole page: <!DOCTYPE html>, <head> with <meta name="viewport"> and a <style> block with the CSS, <body> with the real content, and a <script> with the JavaScript it needs'
-              : '';
-            rejectWrite(
-              `"${filePath}" yazılmadı: dosya içeriği boş gönderildi.`,
-              `[NOT WRITTEN]: "content" was empty. write_file must contain the COMPLETE text of "${filePath}"${pageHint}. Send write_file again with the full content.${acceptanceNote()}`
-            );
-            continue;
-          }
-
-          if (
-            currentContent !== null &&
-            currentContent.trim() !== '' &&
-            currentContent.trim() !== content.trim() &&
-            looksLikeStatusMessage(content, userRequestText())
-          ) {
-            const message = content.trim().slice(0, 120);
-            rejectWrite(
-              `"${filePath}" yazılmadı: dosya içeriği yerine bir durum mesajı yazılıyordu ("${message}").`,
-              `[NOT WRITTEN]: "${message}" is a status message for the user, not content of "${filePath}"; the file keeps its current content. If the task is done, reply with finish and put this message in "summary".`
-            );
-            continue;
-          }
-
-          const lazy = detectLazyPlaceholder(content, currentContent);
-          if (lazy) {
-            rejectWrite(
-              `"${filePath}" yazılmadı: içerik gerçek kod yerine yer tutucu içeriyor ("${lazy}").`,
-              `[NOT WRITTEN]: the content contains the placeholder "${lazy}" instead of real code. Send the COMPLETE file content in write_file.`
-            );
-            continue;
-          }
-
-          const formatError = strictFormatError(filePath, content);
-          if (formatError && (currentContent === null || strictFormatError(filePath, currentContent) === null)) {
-            rejectWrite(
-              `"${filePath}" yazılmadı: içerik geçerli JSON değil (${formatError}).`,
-              `[NOT WRITTEN]: the new content of "${filePath}" is not valid JSON — ${formatError}. The file was left unchanged. Fix that line and send the complete, valid JSON document.`
-            );
-            continue;
-          }
-
-          // Config rewrites that forget existing keys ("scripts.test", "name") are merged additively,
-          // so even small models can "add a script" without destroying package.json.
-          if (exists && currentContent !== null && !REMOVAL_INTENT.test(userRequestText())) {
-            const merged = mergeJsonPreservingKeys(filePath, currentContent, content);
-            if (merged) {
-              content = merged.content;
-              sanitized.notes.push(`kept existing keys the rewrite had dropped (${merged.kept.slice(0, 10).join(', ')})`);
-            }
-          }
-
-          if (exists && currentContent !== null && !REMOVAL_INTENT.test(userRequestText()) && !REWRITE_INTENT.test(userRequestText())) {
-            const destructive = detectDestructiveRewrite(filePath, currentContent, content);
-            if (destructive) {
-              rejectWrite(
-                `"${filePath}" yazılmadı: yeniden yazım dosyanın çoğunu silecekti (${destructive}).`,
-                `[NOT WRITTEN]: write_file replaces the WHOLE file, and ${destructive}. To add or change a part, use edit_file: put an existing anchor line in "find" (for example "</body>" or the end of a function) and the anchor plus your new code in "replace". Otherwise send the complete updated file.`
-              );
-              continue;
-            }
-          }
-
-          if (exists && currentContent !== null && !REMOVAL_INTENT.test(userRequestText())) {
-            const dropped = jsonKeyLoss(filePath, originalSnapshots.get(filePath) ?? currentContent, content);
-            if (dropped.length > 0) {
-              rejectWrite(
-                `"${filePath}" yazılmadı: mevcut anahtarları siliyordu (${dropped.join(', ')}).`,
-                `[NOT WRITTEN]: this rewrite of "${filePath}" would delete existing keys: ${dropped.join(', ')}. Keep everything that is already there and only add or change what the task needs. Current content:\n${wrapUntrustedFileContent(filePath, currentContent.slice(0, 6000))}\nUse edit_file for a small change, or write_file with the complete merged document.`
-              );
-              continue;
-            }
-          }
-
-          if (exists && currentContent !== null && currentContent !== content) {
-            const damage = damageFromChange(filePath, currentContent, content);
-            if (damage.length > 0) {
-              rejectWrite(
-                `"${filePath}" yazılmadı: yeni içerik dosyayı bozacaktı (${damage[0].message.slice(0, 160)}).`,
-                `[NOT WRITTEN]: the new content would break "${filePath}", so the file is unchanged. The automatic check would report:\n${formatSanityIssues(damage)}${issueExcerpt(content, damage, 'Your version would read at')}\nSend the complete file again with these problems fixed.`
-              );
-              continue;
-            }
-          }
-
-          if (exists && currentContent === content) {
-            repeatStreak++;
-            stepsWithoutProgress++;
-            notice(`"${filePath}" zaten bu içeriğe sahip; değişiklik yok.`, 'rejected');
-            pushExchange(
-              assistantText,
-              parsed.rawJson,
-              `[NO CHANGE]: "${filePath}" already contains exactly this content.${acceptanceNote()}${repeatNudge() || ' Continue with the next part of the task or finish.'}`
-            );
-            continue;
-          }
-
-          const changesetItem: ChangesetItem = {
-            id: `cs_create_${Date.now()}`,
-            operation: exists ? 'edit' : 'create',
-            relativePath: filePath,
-            baseHash: exists ? readRes?.hash || '' : '',
-            proposedContentHash: '',
-            originalContent: currentContent || '',
-            newContent: content,
-            reason: String(parsed.rawJson?.thought || payload.reason || '').slice(0, 300),
-            selected: true,
-            status: 'pending',
-          };
-          const approved = await requestApproval(
-            changesetItem,
-            exists ? 'Dosya Yeniden Yazıldı (Otomatik Onay)' : 'Yeni Dosya Oluşturma (Otomatik Onay)',
-            exists ? 'Dosya Yeniden Yazma Teklifi' : 'Yeni Dosya Oluşturma Teklifi',
-            `"${filePath}" ${exists ? 'baştan yazılıyor' : 'oluşturuluyor'} (${lineCount(content)} satır).${
-              sanitized.notes.length ? ` Otomatik düzeltme: ${sanitized.notes.join(', ')}.` : ''
-            }`
-          );
-          if (!approved) {
-            stepsWithoutProgress++;
-            callbacks.onStep({
-              id: `step_rej_${Date.now()}`,
-              timestamp: Date.now(),
-              type: 'tool_result',
-              toolName: 'propose_create',
-              content: 'Kullanıcı dosya yazımını reddetti.',
-              status: 'rejected',
-            });
-            pushExchange(assistantText, parsed.rawJson, `[REJECTED BY USER]: the user did not approve writing "${filePath}". Choose a different approach or ask the user.`);
-            continue;
-          }
-
-          const result = await applyMutation({ filePath, exists, baseHash: readRes?.hash || '', newContent: content });
-          if (!result.ok) {
-            consecutiveErrors++;
-            callbacks.onStep({
-              id: `step_apply_fail_${Date.now()}`,
-              timestamp: Date.now(),
-              type: 'tool_result',
-              toolName: 'propose_create',
-              content: `Dosya yazılamadı: ${result.error}`,
-              status: 'failed',
-            });
-            pushExchange(assistantText, parsed.rawJson, `[ERROR]: could not write "${filePath}": ${result.error}`);
-            continue;
-          }
-
-          consecutiveErrors = 0;
-          repeatStreak = 0;
-          ledger.appliedChanges.push(`${exists ? 'Yeniden yazıldı' : 'Yeni dosya'}: "${filePath}"`);
-          ledger.milestones.push({
-            id: `m_cr_${Date.now()}`,
-            description: `${exists ? 'Dosya yeniden yazıldı' : 'Yeni dosya oluşturuldu'}: ${filePath}`,
-            status: 'done',
-            timestamp: Date.now(),
-          });
-          callbacks.onStep({
-            id: `step_apply_${Date.now()}`,
-            timestamp: Date.now(),
-            type: 'tool_result',
-            toolName: 'propose_create',
-            content: `"${filePath}" ${exists ? 'yeniden yazıldı' : 'oluşturuldu'} (${lineCount(content)} satır, ${formatKb(content.length)}).`,
-            status: 'success',
-          });
-          if (!originalSnapshots.has(filePath)) originalSnapshots.set(filePath, currentContent);
-          // A full rewrite starts the file's edit history over.
-          for (const sig of Array.from(appliedEdits.keys())) if (sig.startsWith(`${filePath}:`)) appliedEdits.delete(sig);
-          const verdict = await afterMutation(filePath, content, currentContent);
-          const baseline = originalSnapshots.get(filePath);
-          const lostKeys = baseline ? jsonKeyLoss(filePath, baseline, content) : [];
-          const lostDefinitions = baseline ? definitionLoss(filePath, baseline, content) : [];
-          const observation = [
-            `[OK]: wrote "${filePath}" (${lineCount(content)} lines, ${formatKb(content.length)})${exists ? ', replacing the previous version' : ''}.`,
-            sanitized.notes.length ? `Auto-fixed: ${sanitized.notes.join('; ')}.` : '',
-            lostKeys.length
-              ? `Warning: the rewrite removed these existing keys: ${lostKeys.join(', ')}. Restore them unless the task asked to remove them.`
-              : '',
-            lostDefinitions.length
-              ? `Warning: the rewrite removed these existing definitions: ${lostDefinitions.slice(0, 12).join(', ')}. Restore them unless removing them was intended.`
-              : '',
-            verdict,
-          ]
-            .filter(Boolean)
-            .join('\n');
-          pushExchange(assistantText, parsed.rawJson, observation);
-          continue;
+          const flow = await handleWriteFile(ctx, { assistantText, parsed, payload });
+          if (flow === 'continue') continue;
+          if (flow === 'break') break;
+          if (flow === 'return') return;
         }
 
         if (parsed.type === 'propose_edit') {
-          const filePath: string = payload.path;
-          const readRes = await window.electronAPI?.readWorkspaceFile(filePath);
-          if (!(readRes?.success && readRes.content !== undefined)) {
-            consecutiveErrors++;
-            stepsWithoutProgress++;
-            notice(`"${filePath}" henüz mevcut değil; düzenleme yerine write_file kullanılmalı.`, 'rejected');
-            pushExchange(assistantText, parsed.rawJson, `[ERROR]: "${filePath}" does not exist, so it cannot be edited. Create it with write_file and its complete content.`);
-            continue;
-          }
-          const currentContent = readRes.content;
-          if (isProtectedTestFile(filePath, userRequestText())) {
-            consecutiveErrors++;
-            stepsWithoutProgress++;
-            notice(`"${filePath}" değiştirilmedi: mevcut testler beklenen davranışı tanımlar, düzeltilmesi gereken koddur.`, 'rejected', 'Test Koruması');
-            pushExchange(
-              assistantText,
-              parsed.rawJson,
-              `[NOT APPLIED]: "${filePath}" is an existing test file. The tests define the expected behaviour — change the code so that they pass; do not change the tests (only the user may ask for that). Read the failing assertion (expected vs actual) and fix the implementation.`
-            );
-            continue;
-          }
-          let replaceText: string = payload.new_chunk;
-          const replaceSanitized = sanitizeFileContent(filePath, replaceText);
-          if (replaceSanitized.notes.some((n) => n.includes('escape'))) replaceText = replaceSanitized.content;
-
-          // Re-applying an identical edit is never progress: replace_lines changes the file again on
-          // every call (gemma2:2b deleted a CSS line per step this way) and insertions duplicate.
-          const editSig = `${filePath}:${
-            payload.lineRange ? `L${payload.startLine}-${payload.endLine}` : hashText(String(payload.original_chunk ?? ''))
-          }:${hashText(String(replaceText ?? ''))}`;
-          const appliedAt = appliedEdits.get(editSig);
-          if (appliedAt !== undefined) {
-            repeatStreak++;
-            stepsWithoutProgress++;
-            notice(`Döngü Engellendi: "${filePath}" dosyasına aynı düzenleme ${appliedAt}. adımda zaten uygulanmıştı.`, 'rejected');
-            const around = payload.lineRange
-              ? `\nCurrent lines ${Math.max(1, payload.startLine - 3)}-${payload.endLine + 3} of "${filePath}":\n${numberedLines(currentContent, payload.startLine - 3, payload.endLine + 3)}`
-              : '';
-            // Re-sending the edit while the file is still broken means the model cannot see the fix:
-            // the whole file and a complete rewrite are the way out (patching failed already).
-            const openErrors = (openSanityIssues.get(filePath) || []).filter((i) => i.severity === 'error');
-            const help =
-              openErrors.length === 0
-                ? `${around}${openProblemsFor(filePath)}`
-                : `\n"${filePath}" still has this error:\n${formatSanityIssues(openErrors)}\nDo not send this edit again. ${
-                    currentContent.length <= 6000
-                      ? `Rewrite the WHOLE file correctly with write_file (its complete content). The current file:\n${wrapUntrustedFileContent(filePath, numberedLines(currentContent))}`
-                      : `Read the reported lines and fix them with a different edit.${problemExcerpt(filePath)}`
-                  }`;
-            pushExchange(
-              assistantText,
-              parsed.rawJson,
-              `[REPEATED]: exactly this edit was already applied at step ${appliedAt}. Applying it again would change "${filePath}" again (line numbers shift after every edit), so nothing was changed.${help}${acceptanceNote()}${repeatNudge() || ' Do a different, necessary step or finish.'}`
-            );
-            continue;
-          }
-
-          const editResult = payload.lineRange
-            ? applyLineRangeEdit(currentContent, payload.startLine, payload.endLine, replaceText)
-            : applyChunkEdit(currentContent, stripLineNumberPrefixes(payload.original_chunk), stripLineNumberPrefixes(replaceText));
-          if (!editResult.success) {
-            consecutiveErrors++;
-            stepsWithoutProgress++;
-            const failures = (editFailures.get(filePath) || 0) + 1;
-            editFailures.set(filePath, failures);
-            // Numbered lines let the model switch to replace_lines instead of re-copying text.
-            let hint = '';
-            if (currentContent.length <= 6000) {
-              hint = `Current content of "${filePath}" with line numbers:\n${wrapUntrustedFileContent(filePath, numberedLines(currentContent))}`;
-            } else {
-              const region = findBestMatchRegion(currentContent, payload.original_chunk || '');
-              hint = region
-                ? `The most similar text is at lines ${region.startLine}-${region.endLine}:\n${wrapUntrustedFileContent(filePath, numberedLines(currentContent, region.startLine, region.endLine))}`
-                : 'Read the file again to copy the exact text.';
-            }
-            const rewriteAdvice = failures >= 2 ? '\nEdits keep failing: rewrite the whole file with write_file and its complete updated content.' : '';
-            notice(`"${filePath}" düzenlemesi uygulanamadı: ${editResult.error}.`, 'rejected', 'Diff Eşleşmedi');
-            const failureEntry = pushExchange(
-              assistantText,
-              parsed.rawJson,
-              `[EDIT FAILED]: ${editResult.error}. Nothing was changed.\n${hint}\nEasiest fix: replace_lines with the line numbers above (start_line, end_line, content). Or copy "find" exactly (same characters and indentation, without the "NN| " prefixes).${rewriteAdvice}`,
-              `[edit_file "${filePath}" failed; the file content shown then was removed from history — read it again if you need it]`
-            );
-            if (currentContent.length <= 6000) {
-              // The full file is in this result, so an immediate read_file would only repeat it.
-              seenActions.set(`read:${filePath}:${readRes.hash || hashText(currentContent)}:-`, { step: stepCount, entry: failureEntry });
-            }
-            continue;
-          }
-
-          let newFullContent = editResult.newContent;
-          let editMergeNote = '';
-          // Python: a block indented differently from the lines it replaces is aligned to them when
-          // that removes errors (small models cannot see the stray indentation they keep re-sending).
-          if (payload.lineRange && /\.pyw?$/i.test(filePath)) {
-            const aligned = alignReplacementIndent(currentContent, payload.startLine, payload.endLine, replaceText);
-            const alignedResult = aligned === null ? null : applyLineRangeEdit(currentContent, payload.startLine, payload.endLine, aligned);
-            const errorCount = (content: string) => checkFileSanity(filePath, content).filter((i) => i.severity === 'error').length;
-            if (alignedResult?.success && errorCount(alignedResult.newContent) < errorCount(newFullContent)) {
-              newFullContent = alignedResult.newContent;
-              editMergeNote = 'Auto-fixed: your lines were indented differently from the lines they replace; they were aligned to them.';
-            }
-          }
-          if (!REMOVAL_INTENT.test(userRequestText())) {
-            const merged = mergeJsonPreservingKeys(filePath, currentContent, newFullContent);
-            if (merged) {
-              newFullContent = merged.content;
-              editMergeNote = `Kept existing keys the edit had dropped: ${merged.kept.slice(0, 10).join(', ')}.`;
-            }
-          }
-          const editFormatError = strictFormatError(filePath, newFullContent);
-          if (editFormatError && strictFormatError(filePath, currentContent) === null) {
-            consecutiveErrors++;
-            stepsWithoutProgress++;
-            notice(`"${filePath}" düzenlemesi uygulanmadı: sonuç geçerli JSON olmazdı (${editFormatError}).`, 'rejected', 'Dosya Denetimi');
-            pushExchange(
-              assistantText,
-              parsed.rawJson,
-              `[NOT APPLIED]: after this edit "${filePath}" would no longer be valid JSON (${editFormatError}). The file is unchanged. Check commas, quotes and brackets in "replace".`
-            );
-            continue;
-          }
-          if (!REMOVAL_INTENT.test(userRequestText())) {
-            const dropped = jsonKeyLoss(filePath, originalSnapshots.get(filePath) ?? currentContent, newFullContent);
-            if (dropped.length > 0) {
-              consecutiveErrors++;
-              stepsWithoutProgress++;
-              notice(`"${filePath}" düzenlemesi uygulanmadı: mevcut anahtarları siliyordu (${dropped.join(', ')}).`, 'rejected', 'Dosya Denetimi');
-              pushExchange(
-                assistantText,
-                parsed.rawJson,
-                `[NOT APPLIED]: this edit would delete existing keys from "${filePath}": ${dropped.join(', ')}. Keep them; only add or change what the task needs.`
-              );
-              continue;
-            }
-          }
-          if (newFullContent === currentContent) {
-            repeatStreak++;
-            stepsWithoutProgress++;
-            notice(`"${filePath}" için önerilen düzenleme dosyayı değiştirmiyor (zaten uygulanmış).`, 'rejected');
-            pushExchange(
-              assistantText,
-              parsed.rawJson,
-              `[NO CHANGE]: this edit leaves "${filePath}" unchanged — it is already applied.${acceptanceNote()}${repeatNudge() || ' Continue with the next part of the task.'}`
-            );
-            continue;
-          }
-          const lazy = detectLazyPlaceholder(replaceText, payload.original_chunk);
-          if (lazy) {
-            consecutiveErrors++;
-            stepsWithoutProgress++;
-            notice(`"${filePath}" düzenlemesi reddedildi: yer tutucu içeriyor ("${lazy}").`, 'rejected');
-            pushExchange(assistantText, parsed.rawJson, `[NOT APPLIED]: "replace" contains the placeholder "${lazy}" instead of real code. Write the actual code.`);
-            continue;
-          }
-
-          // Do no harm: an edit that breaks a working file (or makes a broken one worse) is not
-          // applied, so the model never has to patch its own breakage line by line.
-          const damage = damageFromChange(filePath, currentContent, newFullContent);
-          if (damage.length > 0) {
-            consecutiveErrors++;
-            stepsWithoutProgress++;
-            notice(`"${filePath}" düzenlemesi uygulanmadı: dosyayı bozacaktı (${damage[0].message.slice(0, 160)}).`, 'rejected', 'Dosya Denetimi');
-            const rangeHint = payload.lineRange
-              ? 'replace_lines replaces EVERY line from start_line to end_line with "content": include each line of that range that must stay (to insert a line, repeat the original line in content) and keep the range as small as possible.'
-              : '"replace" must keep every tag, bracket and quote of the text it replaces that is still needed.';
-            pushExchange(
-              assistantText,
-              parsed.rawJson,
-              `[NOT APPLIED]: this edit would break "${filePath}", so the file is unchanged. With your edit the automatic check would report:\n${formatSanityIssues(damage)}${issueExcerpt(newFullContent, damage, 'Your version would read at')}\n${rangeHint} Send a corrected edit.`
-            );
-            continue;
-          }
-
-          // An edit that deletes a function or class the file still uses leaves it valid but broken: in the
-          // app, qwen2.5-coder:7b filled add_options() over a range that also held "def plan(...)", while
-          // run_tool(..., plan) stayed. Removing one on purpose removes its uses too, so this holds for
-          // any request (variables are left out: a removed local may share its name with a property).
-          const definedAt = (name: string) => new RegExp(`\\b(?:def|class|function\\*?)\\s+${name}\\b`);
-          const stillUsed = definitionLoss(filePath, currentContent, newFullContent).filter(
-            (name) => definedAt(name).test(currentContent) && new RegExp(`\\b${name}\\b`).test(newFullContent)
-          );
-          if (stillUsed.length > 0) {
-            consecutiveErrors++;
-            stepsWithoutProgress++;
-            const useLine = newFullContent.split('\n').findIndex((l) => new RegExp(`\\b${stillUsed[0]}\\b`).test(l)) + 1;
-            const defLine = currentContent.split('\n').findIndex((l) => definedAt(stillUsed[0]).test(l)) + 1;
-            notice(`"${filePath}" düzenlemesi uygulanmadı: hâlâ kullanılan "${stillUsed.join('", "')}" tanımını siliyordu.`, 'rejected', 'Dosya Denetimi');
-            pushExchange(
-              assistantText,
-              parsed.rawJson,
-              `[NOT APPLIED]: this edit deletes the definition of ${stillUsed.join(', ')}${defLine > 0 ? ` (line ${defLine})` : ''}, but "${filePath}" still uses it (line ${useLine} after your edit), so the file is unchanged. ${
-                payload.lineRange
-                  ? `replace_lines replaces EVERY line from start_line to end_line: choose a range that ends before line ${defLine || 'of that definition'}, or repeat the lines that must stay in "content".`
-                  : '"find" must not include that definition, or "replace" must repeat it.'
-              }${payload.lineRange ? `\nCurrent lines ${Math.max(1, payload.startLine - 1)}-${payload.endLine + 2} of "${filePath}":\n${numberedLines(currentContent, payload.startLine - 1, payload.endLine + 2)}` : ''}`
-            );
-            continue;
-          }
-
-          const changesetItem: ChangesetItem = {
-            id: `cs_edit_${Date.now()}`,
-            operation: 'edit',
-            relativePath: filePath,
-            baseHash: readRes.hash || '',
-            proposedContentHash: '',
-            originalContent: currentContent,
-            newContent: newFullContent,
-            reason: String(parsed.rawJson?.thought || payload.reason || 'Kod güncellendi').slice(0, 300),
-            selected: true,
-            status: 'pending',
-          };
-          const approved = await requestApproval(
-            changesetItem,
-            'Kod Değişikliği (Otomatik Onay)',
-            'Kod Değişikliği Teklifi',
-            `"${filePath}" dosyasında değişiklik (${editResult.method}).`
-          );
-          if (!approved) {
-            stepsWithoutProgress++;
-            callbacks.onStep({
-              id: `step_edit_rej_${Date.now()}`,
-              timestamp: Date.now(),
-              type: 'tool_result',
-              toolName: 'propose_edit',
-              content: 'Kullanıcı bu kod değişikliğini reddetti.',
-              status: 'rejected',
-            });
-            pushExchange(assistantText, parsed.rawJson, `[REJECTED BY USER]: the user did not approve this edit of "${filePath}". Choose a different approach.`);
-            continue;
-          }
-
-          const result = await applyMutation({ filePath, exists: true, baseHash: readRes.hash || '', newContent: newFullContent });
-          if (!result.ok) {
-            consecutiveErrors++;
-            callbacks.onStep({
-              id: `step_edit_fail_${Date.now()}`,
-              timestamp: Date.now(),
-              type: 'tool_result',
-              toolName: 'propose_edit',
-              content: `Uygulama hatası: ${result.error}`,
-              status: 'failed',
-            });
-            pushExchange(assistantText, parsed.rawJson, `[ERROR]: the edit could not be applied: ${result.error}. Read the file again before retrying.`);
-            continue;
-          }
-
-          appliedEdits.set(editSig, stepCount);
-          consecutiveErrors = 0;
-          repeatStreak = 0;
-          ledger.appliedChanges.push(`Düzenlendi: "${filePath}"`);
-          ledger.milestones.push({
-            id: `m_ed_${Date.now()}`,
-            description: `Kod değişikliği uygulandı: ${filePath}`,
-            status: 'done',
-            timestamp: Date.now(),
-          });
-          callbacks.onStep({
-            id: `step_edit_ok_${Date.now()}`,
-            timestamp: Date.now(),
-            type: 'tool_result',
-            toolName: 'propose_edit',
-            content: `"${filePath}" değişikliği uygulandı (${editResult.method}).`,
-            status: 'success',
-          });
-          if (!originalSnapshots.has(filePath)) originalSnapshots.set(filePath, currentContent);
-          const verdict = await afterMutation(filePath, newFullContent, currentContent);
-          const editLostKeys = jsonKeyLoss(filePath, originalSnapshots.get(filePath) || currentContent, newFullContent);
-          const observation = [
-            `[OK]: edited "${filePath}" (${editResult.method}); ${changedRegionExcerpt(currentContent, newFullContent)}`,
-            editMergeNote,
-            editLostKeys.length
-              ? `Warning: the edit removed these existing keys: ${editLostKeys.join(', ')}. Restore them unless the task asked to remove them.`
-              : '',
-            verdict,
-          ]
-            .filter(Boolean)
-            .join('\n');
-          pushExchange(assistantText, parsed.rawJson, observation);
-          continue;
+          const flow = await handleEditFile(ctx, { assistantText, parsed, payload });
+          if (flow === 'continue') continue;
+          if (flow === 'break') break;
+          if (flow === 'return') return;
         }
 
         if (parsed.type === 'propose_delete') {
-          const filePath: string = payload.path;
-          const readRes = await window.electronAPI?.readWorkspaceFile(filePath);
-          if (!readRes?.success) {
-            consecutiveErrors++;
-            pushExchange(assistantText, parsed.rawJson, `[ERROR]: "${filePath}" does not exist.`);
-            continue;
-          }
-          const authenticBaseHash = readRes.hash || '';
-          const deleteItem: ChangesetItem = {
-            id: `cs_del_${Date.now()}`,
-            operation: 'delete',
-            relativePath: filePath,
-            baseHash: authenticBaseHash,
-            proposedContentHash: '',
-            originalContent: readRes.content || '',
-            reason: String(parsed.rawJson?.thought || payload.reason || '').slice(0, 300),
-            selected: true,
-            status: 'pending',
-          };
-          callbacks.onStep({
-            id: `step_del_warn_${Date.now()}`,
-            timestamp: Date.now(),
-            type: 'delete_warning',
-            title: 'Yüksek Riskli Dosya Silme Uyarısı',
-            content: `"${filePath}" dosyasının kalıcı olarak silinmesi isteniyor. Gerekçe: ${deleteItem.reason}`,
-            status: 'pending',
-          });
-
-          // Deletes ALWAYS require user approval in all security profiles
-          callbacks.onStatusChange('waiting_delete_approval');
-          pauseTimer();
-          let approved = false;
-          try {
-            approved = await callbacks.onRequestDeleteApproval(deleteItem);
-          } finally {
-            resumeTimer();
-          }
-          callbacks.onStatusChange('thinking');
-
-          if (!approved) {
-            callbacks.onStep({
-              id: `step_del_rej_${Date.now()}`,
-              timestamp: Date.now(),
-              type: 'tool_result',
-              toolName: 'propose_delete',
-              content: 'Kullanıcı dosya silme talebini reddetti.',
-              status: 'rejected',
-            });
-            pushExchange(assistantText, parsed.rawJson, `[REJECTED BY USER]: "${filePath}" was not deleted.`);
-            continue;
-          }
-          const tokenRes = await window.electronAPI?.requestMutationToken({
-            relativePath: filePath,
-            operation: 'delete',
-            expectedBaseHash: authenticBaseHash,
-            proposedContentHash: '',
-          });
-          const applyRes = tokenRes?.success && tokenRes.token
-            ? await window.electronAPI?.applyApprovedMutation({ token: tokenRes.token, relativePath: filePath, operation: 'delete' })
-            : null;
-          if (tokenRes?.token && applyRes?.success) {
-            consecutiveErrors = 0;
-            repeatStreak = 0;
-            stepsWithoutProgress = 0;
-            mutationCount++;
-            treeVersion++;
-            callbacks.onTransactionApplied?.({
-              transactionId: tokenRes.token,
-              relativePath: filePath,
-              operation: 'delete',
-              timestamp: Date.now(),
-              approvedHash: '',
-              baseHash: authenticBaseHash,
-            });
-            ledger.projectTree = ledger.projectTree.filter((p) => p !== filePath);
-            writtenFiles.delete(filePath);
-            ledger.appliedChanges.push(`Silindi: "${filePath}"`);
-            delete ledger.knownFiles[filePath];
-            openSanityIssues.delete(filePath);
-            callbacks.onStep({
-              id: `step_del_ok_${Date.now()}`,
-              timestamp: Date.now(),
-              type: 'tool_result',
-              toolName: 'propose_delete',
-              content: `"${filePath}" başarıyla silindi.`,
-              status: 'success',
-            });
-            pushExchange(assistantText, parsed.rawJson, `[OK]: deleted "${filePath}".`);
-          } else {
-            consecutiveErrors++;
-            pushExchange(assistantText, parsed.rawJson, `[ERROR]: could not delete "${filePath}": ${applyRes?.error || tokenRes?.error || 'unknown error'}`);
-          }
-          continue;
+          const flow = await handleDeleteFile(ctx, { assistantText, parsed, payload });
+          if (flow === 'continue') continue;
+          if (flow === 'break') break;
+          if (flow === 'return') return;
         }
 
         if (parsed.type === 'propose_command') {
-          const binary: string = payload.binary;
-          const args: string[] = payload.args || [];
-          const cmdKey = `${binary}:${args.join(' ')}`;
-          const previousFailure = seenActions.get(`cmdfail:${cmdKey}:${mutationCount}`);
-          if (previousFailure) {
-            repeatStreak++;
-            stepsWithoutProgress++;
-            notice(`Döngü Engellendi: '${binary} ${args.join(' ')}' daha önce hata verdi ve o zamandan beri kod değişmedi.`, 'rejected');
-            pushExchange(
-              assistantText,
-              parsed.rawJson,
-              `[REPEATED]: "${binary} ${args.join(' ')}" already failed at step ${previousFailure.step} and no file changed since. Fix the code first or take another approach.${repeatNudge()}`
-            );
-            continue;
-          }
-          // Running a CLI program without arguments always prints its usage text; models took that
-          // for a bug and kept "fixing" working code until they broke it.
-          const usageRun = seenActions.get(`usage:${cmdKey}`);
-          if (usageRun) {
-            repeatStreak++;
-            stepsWithoutProgress++;
-            notice(`Döngü Engellendi: '${binary} ${args.join(' ')}' argümansız çalıştırıldığında her zaman kullanım metnini yazdırır.`, 'rejected');
-            pushExchange(
-              assistantText,
-              parsed.rawJson,
-              `[ALREADY TESTED]: "${binary} ${args.join(' ')}" was run at step ${usageRun.step} and printed its usage text. That is the correct behaviour of a command-line program started without arguments, so running it again shows nothing new. Run it WITH arguments that match its usage line to test a feature, or finish if the task is complete.${repeatNudge()}`
-            );
-            continue;
-          }
-          // A script that changes files does it again on every run: in the app, qwen2.5-coder:7b applied
-          // its rename script to the sample folder five times ("deniz_001_001_001_001_001.JPG"), each time
-          // calling it a preview. The same apply command is not run again until a file changes.
-          // Its preview of the same folder afterwards is misleading too: it proposes renaming the renamed
-          // files, which the model took for "not done yet" and started over in ornek_veri2, ornek_veri3...
-          const applyFlag = runOptions.applyFlag;
-          const applyKey = applyFlag ? `${binary}:${args.filter((a) => a !== applyFlag).join(' ')}:${mutationCount}` : '';
-          const earlierApply = applyFlag ? appliedRuns.get(applyKey) : undefined;
-          if (earlierApply) {
-            repeatStreak++;
-            stepsWithoutProgress++;
-            const again = args.includes(applyFlag!);
-            notice(
-              again
-                ? `Komut yeniden çalıştırılmadı: '${binary} ${args.join(' ')}' başarıyla çalıştı ve o zamandan beri dosya değişmedi; tekrar çalıştırmak örnek dosyaları yeniden değiştirirdi.`
-                : `Önizleme çalıştırılmadı: bu klasör ${earlierApply.step}. adımda ${applyFlag} ile zaten değiştirildi; önizleme yeniden adlandırılmış dosyaları tekrar adlandırmayı gösterirdi.`,
-              'rejected'
-            );
-            const shown = earlierApply.output.length > 1500 ? `...\n${earlierApply.output.slice(-1500)}` : earlierApply.output;
-            pushExchange(
-              assistantText,
-              parsed.rawJson,
-              `[NOT RUN]: ${
-                again
-                  ? `"${binary} ${args.join(' ')}" already ran successfully with ${applyFlag} and no file changed since. Running it again would change the files again (a rename renames the renamed files), so it was not run.`
-                  : `"${binary} ${args.join(' ')}" previews a folder that the same command with ${applyFlag} already changed at step ${earlierApply.step}, and no file changed since. A preview now would only propose changing the changed files again (renaming the renamed files), so it was not run.`
-              } The run with ${applyFlag} printed:\n${shown || '(no output)'}\nIf that is what the task expects, mark the checklist item done and finish now. If not, fix the script and test it on a fresh copy of the sample data.${repeatNudge()}`
-            );
-            continue;
-          }
-
-          const cmdItem: CommandApprovalItem = {
-            id: `cmd_${Date.now()}`,
-            binary,
-            args,
-            reason: String(parsed.rawJson?.thought || payload.reason || '').slice(0, 300),
-          };
-          const isSafeCommand =
-            (binary === 'npm' && (args[0] === 'test' || (args[0] === 'run' && args[1] === 'test'))) ||
-            binary === 'pytest' ||
-            (binary === 'cargo' && args[0] === 'test') ||
-            (binary === 'git' && (args[0] === 'status' || args[0] === 'diff'));
-          const isAutoApprove = securityProfile === 'autonomous' && isSafeCommand;
-          let approved = false;
-          if (isAutoApprove) {
-            approved = true;
-            callbacks.onStep({
-              id: `step_cmd_pr_${Date.now()}`,
-              timestamp: Date.now(),
-              type: 'command_proposal',
-              title: 'Komut Çalıştırılıyor (Otonom Profil)',
-              content: `\`${binary} ${args.join(' ')}\` güvenli komutu otomatik onaylandı.`,
-              status: 'approved',
-            });
-          } else {
-            callbacks.onStep({
-              id: `step_cmd_pr_${Date.now()}`,
-              timestamp: Date.now(),
-              type: 'command_proposal',
-              title: 'Komut Çalıştırma Onayı',
-              content: `\`${binary} ${args.join(' ')}\` komutunun çalıştırılması isteniyor. Gerekçe: ${cmdItem.reason}`,
-              status: 'pending',
-            });
-            callbacks.onStatusChange('waiting_command_approval');
-            pauseTimer();
-            try {
-              approved = await callbacks.onRequestCommandApproval(cmdItem);
-            } finally {
-              resumeTimer();
-            }
-          }
-
-          if (!approved) {
-            callbacks.onStatusChange('thinking');
-            callbacks.onStep({
-              id: `step_cmd_rej_${Date.now()}`,
-              timestamp: Date.now(),
-              type: 'tool_result',
-              toolName: 'propose_command',
-              content: 'Kullanıcı komut çalıştırma talebini reddetti.',
-              status: 'rejected',
-            });
-            pushExchange(assistantText, parsed.rawJson, `[REJECTED BY USER]: permission to run "${binary} ${args.join(' ')}" was not given. Continue without it.`);
-            continue;
-          }
-
-          callbacks.onStatusChange('running_command');
-          callbacks.onLog(`İzole komut koşturuluyor: ${binary} ${args.join(' ')}`);
-          const cmdRes = await window.electronAPI?.runApprovedCommand({ binary, args, timeoutMs: 60000 });
-          callbacks.onStatusChange('thinking');
-          const output = `${cmdRes?.output || ''}${cmdRes?.error ? `\n${cmdRes.error}` : ''}`.trim();
-          const tail = output.length > 4000 ? `...\n${output.slice(-4000)}` : output;
-          let observation: string;
-          if (cmdRes?.success) {
-            // The same command printing exactly the same thing, with no file changed since, is no
-            // progress (a 7B model re-ran a finished script again and again instead of finishing).
-            const okKey = `cmdok:${cmdKey}:${mutationCount}`;
-            const sameOutput = commandOutputs.get(okKey) === output;
-            commandOutputs.set(okKey, output);
-            if (applyFlag && args.includes(applyFlag)) appliedRuns.set(applyKey, { step: stepCount, output });
-            // A script that changes files prints something new on every run, so the output alone does
-            // not catch a model that re-applies it over and over (one renamed its test files 30 times).
-            const runs = (commandRuns.get(okKey) || 0) + 1;
-            commandRuns.set(okKey, runs);
-            const rerun = runs >= 3;
-            consecutiveErrors = 0;
-            // Evidence that the work runs only when the command runs a file the model wrote (not `dir`).
-            if ([binary, ...args].some((a) => writtenByModel.has(baseName(String(a))))) programOkAt = mutationCount;
-            if (sameOutput || rerun) {
-              repeatStreak++;
-              stepsWithoutProgress++;
-            } else {
-              repeatStreak = 0;
-              stepsWithoutProgress = 0;
-            }
-            observation = `[COMMAND OK] (exit code 0):\n${tail || '(no output)'}${
-              sameOutput
-                ? `\n[SAME OUTPUT]: the same command printed exactly this before and no file changed since.${repeatNudge()}`
-                : rerun
-                  ? `\n[ALREADY RUN]: you have run exactly this command ${runs} times since your last file change. Running it again only repeats it (a script that changes files changes them again). If the result is what the task expects, mark the checklist item done and finish now.${repeatNudge()}`
-                  : ''
-            }`;
-            ledger.milestones.push({
-              id: `m_cmd_${Date.now()}`,
-              description: `Komut çalıştırıldı: ${binary} ${args.join(' ')}`,
-              status: 'done',
-              timestamp: Date.now(),
-            });
-            callbacks.onStep({
-              id: `step_cmd_ok_${Date.now()}`,
-              timestamp: Date.now(),
-              type: 'tool_result',
-              toolName: 'propose_command',
-              content: tail.slice(0, 2000) || 'Komut başarıyla çalıştı.',
-              status: 'success',
-            });
-          } else {
-            const usageText = looksLikeUsageText(output);
-            const operands = args.filter((a) => !a.startsWith('-'));
-            const bareUsage = usageText && (binary === 'python' || binary === 'node') && operands.length <= 1;
-            if (!bareUsage) {
-              consecutiveErrors++;
-              programOkAt = -1;
-            }
-            seenActions.set(`cmdfail:${cmdKey}:${mutationCount}`, { step: stepCount });
-            const errText = `${cmdRes?.error || ''}\n${cmdRes?.output || ''}`;
-            const notFound =
-              /ENOENT|not found|not recognized|bulunamadı|izin verilmiyor/i.test(errText) &&
-              (cmdRes?.exitCode === null || cmdRes?.exitCode === undefined || /ENOENT|izin verilmiyor/i.test(cmdRes?.error || ''));
-            const policyBlocked = /Güvenlik Politikası|Güvenlik Koruması/i.test(cmdRes?.error || '');
-            if (/package\.json/i.test(cmdRes?.error || '') && /mevcut değil|not found|missing/i.test(cmdRes?.error || '')) {
-              // A static site or a non-Node project: there is nothing to run, and inventing a
-              // package.json just to run "npm test" sent models into long detours.
-              if (!ledger.unavailableBinaries.includes(binary)) ledger.unavailableBinaries.push(binary);
-              observation = `[NOT APPLICABLE]: this project has no package.json, so npm has nothing to run here. That is fine — do NOT create a package.json just to run commands. Continue with the task, or finish if it is done.`;
-            } else if (notFound || policyBlocked) {
-              if (!ledger.unavailableBinaries.includes(binary) && notFound) ledger.unavailableBinaries.push(binary);
-              observation = `[COMMAND UNAVAILABLE]: "${binary} ${args.join(' ')}" cannot run here (${(cmdRes?.error || 'not installed').trim().slice(0, 200)}). Do not call it again; continue without it.`;
-            } else if (bareUsage) {
-              seenActions.set(`usage:${cmdKey}`, { step: stepCount });
-              observation = `[PROGRAM PRINTED ITS USAGE TEXT] (exit code ${cmdRes?.exitCode ?? '?'}):\n${tail}\nThis is NOT a bug: the program was started without arguments, so it printed how to use it. Do not change the code because of this. To test it, run it with arguments that match the usage line above (one feature per run), or finish if the task is complete.`;
-            } else if (usageText) {
-              observation = `[PROGRAM PRINTED ITS USAGE TEXT] (exit code ${cmdRes?.exitCode ?? '?'}):\n${tail}\nThe program did not accept the arguments "${operands.slice(1).join(' ')}". If they are valid for this task, fix the argument handling in the code; otherwise run it again with arguments that match the usage line.`;
-            } else {
-              // Numbered lines at the failing location let the model fix it with replace_lines.
-              let excerpt = '';
-              const location = findErrorLocation(output, ledger.projectTree);
-              if (location) {
-                const fileRes = await window.electronAPI?.readWorkspaceFile(location.path);
-                if (fileRes?.success && fileRes.content !== undefined) {
-                  excerpt = `\nThe error points at line ${location.line} of "${location.path}":\n${numberedLines(fileRes.content, location.line - 3, location.line + 5)}\nFix it with replace_lines (use these line numbers) or edit_file.`;
-                }
-              }
-              observation = `[COMMAND FAILED] (exit code ${cmdRes?.exitCode ?? '?'}):\n${tail}${excerpt}\nRead the errors, fix the code, then run it again.`;
-            }
-            callbacks.onStep({
-              id: `step_cmd_fail_${Date.now()}`,
-              timestamp: Date.now(),
-              type: 'tool_result',
-              toolName: 'propose_command',
-              content: tail.slice(0, 2000) || 'Komut başarısız oldu.',
-              status: 'failed',
-            });
-          }
-          pushExchange(assistantText, parsed.rawJson, observation, `[run_command "${binary} ${args.join(' ')}" output shortened]`);
-          continue;
+          const flow = await handleRunCommand(ctx, { assistantText, parsed, payload });
+          if (flow === 'continue') continue;
+          if (flow === 'break') break;
+          if (flow === 'return') return;
         }
 
         if (parsed.type === 'ask_question') {
-          const { question, options } = payload;
-          if (securityProfile === 'autonomous') {
-            const chosenOption = options && options.length > 0 ? options[0] : 'Varsayılan ve en uygun mühendislik yaklaşımı';
-            callbacks.onLog(`[Otonom Karar]: Soru sorulmadı, "${chosenOption}" seçeneği otonom tercih edilerek akış sürdürülüyor.`);
-            callbacks.onStep({
-              id: `step_q_auto_${Date.now()}`,
-              timestamp: Date.now(),
-              type: 'clarification',
-              title: 'Otonom Karar (Soru Atlandı)',
-              content: `Soru atlandı. Otonom profil gereği "${chosenOption}" tercihi ile devam ediliyor. (Soru: ${question})`,
-              status: 'approved',
-              metadata: { options, autoAnswer: chosenOption },
-            });
-            ledger.userDecisions.push({ question, answer: chosenOption });
-            pushExchange(assistantText, parsed.rawJson, `[AUTONOMOUS MODE]: questions are disabled; "${chosenOption}" was chosen. Continue the work without asking.`);
-            continue;
-          }
-
-          const previous = ledger.userDecisions.find((d) => d.question.trim().toLowerCase() === String(question).trim().toLowerCase());
-          if (previous) {
-            repeatStreak++;
-            pushExchange(
-              assistantText,
-              parsed.rawJson,
-              `[ALREADY ANSWERED]: the user answered this question before: "${previous.answer}". Continue with that decision.${repeatNudge()}`
-            );
-            continue;
-          }
-
-          callbacks.onStep({
-            id: `step_q_${Date.now()}`,
-            timestamp: Date.now(),
-            type: 'clarification',
-            title: 'Ajan Kullanıcıya Danışıyor',
-            content: question,
-            status: 'pending',
-            metadata: { options },
-          });
-          callbacks.onStatusChange('waiting_clarification');
-          pauseTimer();
-          let answer = '';
-          try {
-            answer = await callbacks.onRequestClarification({ id: `q_${Date.now()}`, question, options });
-          } finally {
-            resumeTimer();
-          }
-          // RECORD IN LEDGER SO MODEL NEVER ASKS THIS AGAIN!
-          ledger.userDecisions.push({ question, answer });
-          callbacks.onStatusChange('thinking');
-          callbacks.onStep({
-            id: `step_ans_${Date.now()}`,
-            timestamp: Date.now(),
-            type: 'tool_result',
-            toolName: 'ask_question',
-            content: `Kullanıcı Yanıtı: ${answer}`,
-            status: 'success',
-          });
-          consecutiveErrors = 0;
-          repeatStreak = 0;
-          stepsWithoutProgress = 0;
-          pushExchange(assistantText, parsed.rawJson, `[USER ANSWER]: ${answer}`);
-          continue;
+          const flow = await handleAskUser(ctx, { assistantText, parsed, payload });
+          if (flow === 'continue') continue;
+          if (flow === 'break') break;
+          if (flow === 'return') return;
         }
       } catch (err: any) {
         if (this.pendingInterruptDirective) {
@@ -3512,7 +1887,7 @@ export class AgentEngine {
         }
 
         if (err?.name === 'AbortError' || this.abortController?.signal.aborted || !this.isRunning) {
-          callbacks.onLog('Kullanıcı tarafından durduruldu.');
+          callbacks.onLog(et('stoppedByUser'));
           releaseSubtasks(ledger);
           callbacks.onStatusChange('idle');
           break;
@@ -3521,17 +1896,17 @@ export class AgentEngine {
         const rawMessage = String(err?.message || err || 'Bilinmeyen hata');
         let friendly = rawMessage;
         if (/Failed to fetch|NetworkError|ECONNREFUSED|fetch failed/i.test(rawMessage)) {
-          friendly = `Ollama'ya bağlanılamadı (${ollamaClient.getEndpoint()}). Ollama'nın çalıştığından emin olun.`;
+          friendly = et('ollamaUnreachable', { endpoint: ollamaClient.getEndpoint() });
         } else if (/not found|pull/i.test(rawMessage) && /model/i.test(rawMessage)) {
-          friendly = `Model bulunamadı: "${model}". Model Yöneticisi'nden indirin veya başka bir model seçin. (${rawMessage})`;
+          friendly = et('modelMissing', { model, error: rawMessage });
         } else if (/memory|out of memory|runner.*(terminated|stopped)/i.test(rawMessage)) {
-          friendly = `Model belleğe sığmadı veya çalıştırıcı durdu (${rawMessage}). Ayarlar › Ajan bölümünden bağlam uzunluğunu düşürün veya daha küçük bir model seçin.`;
+          friendly = et('modelOutOfMemory', { error: rawMessage });
         }
         callbacks.onStep({
           id: `step_err_${Date.now()}`,
           timestamp: Date.now(),
           type: 'system_notice',
-          content: `Ajan hatası: ${friendly}`,
+          content: et('agentError', { error: friendly }),
           status: 'failed',
         });
         moveTo(['RETRYING', 'FAILED'], rawMessage);
@@ -3542,9 +1917,9 @@ export class AgentEngine {
     }
 
     if (!finished && this.isRunning && stepCount >= MAX_STEPS) {
-      if (!(await tryGracefulCompletion(`Maksimum adım sınırına (${MAX_STEPS}) ulaşıldı.`))) {
+      if (!(await tryGracefulCompletion(et('limitSteps', { count: MAX_STEPS })))) {
         releaseSubtasks(ledger);
-        notice(`Maksimum adım sınırına (${MAX_STEPS}) ulaşıldı.`, 'failed');
+        notice(et('limitSteps', { count: MAX_STEPS }), 'failed');
         callbacks.onStatusChange('idle');
       }
     }

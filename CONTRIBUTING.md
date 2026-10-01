@@ -26,11 +26,12 @@ npm test             # all regression suites; none of them needs Ollama
 Optional:
 ```bash
 npm run test:agent      # only the agent suites
+npm run test:sandbox    # the isolated environment of commands, tried for real on this system
 npm run check:library   # reads the live ollama.com pages to catch markup changes (needs internet)
 node ./scripts/run-ts-test.mjs scripts/agent-e2e.ts qwen2.5-coder:7b web-new   # benchmark against a real model
 ```
 
-The benchmark scenarios are `web-new`, `web-followup`, `repair-corrupted`, `js-bugfix`, `python-cli`, `json-config`, `nav-links`, `six-products`, `wizard-site`, `wizard-mini` and `wizard-script` (see the top of `scripts/agent-e2e.ts`). On a computer without a GPU each scenario takes several minutes.
+The benchmark scenarios are `web-new`, `web-followup`, `repair-corrupted`, `js-bugfix`, `python-cli`, `json-config`, `nav-links`, `six-products`, `wizard-site`, `wizard-mini`, `wizard-script`, `center-header` and `center-header-followup` (see the top of `scripts/agent-e2e.ts`). On a computer without a GPU each scenario takes several minutes.
 
 Packages:
 ```bash
@@ -44,14 +45,18 @@ npm run build:linux       # Linux: deb, rpm, AppImage, tar.gz
 
 | Area | Files |
 | :--- | :--- |
-| Agent loop, approvals, guards | `src/lib/agent/AgentEngine.ts` |
+| Agent loop, approvals, guards | `src/lib/agent/AgentEngine.ts`, one handler per tool in `src/lib/agent/run/`, helpers in `src/lib/agent/engineHelpers.ts` |
+| Texts of the agent engine and check results | `src/lib/agent/engineText.ts`, `src/lib/agent/checkTexts.ts` |
 | System prompt and tool schema | `src/lib/agent/AgentProtocol.ts` |
 | Parsing and repairing model actions | `src/lib/agent/ToolDispatcher.ts` |
 | File checks per language | `src/lib/agent/FileSanity.ts` |
 | Web page acceptance checks | `src/lib/agent/TaskContract.ts`, `src/lib/agent/TaskValidator.ts` |
 | Context length, sampling, model profile | `src/lib/ollama/ModelRuntime.ts`, `src/lib/ollama/OllamaClient.ts` |
 | Chat and web search | `src/stores/chatStore.ts`, `src/lib/web/` |
-| File access, tokens, commands, web requests | `electron/main.ts`, `electron/preload.ts` |
+| File access, tokens, running commands | `electron/main.ts`, `electron/preload.ts` |
+| Which commands may run | `electron/commandPolicy.ts` |
+| Isolated environment of commands | `electron/sandbox.ts`, `native/windows/` (launcher and Node guard), `scripts/build-sandbox.cjs` |
+| Web requests, read-only git, texts of the main process | `electron/web.ts`, `electron/git.ts`, `electron/i18n.ts` |
 | Packaging hooks | `scripts/afterPack.js` (Windows icon, Linux launcher), `scripts/postbuild.js` |
 | Creation wizards | `src/lib/wizard/`, `src/components/agent/wizard/`, `src/stores/siteWizardStore.ts`, `src/stores/toolWizardStore.ts` |
 | Design themes | `src/lib/design/` |
@@ -69,10 +74,10 @@ npm run build:linux       # Linux: deb, rpm, AppImage, tar.gz
 ## Conventions
 
 - **Types.** Avoid `any` where a type or interface can be written.
-- **File and command access.** The preload script and IPC must not expose direct write functions. Agent changes go through `requestMutationToken` and `applyApprovedMutation`; a new command has to pass the allowlist in `workspace:runApprovedCommand`. See [docs/SECURITY_MODEL.md](./docs/SECURITY_MODEL.md).
+- **File and command access.** The preload script and IPC must not expose direct write functions. Agent changes go through `requestMutationToken` and `applyApprovedMutation`; a new command has to pass the rules in `electron/commandPolicy.ts`, which the main process checks again in `workspace:runApprovedCommand`. See [docs/SECURITY_MODEL.md](./docs/SECURITY_MODEL.md).
 - **Stable system prompt.** The agent's system prompt must stay identical between the steps of a task, because Ollama's cache depends on it. Put per-step information into tool results.
 - **Tests with fixes.** A fix for an agent failure seen with a real model comes with a regression check in `test_agent_reliability.ts` or `test_agent_engine.ts`. File checks must not report errors on valid code.
-- **Texts in both languages.** Every visible text goes through the translation files; add or change it in both `en.ts` and `tr.ts`. Examples, sample data and defaults must work for users in any country: money and dates from the locale, no country-specific assumptions.
+- **Texts in both languages.** Every visible text goes through the translation files; add or change it in both `en.ts` and `tr.ts`. This includes the main process (`mt()`) and the agent engine (`et()`). Texts for the model stay English. Examples, sample data and defaults must work for users in any country: money and dates from the locale, no country-specific assumptions.
 - **Interface.** Use the shared components in `src/components/common/` (`Modal`, `Button`, `IconButton`, `Toggle`, `Select`, `Tabs`, `StartIcon`) and the settings rows in `src/components/settings/SettingsRow.tsx`. Ask for confirmation with `confirmDialog` and show messages with `noticeDialog` from `src/lib/ui/dialogs.ts`, not with `window.confirm` or `window.alert`. Use the existing Tailwind color classes (zinc, red, amber, emerald, blue); colors are CSS variables in `src/index.css`, so the same classes work in the dark and the light theme. Do not write hex colors in components, and check new screens in both themes.
 
 ---

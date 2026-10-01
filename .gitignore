@@ -105,3 +105,6 @@ win-unpacked/
 
 # Instructions for local AI assistants
 GEMINI.md
+
+# Built by scripts/build-sandbox.cjs
+native/windows/bin/

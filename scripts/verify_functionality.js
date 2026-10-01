@@ -1,5 +1,12 @@
 const fs = require('fs');
 const path = require('path');
+
+/** The coding agent's source: AgentEngine.ts, its helpers and the tool handlers of a run. */
+function readAgentEngineSource() {
+  const dir = path.join(__dirname, '../src/lib/agent');
+  const files = ['AgentEngine.ts', 'engineHelpers.ts', ...fs.readdirSync(path.join(dir, 'run')).map((f) => path.join('run', f))];
+  return files.map((f) => fs.readFileSync(path.join(dir, f), 'utf-8')).join('\n');
+}
 const assert = require('assert');
 
 console.log('==============================================');
@@ -167,7 +174,7 @@ test('8. Architecture: HistorySidebar and chatStore support unified chat & agent
 
 // 9. Memory Ledger & Anti-Amnesia Formatting
 test('9. Agent Memory: formatLedgerBlock serializes known files and user decisions', () => {
-  const engineSrc = fs.readFileSync(path.join(__dirname, '../src/lib/agent/AgentEngine.ts'), 'utf-8');
+  const engineSrc = readAgentEngineSource();
   assert(engineSrc.includes('formatLedgerBlock'), 'AgentEngine missing formatLedgerBlock');
   assert(engineSrc.includes('OTURUM HAFIZA DEFTERİ'), 'AgentEngine missing memory ledger header');
   assert(engineSrc.includes('ledger.userDecisions'), 'AgentEngine does not track userDecisions');
@@ -176,14 +183,14 @@ test('9. Agent Memory: formatLedgerBlock serializes known files and user decisio
 
 // 10. Context Sliding Window Compression
 test('10. Context Optimization: compressConversationContext compresses heavy older observations', () => {
-  const engineSrc = fs.readFileSync(path.join(__dirname, '../src/lib/agent/AgentEngine.ts'), 'utf-8');
+  const engineSrc = readAgentEngineSource();
   assert(engineSrc.includes('compressConversationContext'), 'AgentEngine missing compressConversationContext');
   assert(engineSrc.includes('maxRecentVerbatim'), 'AgentEngine missing maxRecentVerbatim sliding window');
 });
 
 // 11. Active Execution Timer & Circuit Breaker
 test('11. Timeout Fix: Circuit breaker measures active execution time and pauses during user interaction', () => {
-  const engineSrc = fs.readFileSync(path.join(__dirname, '../src/lib/agent/AgentEngine.ts'), 'utf-8');
+  const engineSrc = readAgentEngineSource();
   assert(engineSrc.includes('activeExecutionTimeMs'), 'AgentEngine lacks activeExecutionTimeMs');
   assert(engineSrc.includes('pauseTimer'), 'AgentEngine lacks pauseTimer');
   assert(engineSrc.includes('resumeTimer'), 'AgentEngine lacks resumeTimer');
@@ -204,7 +211,7 @@ test('13. Security: Security profiles (strict, balanced, autonomous) configured 
   const settingsTypeSrc = fs.readFileSync(path.join(__dirname, '../src/types/settings.ts'), 'utf-8');
   assert(settingsTypeSrc.includes("'strict' | 'balanced' | 'autonomous'"), 'SecurityProfile missing required union members');
 
-  const engineSrc = fs.readFileSync(path.join(__dirname, '../src/lib/agent/AgentEngine.ts'), 'utf-8');
+  const engineSrc = readAgentEngineSource();
   assert(engineSrc.includes("securityProfile === 'balanced'"), 'AgentEngine missing balanced profile checks');
   assert(engineSrc.includes("securityProfile === 'autonomous'"), 'AgentEngine missing autonomous profile checks');
 
@@ -252,7 +259,7 @@ test('16. Multi-Tab Preview: File tabs are opened, closable with fallback to tim
 
 // 17. Circuit Breaker Timeout: Minimum 30 Minutes & Configurable
 test('17. Circuit Breaker: Timeout enforces >= 30 minutes floor and user configurability', () => {
-  const engineSrc = fs.readFileSync(path.join(__dirname, '../src/lib/agent/AgentEngine.ts'), 'utf-8');
+  const engineSrc = readAgentEngineSource();
   assert(engineSrc.includes('Math.max(30, timeoutMinutes || 30)'), 'AgentEngine does not enforce 30 minute minimum timeout');
   assert(engineSrc.includes('effectiveMinutes'), 'AgentEngine does not log effectiveMinutes in breaker message');
 
@@ -284,7 +291,7 @@ test('18. Projects: sidebar groups tasks by folder, starts projects and tasks; C
 
 // 19. Real-Time Inline Transcript & LLM Token Streaming
 test('19. Live Token Streaming: onStreamChunk emits character chunks into inline expandable transcript', () => {
-  const engineSrc = fs.readFileSync(path.join(__dirname, '../src/lib/agent/AgentEngine.ts'), 'utf-8');
+  const engineSrc = readAgentEngineSource();
   assert(engineSrc.includes('onStreamChunk?: (chunk: string, fullResponseSoFar: string) => void'), 'AgentEngine lacks onStreamChunk callback');
   assert(engineSrc.includes('callbacks.onStreamChunk?.(chunk.message.content, fullResponse)'), 'AgentEngine does not emit stream chunks');
 
@@ -322,9 +329,10 @@ test('21. Linux Compatibility: main.ts contains Linux Ollama paths, GPU lspci de
   assert(mainSrc.includes('setDesktopFileName') && mainSrc.includes('emir-code.desktop'), 'main.ts missing Linux desktop file registration');
   assert(mainSrc.includes('/usr/local/bin/ollama'), 'main.ts checkOllamaStatus missing Linux Ollama path');
   assert(mainSrc.includes('lspci'), 'main.ts system:getHardware missing Linux lspci GPU detection');
-  assert(mainSrc.includes('HOME: process.env.HOME'), 'main.ts STRICT_ENV missing HOME variable for Linux subprocesses');
-  assert(mainSrc.includes('SHELL: process.env.SHELL'), 'main.ts STRICT_ENV missing SHELL variable for Linux');
-  assert(mainSrc.includes('pkill -P'), 'main.ts timeout handler missing Linux process kill');
+  const sandboxSrc = fs.readFileSync(path.join(__dirname, '../electron/sandbox.ts'), 'utf-8');
+  assert(sandboxSrc.includes('HOME: source.HOME'), 'commandEnvironment missing HOME variable for Linux subprocesses');
+  assert(sandboxSrc.includes('SHELL: source.SHELL'), 'commandEnvironment missing SHELL variable for Linux');
+  assert(mainSrc.includes("process.kill(-child.pid, 'SIGKILL')") && mainSrc.includes("detached: process.platform !== 'win32'"), 'main.ts timeout handler missing Linux process group kill');
 });
 
 // 22. Linux Desktop Integration & Standalone GUI Installer Wizard
@@ -372,7 +380,7 @@ test('24. Agent Hardware Optimization: Configurable tokens and synthesis strateg
   const settingsStoreTs = fs.readFileSync(path.join(__dirname, '../src/stores/settingsStore.ts'), 'utf-8');
   assert(settingsStoreTs.includes('setAgentOptimization:'), 'settingsStore.ts missing setAgentOptimization implementation');
 
-  const agentEngineTs = fs.readFileSync(path.join(__dirname, '../src/lib/agent/AgentEngine.ts'), 'utf-8');
+  const agentEngineTs = readAgentEngineSource();
   assert(agentEngineTs.includes('agentOpt?.maxTokens'), 'AgentEngine.ts missing dynamic maxTokens reading');
   assert(agentEngineTs.includes('webSynthesisStrategy'), 'AgentEngine.ts missing webSynthesisStrategy handling');
 

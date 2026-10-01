@@ -34,3 +34,8 @@ export function getTranslations(lang?: Language): Translations {
   const resolved = resolveLanguage(lang);
   return translations[resolved] || translations.tr;
 }
+
+/** Fills "{name}" placeholders of a translated text; unknown placeholders stay as they are. */
+export function format(template: string, params: Record<string, string | number> = {}): string {
+  return template.replace(/\{(\w+)\}/g, (whole, key: string) => (key in params ? String(params[key]) : whole));
+}

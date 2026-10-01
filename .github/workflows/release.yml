@@ -41,6 +41,10 @@ jobs:
       - name: Build Vite & Web Assets
         run: npm run build:vite
 
+      # The AppContainer launcher of isolated agent commands (C#, .NET Framework compiler).
+      - name: Build Command Isolation Launcher
+        run: node ./scripts/build-sandbox.cjs
+
       # scripts/afterPack.js embeds the Emir Code icon and version info into EmirCode.exe
       # before the installer and the portable exe are created.
       - name: Build Windows Executables (Installer & Portable)
@@ -49,6 +53,7 @@ jobs:
       - name: Verify Executable Icon & Metadata
         shell: pwsh
         run: |
+          if (-not (Test-Path "release/win-unpacked/resources/sandbox/emir-sandbox.exe")) { throw "the command isolation launcher is missing from the package" }
           $info = (Get-Item "release/win-unpacked/EmirCode.exe").VersionInfo
           Write-Host "ProductName=$($info.ProductName) FileVersion=$($info.FileVersion)"
           if ($info.ProductName -ne 'Emir Code') { throw "EmirCode.exe still carries Electron's metadata/icon" }

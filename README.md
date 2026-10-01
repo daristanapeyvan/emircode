@@ -22,7 +22,7 @@ The app has two modes, switched at the top of the sidebar: **Chat** for question
 ### Chat
 - Ask coding questions; code blocks have syntax highlighting and a copy button.
 - Attach a text or code file, or an image, and ask about it. Images need a model that accepts image input.
-- With **Web** switched on (the globe button in the message box), questions about current information (people, news, prices, weather) are searched on DuckDuckGo first and answered from the results; the message shows what was searched. If a model still replies that it cannot go online, the app runs the search and generates the answer again.
+- With **Web** switched on (the globe button in the message box), questions about current information (people, news, prices, weather) are searched on DuckDuckGo first, the first result page is read, and the answer is written from them; the message shows what was searched and read. Programming questions are answered by the model and go to the web only when you ask for a search ("search the web for…"). If a model still replies that it cannot go online, the app runs the search and generates the answer again.
 - Settings › Generation holds the sampling of the open chat, with the presets Balanced, Precise, Creative and Coding. The **System instructions** button in the message box offers General assistant, Senior developer and Very concise, or your own text.
 
 ### Code (the agent)
@@ -44,7 +44,7 @@ How a task runs:
 3. A web page task is reported as completed only when the page has real CSS, working JavaScript where the request needs it, a mobile viewport tag and only links to files that exist; when you ask for working menu links, every menu link must also lead somewhere. Otherwise the model is sent back to fix it, and if it still fails the task ends as incomplete with the failing checks listed.
 4. An edit that would break a working file is not applied. Existing tests cannot be changed unless you ask for it, so a failing test has to be fixed in the code.
 5. You see each change as a line-by-line diff. Depending on the approval level you approve it, or it is applied for you.
-6. A follow-up request in the same session knows the previous request and the files it changed, so "now add a footer" works.
+6. A follow-up request in the same session knows which files the previous request changed, so "now add a footer" works on the right file. When it continues the earlier work ("continue", "fix those too"), it also gets the previous request.
 7. **Undo changes (n)** in the project bar restores every file the agent changed in the session, including edits you made to those files afterwards. The previous contents are kept in memory, so undo is available only until Emir Code is closed.
 
 ### Creation wizards
@@ -62,9 +62,11 @@ The Model Manager (**Ctrl+Shift+M**) lists the Ollama library from ollama.com by
 - **Approval** (project bar, or Settings › General › Agent approvals):
   - *Strict* (default): you approve every file change, deletion and command.
   - *Balanced*: file changes are applied without asking; commands and deletions need your approval.
-  - *Autonomous*: file changes and test commands (`npm test`, `pytest`, `cargo test`) run without asking, and the agent answers its own questions. Deleting a file still needs your approval.
-- The agent can only change files inside the project folder. `.env` files, `.git`, `node_modules`, build output folders and key or certificate files are off limits.
-- It can only run `npm test`, `npm run test|build|lint|typecheck|check`, `node`, `python`, `pytest` and `cargo`. `npx` and shell commands are blocked.
+  - *Autonomous*: file changes and commands that run isolated are applied without asking, and the agent answers its own questions. A test command (`npm test`, `pytest`, `cargo test`) that runs without isolation starts on its own only until the task has written code; after that it asks, because it would run that code. Deleting a file still needs your approval.
+- The agent can only change files inside the project folder. `.env` files, `.git`, `node_modules`, build output folders, key or certificate files and package manager credentials (`.npmrc`, `.pypirc`, `.netrc` and similar) are off limits.
+- It can only run `npm test`, `npm run test|build|lint|typecheck|check`, `node`, `python`, `pytest` and `cargo`. `npx`, shell commands, npm options, code written on the command line (`node -e`, `python -c`) and `python -m pip` are blocked.
+- **Isolated commands** (Settings › Agent, on by default): programs the agent runs see only the project folder and have no internet unless you allow it. On Windows this covers Python and `node` scripts (AppContainer); npm and cargo run without isolation, and the approval dialog says so. On Linux every command runs in bubblewrap when it is installed. Settings › Agent shows what this computer supports.
+- Links in chat answers open in your browser.
 
 Keyboard shortcuts: Ctrl+N new chat (in the Code tab: new task in the open project) · Ctrl+Shift+N new project · Ctrl+K command palette · Ctrl+Shift+M models · Ctrl+, settings.
 
@@ -127,7 +129,8 @@ Where Chromium's sandbox cannot start (AppImage and archive copies on systems th
 
 ### Troubleshooting
 - **The first agent step is slow.** The model is loaded and reads the whole task once; on a CPU this can take 1–3 minutes. Later steps reuse Ollama's cache.
-- **The task stopped because the model repeated itself or made no progress.** These messages currently appear in Turkish in both languages: "DÖNGÜ TESPİT EDİLDİ" (loop detected) and "İLERLEME YOK" (no progress). Write the request more concretely (file names, expected result) or try a larger model.
+- **The task stopped because the model repeated itself or made no progress.** Write the request more concretely (file names, expected result) or try a larger model.
+- **The approval dialog says a command runs without isolation.** On Windows only Python and `node` scripts run isolated; npm and cargo start other programs, which the isolated environment does not allow. Settings › Agent shows the state for each program. If Python is installed in a folder the isolated environment cannot read, the **Allow** button there grants read access to that folder after a Windows administrator prompt.
 - **The task ended with an amber card.** The agent finished, but some automatic checks did not pass; the card lists them. Continue in the same session, for example "also fix: …".
 - **The taskbar shows an old icon after an update.** Windows caches icons; unpin and pin the app again, or sign out and back in.
 - **No answer from Ollama.** Check that Ollama is running and that Settings › Ollama › Ollama address is correct (default `http://localhost:11434`).
@@ -139,7 +142,7 @@ Where Chromium's sandbox cannot start (AppImage and archive copies on systems th
 - No telemetry, analytics or accounts. Chats, settings and tasks are stored on this computer (`emir_code_data.json` in the app's data folder).
 - Prompts and code go only to the Ollama address in Settings (`http://localhost:11434` by default).
 - Emir Code connects to the internet only for:
-  - web access, which is on by default and can be switched off completely or separately for chat and the agent in Settings › Web access. Searches go to DuckDuckGo; the agent can also open web pages;
+  - web access, which is on by default and can be switched off completely or separately for chat and the agent in Settings › Web access. Searches go to DuckDuckGo; chat reads the first result page and the agent can open web pages. Addresses on this computer or the local network are never opened;
   - the Model Manager, which reads the model list from ollama.com and checks tags with registry.ollama.ai (the source `ollama pull` uses) while its Discover or Installed tab is open;
   - the setup wizard, when you ask it to download Ollama or Node.js.
 - Pages the agent creates with a design theme load their fonts from Google Fonts unless Settings › Web design › Web fonts is off.
@@ -156,6 +159,7 @@ cd emircode
 npm install
 npm run dev              # Vite + Electron in development mode
 npm test                 # all regression suites
+npm run test:sandbox     # the isolated environment of commands, tried for real on this system
 npm run build:installer  # Windows installer and portable exe in release/
 npm run build:linux      # Linux packages: deb, rpm, AppImage, tar.gz
 ```

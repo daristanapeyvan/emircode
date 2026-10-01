@@ -9,6 +9,7 @@
  * every task that did not happen to create that exact file.
  */
 
+import { check, renderCheck, CheckText } from './checkTexts';
 export type CriterionType =
   | 'file_exists'
   | 'min_size'
@@ -24,8 +25,16 @@ export type CriterionType =
 export interface ValidationCriterion {
   type: CriterionType;
   target: string;
+  /** What the model is told (English). */
   description: string;
+  /** The same requirement as a translatable text, for the interface. */
+  text: CheckText;
   params?: Record<string, any>;
+}
+
+/** A criterion whose description is the English rendering of its text. */
+function criterion(type: CriterionType, target: string, text: CheckText, params?: Record<string, any>): ValidationCriterion {
+  return { type, target, description: renderCheck(text, 'en'), text, ...(params ? { params } : {}) };
 }
 
 export interface TaskContract {
@@ -136,68 +145,29 @@ export class TaskCompiler {
     const criteria: ValidationCriterion[] = [];
 
     // Baseline criterion: File must exist and have non-trivial size
-    criteria.push({
-      type: 'file_exists',
-      target,
-      description: `'${target}' dosyası diskte oluşturulmuş olmalıdır.`,
-    });
-    criteria.push({
-      type: 'min_size',
-      target,
-      description: `'${target}' dosyası en az 100 bayt içerik barındırmalıdır.`,
-      params: { minBytes: 100 },
-    });
-    criteria.push({
-      type: 'html_structure',
-      target,
-      description: `'${target}' geçerli bir HTML5 belge yapısına (DOCTYPE, html, body) ve gerçek satır sonlarına sahip olmalıdır.`,
-    });
+    criteria.push(criterion('file_exists', target, check('fileShouldExist', { target })));
+    criteria.push(criterion('min_size', target, check('fileMinSize', { target }), { minBytes: 100 }));
+    criteria.push(criterion('html_structure', target, check('htmlStructure', { target })));
 
     // COMPILER GUARD: Verify constraints map to criteria.
     // A styled result is the norm for any new page, so style is always required for new pages.
     if ((wantsStyle || isNewWebPage) && !NO_STYLE_PATTERN.test(trimmed)) {
-      criteria.push({
-        type: 'contains_style',
-        target,
-        description: inlineOnly
-          ? `'${target}' içinde gömülü stil (<style>...</style>) tanımlanmış olmalıdır.`
-          : `'${target}' için gerçek CSS kuralları tanımlanmış olmalıdır (<style> bloğu veya mevcut bir .css dosyası).`,
-        params: { inlineOnly },
-      });
+      criteria.push(criterion('contains_style', target, check(inlineOnly ? 'styleInline' : 'styleAny', { target }), { inlineOnly }));
     }
 
     if (wantsScript) {
-      criteria.push({
-        type: 'contains_script',
-        target,
-        description: inlineOnly
-          ? `'${target}' içinde gömülü script (<script>...</script>) tanımlanmış olmalıdır.`
-          : `'${target}' için çalışan JavaScript kodu olmalıdır (<script> bloğu veya mevcut bir .js dosyası).`,
-        params: { inlineOnly },
-      });
+      criteria.push(criterion('contains_script', target, check(inlineOnly ? 'scriptInline' : 'scriptAny', { target }), { inlineOnly }));
     }
 
-    criteria.push({
-      type: 'references_resolve',
-      target,
-      description: `'${target}' içinde bağlantı verilen tüm yerel CSS/JS dosyaları diskte mevcut olmalıdır.`,
-    });
+    criteria.push(criterion('references_resolve', target, check('referencesResolve', { target })));
 
     if (isLinkFix) {
-      criteria.push({
-        type: 'links_work',
-        target,
-        description: `'${target}' menüsündeki her bağlantı çalışmalıdır: sayfadaki bir bölüme (id), var olan bir dosyaya ya da JavaScript ile ele alınan bir işleve gitmelidir.`,
-      });
+      criteria.push(criterion('links_work', target, check('linksWork', { target })));
     }
 
     // Without the viewport meta tag no page is responsive on phones, whatever the CSS says.
     if (isNewWebPage || RESPONSIVE_PATTERN.test(trimmed)) {
-      criteria.push({
-        type: 'viewport_meta',
-        target,
-        description: `'${target}' <head> içinde <meta name="viewport" content="width=device-width, initial-scale=1.0"> içermelidir.`,
-      });
+      criteria.push(criterion('viewport_meta', target, check('viewportMeta', { target })));
     }
 
     return [
@@ -225,7 +195,9 @@ export class TaskCompiler {
     for (const crit of extra[0].criteria) {
       const exists = base.criteria.some((c) => c.type === crit.type);
       if (!exists) {
-        base.criteria.push({ ...crit, target: base.criteria[0]?.target || crit.target });
+        const target = base.criteria[0]?.target || crit.target;
+        const text = check(crit.text.key, { ...crit.text.params, target });
+        base.criteria.push({ ...crit, target, text, description: renderCheck(text, 'en') });
       }
     }
     return merged;

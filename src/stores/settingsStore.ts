@@ -14,6 +14,7 @@ import { HardwareInfo } from '@/types/hardware';
 import { storageService } from '@/lib/storage/StorageService';
 import { ollamaClient } from '@/lib/ollama/OllamaClient';
 import { WebAccessService } from '@/lib/web/WebAccessService';
+import { resolveLanguage } from '@/lib/localization/i18n';
 
 interface SettingsState {
   settings: AppSettings;
@@ -29,6 +30,15 @@ interface SettingsState {
   setFontSize: (size: FontSize) => void;
   setOllamaEndpoint: (endpoint: string) => void;
   refreshHardware: () => Promise<void>;
+}
+
+/** Errors from the main process (files, commands, web) use the interface language too. */
+function tellMainLanguage(language: Language | undefined): void {
+  try {
+    window.electronAPI?.setUiLanguage?.(resolveLanguage(language));
+  } catch {
+    // not in the desktop app
+  }
 }
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
@@ -56,6 +66,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         ...DEFAULT_SETTINGS.webAccess,
         ...(data.settings?.webAccess || {}),
       },
+      commandIsolation: {
+        ...DEFAULT_SETTINGS.commandIsolation,
+        ...(data.settings?.commandIsolation || {}),
+      },
       agentOptimization: {
         ...DEFAULT_SETTINGS.agentOptimization,
         ...(data.settings?.agentOptimization || {}),
@@ -77,6 +91,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     ollamaClient.setEndpoint(settings.ollamaEndpoint);
 
     set({ settings, isInitialized: true });
+    tellMainLanguage(settings.language);
 
     // Fetch hardware, then re-derive the automatic profile so older saved values
     // (e.g. the former 2400-token limit) follow the current recommendations.
@@ -115,13 +130,12 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     const newWebAccess = { ...currentWeb, ...partialConfig };
     get().updateSettings({ webAccess: newWebAccess });
 
-    // Immediate in-flight request cancellation if Web Access is toggled OFF
-    if (newWebAccess.enabled === false) {
-      WebAccessService.abortAllActiveRequests('Kullanıcı Web Erişimini kapattı.');
-      if (typeof window !== 'undefined' && (window as any).electronAPI?.webAbortAll) {
-        (window as any).electronAPI.webAbortAll().catch(() => {});
-      }
-    }
+    // Turning web access off (entirely, or for chat or the agent) stops the requests in flight.
+    const turnedOff =
+      (currentWeb.enabled && !newWebAccess.enabled) ||
+      (currentWeb.chatEnabled && !newWebAccess.chatEnabled) ||
+      (currentWeb.codingEnabled && !newWebAccess.codingEnabled);
+    if (turnedOff) WebAccessService.abortAll();
   },
 
   setAgentOptimization: (partialConfig) => {
@@ -208,6 +222,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   setLanguage: (language) => {
     get().updateSettings({ language });
+    tellMainLanguage(language);
   },
 
   setTheme: (theme) => {

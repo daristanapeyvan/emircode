@@ -4,12 +4,35 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+### Added
+- Isolated commands (Settings › Agent, on by default): programs the agent runs see only the project folder and have no network unless "Internet for isolated commands" is on. On Windows, Python, `pytest` and `node` scripts run in an AppContainer with a job object (64 processes, 4 GB); npm and cargo start other programs and run without isolation. On Linux every command runs in bubblewrap when it is installed.
+- Settings › Agent shows what this computer supports. When Python is installed in a folder that isolated programs cannot read, an **Allow** button grants that folder read access after a Windows administrator prompt; the app never changes it on its own.
+- The approval dialog says when a command runs without isolation, and for `npm test` and `npm run` shows the script from `package.json` that will run.
+- Chat with Web reads the first result page as well as the search results, and the message shows what was searched and read. Stopping an answer cancels its web requests.
+- The log of every agent step shows how long the model took to load, to read the prompt (with the token count) and to answer.
+- `npm run test:sandbox` tries the isolated environment for real; CI runs it on Windows and Ubuntu.
+
 ### Changed
-- Documentation rewritten to match the app: README, the Turkish guide, the examples, architecture, security model, security policy, contributing guide and GitHub templates. The security model now also states the limits: file-change tokens are not an approval check, writes are not flushed to disk, undo copies are kept only in memory, deletes in the Files panel cannot be undone, and the web address check does not pin the resolved address.
-- The package description in `package.json` describes what the app does.
-- `GEMINI.md` (instructions for an AI assistant) is no longer part of the repository.
+- Autonomous approval: isolated commands run without asking. A test command that runs without isolation starts on its own only until the task has written code, because after that it would run code the model wrote.
+- A follow-up request in the same session always learns which files the previous request changed, but gets the previous request itself only when it continues it ("continue", "devam et"). An unrelated request no longer picks up the old work.
+- Web questions in chat are recognised by whole words, so "web sitesi oluştur" or "google maps api" no longer start a search. Programming questions go to the web only when you ask for a search, and an "I'm not sure" in an answer to a code question no longer replaces the answer with search results.
+- All web requests run in the main process; the renderer's own search code was removed. Pages are read as a stream up to the size limit, compressed pages are decompressed, the character set is taken from the response or the page, and only text formats are read. A changed DuckDuckGo page layout is reported as an error instead of "no results".
+- The agent engine's messages, the main process's errors and the check results shown in the interface follow the interface language; the model always gets English instructions and check results. Design theme names and categories are translated too.
+- The agent engine was split into the loop and one module per tool (`src/lib/agent/run/`), and command refusals carry a code instead of being recognised by their text.
+- Documentation rewritten to match the app: README, the Turkish guide, the examples, architecture, security model, security policy, contributing guide and GitHub templates. The security model describes the isolated environment and states the limits that remain, for example that npm and cargo run without isolation on Windows.
+- The package description in `package.json` describes what the app does, and `GEMINI.md` (instructions for an AI assistant) is no longer part of the repository.
 
 ### Fixed
+- Commands: npm options such as `--prefix` or `--userconfig`, code on the command line (`node -e`, `node -p`, `data:` imports, `python -c`) and `python -m` with any module (for example `pip`) were allowed. They are refused now; `python -m` accepts only `pytest`, `unittest`, `doctest` and `py_compile`, and cargo only `build`, `check`, `test`, `run`, `fmt`, `clippy`, `bench` and `doc`.
+- The agent could write `.npmrc`, `.yarnrc`, `.pypirc`, `.netrc`, `.git-credentials` and `pip.conf`/`pip.ini`, which hold credentials or change what npm and pip run. These files are off limits now.
+- The read-only git commands ran programs that a repository configures (`core.fsmonitor`, hooks, external diff and text conversion, filters). Git now runs with these settings switched off, so opening a downloaded project runs nothing from it.
+- The web address check did not pin the resolved address: a host name could resolve to a public address during the check and to a local one when connecting. The address is now checked at connection time, for every redirect too, and IPv6 forms of private addresses (IPv4-mapped, NAT64, 6to4) are recognised.
+- A link in a chat answer could open a new app window. Links now open in the system browser, and the window cannot be navigated away from the app.
+- On Linux, a command stopped by the time limit left the programs it had started running; the whole process group is stopped now.
+- Numbered lists in chat answers restarted at 1 after a blank line or a code block ("3." followed by "1."). Lists keep their numbers, and indented items are shown as nested lists.
+- The agent engine's stop messages, notifications and completion card were Turkish in the English interface.
+- When the model kept re-sending a style or text change that was already in place, the task was stopped although the file was right; it now ends as completed when the file has no open check errors. When the same edit is refused again for the same fault, the model gets the current lines and one different way to make the change.
+- A follow-up task could stop as a loop before it changed anything: the model asked to read a file whose content was already part of the task message and was refused each time. The first such read is answered now; reading the unchanged file again is still refused.
 - The out-of-memory message pointed to Settings › Generation for the context length; it now points to Settings › Agent.
 
 ## [1.8.0] - 2026-09-26

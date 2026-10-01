@@ -35,6 +35,19 @@ export const CommandApprovalModal: React.FC = () => {
         <p className="px-3 py-2 rounded-md bg-zinc-950 border border-zinc-800 font-mono text-zinc-100 break-all select-text">
           {pendingCommand.binary} {pendingCommand.args.join(' ')}
         </p>
+        {pendingCommand.script && (
+          <div className="space-y-1.5">
+            <p className="text-zinc-400">{t.agent.commandRunsScript}</p>
+            <p className="px-3 py-2 rounded-md bg-zinc-950 border border-zinc-800 font-mono text-zinc-100 break-all select-text">
+              {pendingCommand.script}
+            </p>
+          </div>
+        )}
+        {pendingCommand.isolationNote && (
+          <p className={pendingCommand.isolated ? 'text-zinc-400 leading-relaxed' : 'text-amber-400 leading-relaxed'}>
+            {pendingCommand.isolated ? pendingCommand.isolationNote : `${t.agent.commandNotIsolated} ${pendingCommand.isolationNote}`}
+          </p>
+        )}
         {pendingCommand.reason && <p className="text-zinc-300 leading-relaxed">{pendingCommand.reason}</p>}
       </div>
     </Modal>

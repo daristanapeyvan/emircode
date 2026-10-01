@@ -1,10 +1,12 @@
 /**
  * test_web_access.ts
- * Comprehensive automated verification for Emir Code's Zero-Trust Web Access & Search Subsystem.
+ * Web access for the chat and the agent: the on/off switches, the address checks, prompt-injection
+ * boundaries, request ids and stopping, and the detection of questions that need the web.
  */
 
 import { ToolDispatcher } from './src/lib/agent/ToolDispatcher';
 import { WebAccessService } from './src/lib/web/WebAccessService';
+import { checkUrlShape, isPrivateAddress, htmlToText } from './electron/web';
 import { wrapUntrustedWebResult } from './src/lib/agent/UntrustedData';
 import { buildCompactSystemPrompt, buildSystemPrompt } from './src/lib/agent/AgentEngine';
 import { WebAccessConfig } from './src/types/settings';
@@ -102,7 +104,7 @@ async function run() {
     'Runtime: Subsequent chat request rejected immediately after user disables Web'
   );
 
-  console.log('\n--- 5. Testing Zero-Trust SSRF Protection ---');
+  console.log('\n--- 5. Address checks ---');
   const forbiddenUrls = [
     'http://localhost:3000',
     'http://127.0.0.1:8080',
@@ -114,21 +116,17 @@ async function run() {
     'electron://app/index.html',
     'javascript:alert(1)',
   ];
-
   for (const badUrl of forbiddenUrls) {
-    const check = await WebAccessService.validateUrl(badUrl);
-    assert(!check.valid, `SSRF Blocked: ${badUrl} (Reason: ${check.reason})`);
+    assert(!checkUrlShape(badUrl).ok, `Refused: ${badUrl}`);
   }
-
-  // IP Private Range Verification
-  assert(WebAccessService.isPrivateIp('127.0.0.1'), '127.0.0.1 detected as private/loopback');
-  assert(WebAccessService.isPrivateIp('10.254.1.1'), '10.x detected as private');
-  assert(WebAccessService.isPrivateIp('192.168.0.100'), '192.168.x detected as private');
-  assert(WebAccessService.isPrivateIp('172.20.0.1'), '172.16-31 detected as private');
-  assert(WebAccessService.isPrivateIp('::1'), '::1 detected as IPv6 loopback');
-  assert(WebAccessService.isPrivateIp('fe80::1'), 'fe80:: link-local detected as private');
-  assert(!WebAccessService.isPrivateIp('8.8.8.8'), '8.8.8.8 confirmed as public IP');
-  assert(!WebAccessService.isPrivateIp('104.18.17.205'), '104.18.17.205 confirmed as public IP');
+  assert(isPrivateAddress('127.0.0.1'), '127.0.0.1 is private');
+  assert(isPrivateAddress('10.254.1.1'), '10.x is private');
+  assert(isPrivateAddress('192.168.0.100'), '192.168.x is private');
+  assert(isPrivateAddress('172.20.0.1'), '172.16-31 is private');
+  assert(isPrivateAddress('::1'), '::1 is private');
+  assert(isPrivateAddress('fe80::1'), 'fe80:: is private');
+  assert(!isPrivateAddress('8.8.8.8'), '8.8.8.8 is public');
+  assert(!isPrivateAddress('104.18.17.205'), '104.18.17.205 is public');
 
   console.log('\n--- 6. Testing Prompt Injection & Untrusted Data Boundaries ---');
   const maliciousWebPayload = `
@@ -192,54 +190,63 @@ async function run() {
       </body>
     </html>
   `;
-  const cleaned = WebAccessService.cleanHtmlToText(sampleHtml);
+  const cleaned = htmlToText(sampleHtml, 'Page');
   assert(cleaned.title === 'Electron IPC Tutorial', 'HTML title extracted correctly');
   assert(!cleaned.text.includes('alert('), 'Scripts stripped from HTML content');
   assert(!cleaned.text.includes('Copyright 2026'), 'Footer stripped from HTML content');
   assert(cleaned.text.includes('ipcRenderer.invoke'), 'Valuable content preserved');
 
-  console.log('\n--- 8. Testing SearchProvider Abstraction & Source IDs ---');
-  const { SearchProviderRegistry, DuckDuckGoProvider } = await import('./src/lib/web/SearchProvider');
-  
-  // Custom mock provider testing pluggability
-  class MockSearchProvider {
-    readonly id = 'mock-provider';
-    readonly name = 'Mock Search Engine';
-    async search(query: string) {
-      return [
-        {
-          id: 'web-001',
-          title: `Result for ${query}`,
-          url: 'https://example.com/doc',
-          snippet: 'Official mock documentation snippet.',
-          source: 'example.com',
-        },
-      ];
-    }
-  }
-
-  const mockProvider = new MockSearchProvider();
-  SearchProviderRegistry.register(mockProvider);
-  SearchProviderRegistry.setActive('mock-provider');
-  assert(SearchProviderRegistry.getActive().id === 'mock-provider', 'Active search provider swapped to mock-provider');
-
-  const mockResults = await WebAccessService.search('typescript generics');
-  assert(mockResults.length === 1, 'Mock provider returned results');
-  assert(mockResults[0].id === 'web-001', 'Structured source ID web-001 preserved');
-  assert(mockResults[0].source === 'example.com', 'Source domain correctly reported');
-
-  // Reset to default DuckDuckGo provider
-  SearchProviderRegistry.setActive('duckduckgo');
-  assert(SearchProviderRegistry.getActive().id === 'duckduckgo', 'Provider safely restored to duckduckgo');
-
-  console.log('\n--- 9. Testing In-Flight Request Cancellation ---');
+  console.log('\n--- 8. Requests go to the main process with an id; stopping stops that request ---');
+  const calls: Array<{ kind: string; arg: any; options?: any }> = [];
+  let releaseSearch: (value: any) => void = () => {};
+  (globalThis as any).window = {
+    electronAPI: {
+      webSearch: (query: string, options: any) => {
+        calls.push({ kind: 'search', arg: query, options });
+        return new Promise((resolve) => (releaseSearch = resolve));
+      },
+      webFetch: async (url: string, options: any) => {
+        calls.push({ kind: 'fetch', arg: url, options });
+        throw new Error("Error invoking remote method 'web:fetchUrl': Error: The page could not be read: ECONNRESET");
+      },
+      webAbort: async (requestId: string) => {
+        calls.push({ kind: 'abort', arg: requestId });
+        releaseSearch([]);
+        return true;
+      },
+      webAbortAll: async () => {
+        calls.push({ kind: 'abortAll', arg: null });
+        return true;
+      },
+    },
+  };
   const controller = new AbortController();
-  const unregister = WebAccessService.registerActiveRequest(controller);
-  assert(!controller.signal.aborted, 'Controller initially not aborted');
+  const pending = WebAccessService.search('  typescript generics  ', { signal: controller.signal });
+  assert(calls[0]?.kind === 'search' && calls[0].arg === 'typescript generics', 'The query is trimmed and sent to the main process');
+  const requestId = calls[0]?.options?.requestId;
+  assert(typeof requestId === 'string' && requestId.length > 0, 'The search carries a request id');
+  controller.abort();
+  await pending;
+  assert(calls.some((c) => c.kind === 'abort' && c.arg === requestId), 'Stopping the run stops exactly that request in the main process');
+  let fetchError = '';
+  try {
+    await WebAccessService.fetchUrl('https://example.com');
+  } catch (err: any) {
+    fetchError = err.message;
+  }
+  assert(fetchError === 'The page could not be read: ECONNRESET', `The IPC prefix is removed from errors ("${fetchError}")`);
+  WebAccessService.abortAll();
+  assert(calls.some((c) => c.kind === 'abortAll'), 'Turning web access off stops every request');
+  delete (globalThis as any).window;
 
-  WebAccessService.abortAllActiveRequests('User disabled web access');
-  assert(controller.signal.aborted, 'All in-flight controllers immediately aborted when Web Access is disabled');
-  unregister();
+  console.log('\n--- 9. Without the desktop app there is no web access ---');
+  let outside = '';
+  try {
+    await WebAccessService.search('x');
+  } catch (err: any) {
+    outside = err.message;
+  }
+  assert(/desktop app/.test(outside), 'Outside the app the service refuses clearly');
 
   console.log('\n--- 10. Testing Strict Structured Tool-Calling (Prose Rejection) ---');
   // Conversational sentence without structured JSON MUST NOT trigger tool call
@@ -309,6 +316,43 @@ async function run() {
     'Intent: Casual conversational greeting correctly identified as non-web'
   );
 
+  // Coding questions stay local; substrings no longer trigger a search.
+  const localQuestions = [
+    'how do I pass options to a function in python?',
+    'what does this method return?',
+    "I don't know how to fix this error?",
+    'python kurulumu nasıl yapılır',
+    'explain questions about neural networks',
+    'how does concurrency work in go?',
+    'kodu güncelle ve hatayı düzelt',
+    'set the temperature parameter of the model to 0.7',
+    'web sitesi için bir iletişim formu yaz',
+    'google maps api anahtarı nasıl kullanılır',
+    'what is the current directory in node?',
+  ];
+  for (const q of localQuestions) {
+    assert(!detectWebSearchIntent(q), `Intent: no search for "${q}"`);
+  }
+  const webQuestions = [
+    'dolar kuru bugün ne kadar',
+    'euro kaç tl?',
+    'altın fiyatları düştü mü',
+    'istanbul hava durumu',
+    'webde ara: ollama son sürüm',
+    'internetten araştır yapay zeka haberleri',
+    'search the web for the latest node.js release',
+    'şebnem ferah kimdir',
+    'who is the ceo of nvidia',
+  ];
+  for (const q of webQuestions) {
+    assert(detectWebSearchIntent(q), `Intent: search for "${q}"`);
+  }
+  const { detectKnowledgeRefusal, isExplicitWebRequest } = await import('./src/lib/web/WebIntentDetector');
+  assert(!detectKnowledgeRefusal('Emin değilim ama şu kodu deneyebilirsiniz: arr.sort()', 'bu diziyi nasıl sıralarım? kod örneği ver'), 'Refusal: unsure answer to a coding question is kept');
+  assert(detectKnowledgeRefusal('Bu kişi hakkında bilgim yok.', 'şebnem ferah kimdir'), 'Refusal: "no information" about a person triggers a search');
+  assert(detectKnowledgeRefusal('I do not have access to real-time data.', 'what is the latest react version?'), 'Refusal: no-access answers trigger a search even for code topics');
+  assert(isExplicitWebRequest('webde ara hava durumu') && !isExplicitWebRequest('web sitesi oluştur'), 'Explicit request needs a search verb');
+
   // Search Query Extraction Tests
   const extractedWeather = extractSearchQuery('web aracını kullanarak bugünün 23.09.2026 uşak hava durumunu bul');
   assert(
@@ -328,9 +372,7 @@ async function run() {
   const cleanedThought = cleanThoughtContent(rawThought);
   assert(!cleanedThought.includes('```json') && !cleanedThought.includes('read_file'), 'Thought sanitizer cleaned action JSON from thought block');
 
-  console.log(`\n===========================================`);
-  console.log(`🎉 ALL ${passedTests}/${totalTests} WEB ACCESS TESTS PASSED PERFECTLY!`);
-  console.log(`===========================================`);
+  console.log(`\n${passedTests}/${totalTests} web access tests passed`);
 }
 
 run().catch((err) => {

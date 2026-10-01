@@ -30,20 +30,25 @@ jobs:
       - name: TypeScript Check
         run: npx tsc --noEmit
 
-      - name: Run Functional Test Suite
-        run: node ./scripts/verify_functionality.js
+      # Every suite of "npm test": agent, web access, security rules, wizards, design themes, chat Markdown.
+      - name: Run Test Suites
+        run: npm test
 
-      - name: Run Agent Reliability Tests
-        run: node ./scripts/run-ts-test.mjs test_agent_reliability.ts
+      # The isolated environment of agent commands, tried for real: an AppContainer on Windows,
+      # bubblewrap on Linux (Ubuntu restricts unprivileged user namespaces; the runner allows them).
+      - name: Build Command Isolation Launcher (Windows)
+        if: runner.os == 'Windows'
+        run: node ./scripts/build-sandbox.cjs
 
-      - name: Run Agent Engine Tests (scripted model)
-        run: node ./scripts/run-ts-test.mjs test_agent_engine.ts
+      - name: Install bubblewrap (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
 
-      - name: Run Architecture Tests
-        run: node ./scripts/run-ts-test.mjs test_production_architecture.ts
-
-      - name: Run Web Access Tests
-        run: node ./scripts/run-ts-test.mjs test_web_access.ts
+      - name: Run Command Isolation Tests
+        run: node ./scripts/run-ts-test.mjs test_sandbox.ts
 
       - name: Check Shell Script Syntax
         shell: bash

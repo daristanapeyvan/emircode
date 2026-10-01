@@ -8,17 +8,24 @@ Emir Code is an Electron app (React 19, TypeScript, Zustand, Tailwind CSS) that 
 
 | Process | Responsibilities | Code |
 | --- | --- | --- |
-| Main (Node.js) | Project folder access (path checks, reads, writes, undo copies), the command runner, read-only git, web search and page fetching, the model library requests to ollama.com, app data storage, Ollama start-up, Linux desktop integration | `electron/main.ts` |
+| Main (Node.js) | Project folder access (path checks, reads, writes, undo copies), the command runner, the model library requests to ollama.com, app data storage, Ollama start-up, Linux desktop integration | `electron/main.ts` |
+| | Which commands may run (section 11) | `electron/commandPolicy.ts` |
+| | The isolated environment of commands (section 11) | `electron/sandbox.ts`, `native/windows/` |
+| | Web search and page fetching (section 10) | `electron/web.ts` |
+| | Read-only git with repository settings switched off | `electron/git.ts` |
+| | Texts of the main process in the interface language | `electron/i18n.ts` |
 | Preload | Exposes the typed `window.electronAPI` bridge; the window runs with `contextIsolation: true` and `nodeIntegration: false` | `electron/preload.ts` |
 | Renderer | The interface, the stores, the agent engine and all requests to Ollama (`/api/chat`, `/api/show`, `/api/pull`, …) | `src/` |
 
-The agent engine runs in the renderer. It never touches the disk itself: every read, write, command and web request goes through an IPC call to the main process, which checks it again.
+The agent engine runs in the renderer. It never touches the disk itself: every read, write, command and web request goes through an IPC call to the main process, which checks it again. Links in the window never open a new Electron window or navigate it away; web addresses go to the system browser.
+
+Texts the user sees come from the translation files (`src/lib/localization/translations`), also those of the main process and the agent engine. What the model reads (instructions, check results, errors) is English; the check results shown in the interface are rendered in the interface language (`checkTexts.ts`).
 
 ---
 
 ## 2. How an agent task runs
 
-1. **Start.** `agentStore.startGoal` calls `AgentEngine.runGoal` with the request, the model, the security profile and the previous task of the session (request, outcome, changed files).
+1. **Start.** `agentStore.startGoal` calls `AgentEngine.runGoal` with the request, the model, the security profile and the previous task of the session. The model always learns which files the previous task changed and whether it finished; the previous request itself is included only when the new request continues it ("continue", "devam et"), so an unrelated request does not resume old work.
 2. **Probing.** The engine asks the main process for `git status` and the file list, and reads the model's size, native context length and capabilities from Ollama's `/api/show` (`ModelRuntime.ts`). If Git is not available, the git tools are left out; for the Autonomous profile `ask_user` is left out; without web access the web tools are left out. Models up to 4.5B parameters get a shorter tool list without `search_code` and `delete_file`.
 3. **Planning.** The request becomes a checklist only when the user wrote an explicit list or joined steps with sequencing words (section 4). For web pages, `TaskCompiler` creates acceptance checks (section 5). For a new web page, a design theme is chosen (section 7).
 4. **Tool loop** (at most 35 steps and 50 tool calls, within the task time limit from Settings › General, 30 minutes by default; time spent waiting for the user is not counted):
@@ -26,9 +33,11 @@ The agent engine runs in the renderer. It never touches the disk itself: every r
    - The model answers with one action: `{"thought": …, "action": …, …fields}`. The tools are `list_dir`, `read_file`, `search_code`, `write_file`, `edit_file`, `replace_lines`, `delete_file`, `run_command`, `git_status`, `git_diff`, `web_search`, `fetch_url`, `ask_user` and `finish`.
    - Reads go through the main process. Writes and edits are checked (section 6), shown as a diff and, depending on the profile, approved by the user or applied directly. The main process then writes the file.
    - Every result goes back to the model with a one-line state (section 3).
+   - The loop itself is in `AgentEngine.ts`; each tool has its own handler in `src/lib/agent/run/` (`readTools`, `writeTool`, `editTool`, `deleteTool`, `commandTool`, `webTools`, `askTool`, `finishTool`). The handlers share the run state through a context object (`run/context.ts`); helpers without state are in `engineHelpers.ts`.
+   - Each step's timing is logged: model load, prompt reading (tokens and seconds) and generation.
 5. **Finish.** `finish` is accepted when every acceptance check passes and no written file has open check errors. Otherwise the model gets `[CANNOT FINISH YET]` with the problems, at most twice. A change task that has not changed any file gets `[CHECK]` once. After `finish` the design theme and the page repairs are applied, and the task ends with a completion card (green) or an incomplete card (amber) that lists what could not be verified.
 
-The task stops early after 3 consecutive errors, 3 repeated actions in a row, 10 steps without progress, the step or tool-call limit, or the time limit. When it stops for repetition or lack of progress but every acceptance check already passes (or, for scripts, the model's own program ran successfully after its last change), it ends as completed with a note instead (`tryGracefulCompletion`).
+The task stops early after 3 consecutive errors, 3 repeated actions in a row, 10 steps without progress, the step or tool-call limit, or the time limit. When it stops for repetition or lack of progress but every acceptance check already passes (or, for scripts, the model's own program ran successfully after its last change), it ends as completed with a note instead (`tryGracefulCompletion`). A task without acceptance checks and without code to run (a stylesheet or text change) also ends as completed when the model re-sends, at least twice, a change that is already in the file. When the same edit is refused again for the same fault, the model gets the current lines of the file and one different way to make the change (the complete file for short files, the whole block otherwise).
 
 The run state is tracked by `AgentStateMachine`, which only allows these transitions:
 
@@ -50,8 +59,8 @@ BLOCKED, FAILED and DONE are final.
 - **Static system prompt.** The system prompt (`AgentProtocol.ts`) is the same in every step of a task, and the history is only appended to. Ollama can then reuse its cache for the unchanged beginning of the prompt instead of reading everything again at each step.
 - **State line.** Per-step information is appended to the newest tool result as one line, for example `[STATE] step 6/35 · changed files: index.html · checklist 1/3 done (next: #2) · acceptance checks 5/7 passing`. It can also name the last user decision, unavailable commands and missing paths.
 - **Context length.** Every request to Ollama sends an explicit `num_ctx`. It comes from Settings › Agent › Context length (Auto: chosen for this computer's hardware and capped by the model's native context). Chats use the same value unless a chat has its own override, so Ollama does not reload the model when you switch modes.
-- **Compaction.** The engine estimates the prompt size before each request. When the prompt would not leave room for the answer, older tool results and actions are shortened (the newest exchanges stay complete). If that is not enough, the oldest exchanges are dropped and replaced by a short note that names the changed files. A file body removed from history is replaced by a line such as `[read_file "src/App.tsx": 870 lines — content removed from history to save space; read it again if you need it]`.
-- **Small projects.** In projects with up to 6 files the current file contents are part of the first task message, up to a quarter of the context window.
+- **Compaction.** The engine estimates the prompt size before each request. When the prompt would not leave room for the answer, older tool results and actions are shortened (the newest exchanges stay complete). If that is not enough, the oldest exchanges are dropped and replaced by a short note that names the changed files. A file body removed from history is replaced by a line such as `[read_file "src/App.tsx": 870 lines, content removed from history to save space; read it again if you need it]`.
+- **Small projects.** In projects with up to 6 files the current file contents are part of the first task message, up to a quarter of the context window. When the model asks to read such a file anyway, the first read is answered; after that the rule for repeated reads applies.
 - **Output length.** When Ollama stops because the output limit was reached (`done_reason: "length"`), the step is retried with a larger `num_predict` (up to 60 % of the context window), then the model is asked for a smaller step.
 - **Untrusted data.** File contents, search results, git output and web results are wrapped in markers such as `<<<UNTRUSTED_PROJECT_DATA: path>>>` and `<<<WEB_RESULT_UNTRUSTED>>>`, and the system prompt says that text inside them is data, not instructions.
 
@@ -89,14 +98,14 @@ Acceptance checks are only created where completion can be verified from the fil
 | --- | --- | --- |
 | Invalid or chatty tool calls | Ollama `format` with a JSON Schema that has one variant per enabled tool, each with its own required fields and `thought` first. A fallback parser repairs trailing commas and raw newlines and never turns a malformed action into file content. | `AgentProtocol.buildActionSchema`, `ToolDispatcher.ts` |
 | Broken files | After every write: JSON/JSONC parsing; string- and comment-aware bracket balance for JS/TS/JSX, Java, C/C++/C#, Go, Rust, PHP, Kotlin, Swift and CSS/SCSS; Python strings, brackets, tab/space mix and block indentation; HTML sections and inline scripts; YAML tabs; truncated files and leftover Markdown fences. Findings go back with numbered lines and block `finish`. | `FileSanity.ts` |
-| Edits that break a working file | Every edit is checked before it is applied. A change that adds errors to a clean file, or more errors to a broken one, is refused and the model sees the numbered lines of its own version. On a broken file only fewer errors count as progress; after three edits without improvement the model gets the whole numbered file and is asked to rewrite it. | `FileSanity.damageFromChange`, `AgentEngine.ts` |
-| Destructive rewrites | Invalid JSON never replaces valid JSON; config rewrites that lose keys are merged; rewrites that would delete most of a file or turn a page into a fragment are refused; placeholders such as "rest of the code" and status sentences written over a file are rejected; existing test files cannot be changed unless the user asks. | `FileSanity.ts`, `AgentEngine.ts` |
-| Repetition | Sampling follows the model's recommended values; thinking models get `think: false` unless Settings › Agent › Think before each step is on. Degenerate output is detected while streaming and retried with different sampling. A repeated read-only action is not executed again; the model gets `[REPEATED]` and a request to finish or do something else. Re-applying an identical edit is refused. | `ModelRuntime.ts`, `AgentProtocol.detectRepetitionLoop`, `AgentEngine.ts` |
-| No real progress | Changes that leave the same check errors, changes that only add copies of existing lines, and a successful command repeated with the same output count as no progress. | `AgentEngine.copiedLinesAdded`, `AgentEngine.ts` |
-| Hard-to-see mistakes | A Python `replace_lines` block indented differently from the lines it replaces is aligned when that removes the error. An edit that deletes a function or class the file still uses is refused. For files of up to 60 lines with a reported problem, a complete rewrite is suggested. | `AgentEngine.alignReplacementIndent`, `FileSanity.definitionLoss` |
-| Wrong file paths | A missing path is answered with the closest existing path (`Did you mean "src/App.tsx"?`). | `findClosestPath` |
-| Misread command results | A program started without arguments that prints its usage text is reported as expected behaviour. Tracebacks and stack traces that point into the project come with the numbered lines at that location. A failed command is not run again until a file changes. Python output is read as UTF-8. | `AgentEngine.ts`, `electron/main.ts` |
-| Missing tools | A command that is not installed is reported once with `[COMMAND UNAVAILABLE]` and listed in the state line. | `AgentEngine.ts` |
+| Edits that break a working file | Every edit is checked before it is applied. A change that adds errors to a clean file, or more errors to a broken one, is refused and the model sees the numbered lines of its own version. On a broken file only fewer errors count as progress; after three edits without improvement the model gets the whole numbered file and is asked to rewrite it. | `FileSanity.damageFromChange`, `run/editTool.ts`, `run/writeTool.ts` |
+| Destructive rewrites | Invalid JSON never replaces valid JSON; config rewrites that lose keys are merged; rewrites that would delete most of a file or turn a page into a fragment are refused; placeholders such as "rest of the code" and status sentences written over a file are rejected; existing test files cannot be changed unless the user asks. | `FileSanity.ts`, `run/writeTool.ts` |
+| Repetition | Sampling follows the model's recommended values; thinking models get `think: false` unless Settings › Agent › Think before each step is on. Degenerate output is detected while streaming and retried with different sampling. A repeated read-only action is not executed again; the model gets `[REPEATED]` and a request to finish or do something else. Re-applying an identical edit is refused. | `ModelRuntime.ts`, `AgentProtocol.detectRepetitionLoop`, `AgentEngine.ts`, `run/` |
+| No real progress | Changes that leave the same check errors, changes that only add copies of existing lines, and a successful command repeated with the same output count as no progress. | `engineHelpers.copiedLinesAdded`, `AgentEngine.ts` |
+| Hard-to-see mistakes | A Python `replace_lines` block indented differently from the lines it replaces is aligned when that removes the error. An edit that deletes a function or class the file still uses is refused. For files of up to 60 lines with a reported problem, a complete rewrite is suggested. | `engineHelpers.alignReplacementIndent`, `FileSanity.definitionLoss` |
+| Wrong file paths | A missing path is answered with the closest existing path (`Did you mean "src/App.tsx"?`). | `engineHelpers.findClosestPath` |
+| Misread command results | A program started without arguments that prints its usage text is reported as expected behaviour. Tracebacks and stack traces that point into the project come with the numbered lines at that location. A failed command is not run again until a file changes. Python output is read as UTF-8. | `run/commandTool.ts`, `electron/main.ts` |
+| Missing tools | A command that is not installed is reported once with `[COMMAND UNAVAILABLE]` and listed in the state line. | `run/commandTool.ts` |
 
 The file checks are expected to report no errors on valid code; they are tested against real code bases during development (the Python standard library and JS/TS/CSS/HTML/JSON files from `node_modules`).
 
@@ -129,7 +138,7 @@ The Website, Mini App and Script wizards are chosen in New Project (`NewProjectD
 | Text box | Markdown toolbar, shortcuts, list continuation and preview; edits keep the undo history. | `components/common/RichTextArea.tsx`, `lib/wizard/markdownEdit.ts` |
 | Tool settings | Tools are described as data: toggle, choice, multi-choice, number, text and list fields with the sentence each value adds to the request. The same schema renders the settings page and builds the request. | `lib/wizard/params.ts`, `components/agent/wizard/ParamFields.tsx` |
 | Mini apps | 21 single-file tools in 5 categories, each with rules against typical small-model mistakes and the design category of its theme. The request asks for one `index.html` with inline CSS and JS; the web page checks still apply. | `lib/wizard/miniApps.ts` |
-| Scripts | 13 Python or Node.js tools in 3 categories. Before the first step the app writes a tested safety module next to the script (`guvenli_islem` / `safe_actions`); the model only writes the options and a `plan()` that lists rename, move and write actions, and the module's `execute()` is the only code that touches files: preview by default, changes only with `--uygula` / `--apply`, no deletes, no overwrites, nothing outside the given folder, backups before content changes, an action log. Scripts get no web page checks and no theme. The script's log and backup folders cannot be written by the model, and the same apply command is not run twice without a file change. | `lib/wizard/scripts.ts`, `lib/wizard/scriptSkeleton.ts`, `AgentEngine.ts` |
+| Scripts | 13 Python or Node.js tools in 3 categories. Before the first step the app writes a tested safety module next to the script (`guvenli_islem` / `safe_actions`); the model only writes the options and a `plan()` that lists rename, move and write actions, and the module's `execute()` is the only code that touches files: preview by default, changes only with `--uygula` / `--apply`, no deletes, no overwrites, nothing outside the given folder, backups before content changes, an action log. Scripts get no web page checks and no theme. The script's log and backup folders cannot be written by the model, and the same apply command is not run twice without a file change. | `lib/wizard/scripts.ts`, `lib/wizard/scriptSkeleton.ts`, `AgentEngine.ts`, `run/commandTool.ts` |
 | Run | `startGoal(prompt, { displayGoal, checklist, design, contracts, seedFiles, scriptOutputs, applyFlag })` passes the explicit checklist, the theme choice and the script options to `runGoal`. | `lib/wizard/composer.ts`, `agentStore.ts` |
 
 ---
@@ -150,13 +159,30 @@ The Website, Mini App and Script wizards are chosen in New Project (`NewProjectD
 
 Web access is on by default and can be switched off completely, or separately for chat and for the agent, in Settings › Web access.
 
-- **Chat.** `WebIntentDetector` recognises questions that need current information (people, news, prices, weather) and runs a search before the model answers; the results are added to the prompt as untrusted data. If the model still answers that it has no internet access, `chatStore` runs the search and generates the answer again.
+- **Chat.** `WebIntentDetector` recognises questions that need current information (people, news, prices, weather) by whole words in Turkish and English. Questions about code are not searched unless the user asks for a search. Before the model answers, `chatStore` searches, reads the first result page (up to 6,000 characters) and adds both to the prompt as untrusted data. The model can also ask for a search or a page itself. If it answers that it has no internet access or does not know, the app searches and generates the answer again. Stopping the answer cancels the web requests.
 - **Agent.** With web access on, the agent has `web_search` and `fetch_url`. Without it, the tools are not in the schema, and `ToolDispatcher` and `AgentEngine` refuse a call that appears anyway.
-- **Main process.** Searches are sent to DuckDuckGo Lite (5 results by default, at most 10, each result URL checked). Page fetches check the address, follow at most 3 redirects and check each one, stop after 10 seconds and read at most 512 KB. Switching web access off aborts running requests (`web:abortAll`). The address checks are described in [docs/SECURITY_MODEL.md](./docs/SECURITY_MODEL.md#web-access).
+- **Main process** (`electron/web.ts`). Searches are sent to DuckDuckGo Lite (5 results by default, at most 10, each result URL checked); when DuckDuckGo's page layout is not recognised, the search reports an error instead of "no results". Page fetches check the address, resolve the host name at connection time and refuse private addresses, follow at most 3 redirects and check each one, stop after 10 seconds and read at most 512 KB (after decompression, as a stream). Only text, HTML, XML and JSON are read; the character set is taken from the response or the page. Every request has an id; `web:abort` cancels one, and switching web access off cancels all (`web:abortAll`). The address checks are described in [docs/SECURITY_MODEL.md](./docs/SECURITY_MODEL.md#web-access).
+- **Renderer.** `WebAccessService` only calls the main process; the renderer never fetches web pages itself.
 
 ---
 
-## 11. Model library (Model Manager › Discover)
+## 11. Commands and isolation
+
+| Step | What happens | Code |
+| --- | --- | --- |
+| Rules | `checkCommand` decides what may start: `npm`, `node`, `python`, `pytest` and `cargo`; npm only for `test` and `run test|build|lint|typecheck|check`, with a `package.json` that has the script, and without npm options; no shell characters (on Windows also none that cmd.exe reads inside quotes); no code on the command line (`node -e`, `-p`, `--eval`, `data:` imports, `python -c`); `python -m` only for `pytest`, `unittest`, `doctest` and `py_compile`; a fixed list of cargo subcommands. A refusal has a code and a translation key, so the engine reacts to the code, not to the text. | `electron/commandPolicy.ts` |
+| Before approval | The engine checks the same rules before it asks the user, so a refused command never reaches the approval dialog. For `npm test` and `npm run` it reads the script from `package.json`, and it asks the main process whether the command will run isolated (`sandbox:plan`). The dialog shows both. | `run/commandTool.ts` |
+| Approval | Strict and Balanced ask for every command. Autonomous runs an isolated command directly; a command without isolation only while it is a known test command and the task has not written code yet. | `run/commandTool.ts` |
+| Start | The main process checks the rules again and starts the program without a shell (npm on Windows through cmd.exe as one command string, which Node requires for `.cmd` files). The environment is reduced to the system variables programs need (`commandEnvironment`); API keys and tokens in the app's environment are not passed on. The time limit is 60 seconds; on POSIX the program gets its own process group, so the limit stops everything it started. Output is kept up to 2 MB. | `electron/main.ts`, `electron/sandbox.ts` |
+| Windows isolation | `emir-sandbox.exe` (C#, built with the .NET Framework compiler that ships with Windows by `scripts/build-sandbox.cjs`) creates the AppContainer profile `EmirCode.Sandbox`, grants it the project folder and, where the user owns it, the program's folder, and starts the program with only its standard handles inherited, inside a job object (64 processes, 4 GB, everything stopped with the launcher). `--net` adds the `internetClient` capability. Node gets `node-guard.cjs` as a preload, which makes attempts to start other programs fail at once (libuv needs named pipes for them, which hang in an AppContainer). A setup failure exits with code 125 and an `emir-sandbox:` line, which the main process reports as such instead of as a failed test. | `native/windows/` |
+| Linux isolation | `bwrap` with every namespace unshared (`--share-net` only with the network setting), the system mounted read-only, private home and `/tmp`, the project folder writable and language tool folders (`.nvm`, `.pyenv`, `.cargo`, `.local/lib`, …) read-only. | `linuxMounts` in `electron/sandbox.ts` |
+| Status | The first time a command is planned or Settings › Agent opens (`sandbox:status`), the app checks once whether the isolation works here: on Windows it starts Python and Node in the container, in an empty folder of their own and with the reduced environment; on Linux it starts `bwrap`. When Python sits in a folder the container cannot read, `sandbox:allowPython` adds the read rule for all AppContainers to that folder after a UAC prompt; the app never does this on its own. | `Sandbox` in `electron/sandbox.ts`, `IsolationSettings.tsx` |
+
+`npm run test:sandbox` (`test_sandbox.ts`) tries this for real on the current system: the program reads and writes in the project folder, cannot read or write a file next to it or list the home folder, has no internet without the network setting, and cannot start other programs on Windows (on Linux it can, inside the isolation). It also checks which commands are planned without isolation and why.
+
+---
+
+## 12. Model library (Model Manager › Discover)
 
 | Concern | How it works | Code |
 | --- | --- | --- |
@@ -168,11 +194,12 @@ Web access is on by default and can be switched off completely, or separately fo
 
 ---
 
-## 12. Packaging and release
+## 13. Packaging and release
 
 | Step | What happens | Code |
 | --- | --- | --- |
 | Windows executable | electron-builder packs the app. The `afterPack` hook writes the Emir Code icon and version information into `EmirCode.exe` with `rcedit` before the NSIS installer and the portable exe are built (`win.signAndEditExecutable` is off because electron-builder's own resource editing needs files that cannot be extracted on Windows without Developer Mode). The release workflow fails if the exe still carries Electron's metadata. | `scripts/afterPack.js`, `.github/workflows/release.yml` |
+| Command isolation launcher | `npm run build:installer` and the other build scripts first run `scripts/build-sandbox.cjs`, which compiles `emir-sandbox.exe` with the .NET Framework compiler that ships with Windows and copies `node-guard.cjs` next to it. electron-builder puts both in `resources/sandbox`; the release workflow fails if the launcher is missing from the package. On other systems the script does nothing. | `scripts/build-sandbox.cjs`, `package.json`, `.github/workflows/release.yml` |
 | Taskbar grouping | `app.setAppUserModelId('com.emircode.desktop')` matches the installer's `appId`, so the window groups with its pinned and Start Menu icon. | `electron/main.ts`, `package.json` |
 | Linux launcher | `afterPack` renames the Electron binary to `emir-code-bin` and puts an `emir-code` shell launcher in front of it. The launcher keeps Chromium's sandbox when it can work and adds `--no-sandbox` otherwise; `EMIR_CODE_FORCE_SANDBOX=1` turns the fallback off. | `scripts/afterPack.js` |
 | Linux desktop integration | Desktop entries use `StartupWMClass=Emir Code`, the window class Electron sets from the product name. Settings › About › Create shortcuts points at the AppImage file or the launcher, never at the temporary AppImage mount. | `package.json`, `electron/main.ts` |
@@ -182,7 +209,7 @@ Web access is on by default and can be switched off completely, or separately fo
 
 ---
 
-## 13. Tests
+## 14. Tests
 
 `npm test` runs these suites; none of them needs Ollama.
 
@@ -190,12 +217,16 @@ Web access is on by default and can be switched off completely, or separately fo
 | --- | --- |
 | `scripts/verify_functionality.js` | Static checks across the app: translation parity, the command allowlist, interface structure, packaging configuration |
 | `test_agent_reliability.ts` | Unit checks of the agent: parsing, file checks, guards, checklist splitting |
-| `test_agent_engine.ts` | The whole agent loop against a scripted model |
+| `test_agent_engine.ts` | The whole agent loop against a scripted model, including refused commands and follow-up tasks |
 | `test_production_architecture.ts` | State machine transitions, acceptance checks, validator, tool dispatcher, small-model detection |
-| `test_web_access.ts` | Web access switches, runtime refusal, address checks, untrusted-data markers, search result IDs, request cancellation |
+| `test_web_access.ts` | Web access switches, runtime refusal, address checks, untrusted-data markers, HTML to text, search intent in Turkish and English (code questions stay local), request ids and cancellation |
 | `test_design_theme.ts` | Theme contrast, color and font mapping, page repairs |
 | `test_site_wizard.ts`, `test_tool_wizard.ts` | Wizard requests, catalogs, the script safety module in Python and Node.js |
 | `test_model_library.ts` | Parsing of saved ollama.com pages (`test_fixtures/ollama`), sizes, quantizations, verification |
 | `test_projects.ts` | Project folders, name rules, grouping of tasks |
+| `test_markdown.ts` | Numbered and nested lists in chat answers |
+| `test_security.ts` | Command rules, credential and runner settings files, web address checks, search page parsing, read-only git against a repository with hostile settings |
 
-The CI workflow on pushes and pull requests runs the type check and the first five suites on Windows and Ubuntu. `npm run check:library` reads the live ollama.com pages to notice changes to their markup. `scripts/agent-e2e.ts` runs benchmark scenarios against a real Ollama model and checks the resulting files.
+`test_sandbox.ts` (`npm run test:sandbox`) tries the isolated environment of commands on the current system (section 11).
+
+The CI workflow on pushes and pull requests runs the type check, every suite of `npm test` and `test_sandbox.ts` on Windows and Ubuntu (with bubblewrap installed). `npm run check:library` reads the live ollama.com pages to notice changes to their markup. `scripts/agent-e2e.ts` runs benchmark scenarios against a real Ollama model and checks the resulting files.

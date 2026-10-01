@@ -26,7 +26,7 @@ Make the headings dark blue (#1e3a8a) and add a footer with a copyright notice.
 ```
 
 What happens:
-- The task message contains the previous request, its outcome and the changed files. In projects with up to 6 files, the current file contents are included as well, so the model edits the real page.
+- The task message names the files the previous request changed and whether it finished. The previous request itself is included only when the new one continues it ("continue", "fix those too"). In projects with up to 6 files, the current file contents are included as well, so the model edits the real page.
 - Small changes are made with `edit_file` (find and replace) or `replace_lines` (a line range). A rewrite that would turn the page into a fragment, or delete most of it, is refused with a hint to use `edit_file`.
 - You can also type a new instruction while a task is running (**Send instruction**). It is added to the running task, and requirements such as "add styles" are added to its acceptance checks.
 
@@ -39,7 +39,7 @@ The cart total is wrong after a discount is applied. Fix it and verify with npm 
 
 What happens:
 1. The agent reads the relevant files, fixes the calculation and proposes `npm test`.
-2. Under Strict and Balanced you approve the command; under Autonomous test commands run without asking.
+2. Under Strict and Balanced you approve the command. Under Autonomous an isolated command runs without asking; `npm test` runs without isolation on Windows, so after the fix it asks, because it would run the code the model just wrote. The dialog shows the script from `package.json` that `npm test` runs.
 3. If a test fails, the output goes back to the model. When the output points into the project (`src/cart.js:14`, a Python traceback), the model also gets the numbered lines around that location.
 4. A command that failed is not run again until a file has changed.
 5. Existing test files cannot be changed unless the request asks for test changes, so the model has to fix the code instead of the failing assertion.

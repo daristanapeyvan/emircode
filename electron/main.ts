@@ -1,10 +1,14 @@
-import { app, BrowserWindow, ipcMain, dialog, Notification } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, Notification, shell } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
 import crypto from 'crypto';
-import dns from 'dns';
 import { exec, spawn } from 'child_process';
+import { mt, setMainLanguage, initMainLanguage } from './i18n';
+import { checkCommand, CREDENTIAL_OR_RUNNER_CONFIG } from './commandPolicy';
+import { WebError, searchWeb, fetchPage } from './web';
+import { readOnlyGit } from './git';
+import { Sandbox, IsolationOptions, IsolationReason, isSandboxSetupFailure, commandEnvironment } from './sandbox';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -57,6 +61,21 @@ function createWindow() {
     mainWindow?.show();
   });
 
+  // Links (a chat answer, a page the agent built) open in the system browser, never in an app
+  // window: only the app's own page gets the preload bridge, and only http/https leave the app.
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url).catch(() => {});
+    return { action: 'deny' };
+  });
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    const own = process.env.VITE_DEV_SERVER_URL
+      ? url.startsWith(process.env.VITE_DEV_SERVER_URL)
+      : url.startsWith('file://');
+    if (own) return;
+    event.preventDefault();
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url).catch(() => {});
+  });
+
   mainWindow.on('maximize', () => {
     mainWindow?.webContents.send('window:maximizeChanged', true);
   });
@@ -99,6 +118,11 @@ ipcMain.handle('window:isMaximized', () => {
 
 ipcMain.handle('app:getLocale', () => {
   return app.getLocale();
+});
+
+// The interface tells the main process its language, so errors from here are in the same language.
+ipcMain.on('app:setLanguage', (_event, language: unknown) => {
+  setMainLanguage(language);
 });
 
 // Flash Window Frame (Windows Taskbar Yellow Blinking)
@@ -335,7 +359,7 @@ ipcMain.handle('system:installPrerequisite', async (_event, params: { target: 'o
       return {
         success: true,
         alreadyInstalled: true,
-        message: 'Ollama sisteminizde zaten kurulu olduğu için tekrar indirilmedi.',
+        message: mt('ollamaAlreadyInstalled'),
       };
     }
 
@@ -343,7 +367,7 @@ ipcMain.handle('system:installPrerequisite', async (_event, params: { target: 'o
       try {
         const url = 'https://ollama.com/install.sh';
         const res = await fetch(url);
-        if (!res.ok) throw new Error(`İndirme başarısız: HTTP ${res.status}`);
+        if (!res.ok) throw new Error(mt('downloadFailedHttp', { status: res.status }));
         const script = await res.text();
         const installerPath = path.join(os.tmpdir(), 'ollama-install.sh');
         await fs.promises.writeFile(installerPath, script, { mode: 0o755 });
@@ -355,12 +379,12 @@ ipcMain.handle('system:installPrerequisite', async (_event, params: { target: 'o
         return {
           success: true,
           alreadyInstalled: false,
-          message: 'Ollama Linux kurulum betiği indirildi ve başlatıldı (alternatif: "curl -fsSL https://ollama.com/install.sh | sh").',
+          message: mt('ollamaLinuxScriptStarted'),
         };
       } catch (err: any) {
         return {
           success: false,
-          error: `Ollama indirilemedi: ${err.message}. Lütfen terminalden "curl -fsSL https://ollama.com/install.sh | sh" komutunu çalıştırın.`,
+          error: mt('ollamaDownloadFailedLinux', { error: err.message }),
         };
       }
     }
@@ -372,7 +396,7 @@ ipcMain.handle('system:installPrerequisite', async (_event, params: { target: 'o
       const installerPath = path.join(tempDir, 'OllamaSetup.exe');
 
       const res = await fetch(url);
-      if (!res.ok) throw new Error(`İndirme başarısız: HTTP ${res.status}`);
+      if (!res.ok) throw new Error(mt('downloadFailedHttp', { status: res.status }));
       const arrayBuffer = await res.arrayBuffer();
       await fs.promises.writeFile(installerPath, Buffer.from(arrayBuffer));
 
@@ -383,12 +407,12 @@ ipcMain.handle('system:installPrerequisite', async (_event, params: { target: 'o
       return {
         success: true,
         alreadyInstalled: false,
-        message: 'Ollama kurulum aracı resmi kaynaktan (ollama.com) indirildi ve başlatıldı.',
+        message: mt('ollamaInstallerStarted'),
       };
     } catch (err: any) {
       return {
         success: false,
-        error: `Ollama indirilemedi: ${err.message}`,
+        error: mt('ollamaDownloadFailed', { error: err.message }),
       };
     }
   }
@@ -399,7 +423,7 @@ ipcMain.handle('system:installPrerequisite', async (_event, params: { target: 'o
       return {
         success: true,
         alreadyInstalled: true,
-        message: `Node.js (${nodeStatus.version}) sisteminizde zaten kurulu olduğu için tekrar indirilmedi.`,
+        message: mt('nodeAlreadyInstalled', { version: nodeStatus.version || '' }),
       };
     }
 
@@ -407,7 +431,7 @@ ipcMain.handle('system:installPrerequisite', async (_event, params: { target: 'o
       return {
         success: true,
         alreadyInstalled: false,
-        message: 'Linux sisteminizde Node.js kurmak için lütfen terminalden dağıtımınızın paket yöneticisini kullanın (ör: "sudo apt install -y nodejs npm" veya nvm).',
+        message: mt('nodeLinuxHint'),
       };
     }
 
@@ -418,7 +442,7 @@ ipcMain.handle('system:installPrerequisite', async (_event, params: { target: 'o
       const installerPath = path.join(tempDir, 'node-v22-x64.msi');
 
       const res = await fetch(url);
-      if (!res.ok) throw new Error(`İndirme başarısız: HTTP ${res.status}`);
+      if (!res.ok) throw new Error(mt('downloadFailedHttp', { status: res.status }));
       const arrayBuffer = await res.arrayBuffer();
       await fs.promises.writeFile(installerPath, Buffer.from(arrayBuffer));
 
@@ -429,17 +453,17 @@ ipcMain.handle('system:installPrerequisite', async (_event, params: { target: 'o
       return {
         success: true,
         alreadyInstalled: false,
-        message: 'Node.js resmi kaynaktan (nodejs.org) indirildi ve kurulum başlatıldı.',
+        message: mt('nodeInstallerStarted'),
       };
     } catch (err: any) {
       return {
         success: false,
-        error: `Node.js indirilemedi: ${err.message}`,
+        error: mt('nodeDownloadFailed', { error: err.message }),
       };
     }
   }
 
-  return { success: false, error: 'Bilinmeyen kurulum hedefi' };
+  return { success: false, error: mt('unknownInstallTarget') };
 });
 
 // Storage IPC
@@ -639,7 +663,7 @@ async function isCanonicalPathSafe(relativePathOrAbsolute: string): Promise<{
   error?: string;
 }> {
   if (!currentWorkspaceRoot || !canonicalWorkspaceRoot) {
-    return { safe: false, fullPath: '', canonicalPath: '', relativePath: '', error: 'Aktif bir proje çalışma klasörü seçilmedi.' };
+    return { safe: false, fullPath: '', canonicalPath: '', relativePath: '', error: mt('noProjectOpen') };
   }
 
   const normalizedRoot = canonicalWorkspaceRoot;
@@ -663,13 +687,13 @@ async function isCanonicalPathSafe(relativePathOrAbsolute: string): Promise<{
           fullPath: resolvedTarget,
           canonicalPath: '',
           relativePath: '',
-          error: 'Güvenlik İhlali: Hedef dizin bir Symlink veya Junction ile proje dışına yönlendirilmektedir.',
+          error: mt('linkOutsideProject'),
         };
       }
       canonicalTarget = resolvedTarget;
     }
   } catch (err: any) {
-    return { safe: false, fullPath: resolvedTarget, canonicalPath: '', relativePath: '', error: `Yol doğrulama hatası: ${err.message}` };
+    return { safe: false, fullPath: resolvedTarget, canonicalPath: '', relativePath: '', error: mt('pathCheckFailed', { error: err.message }) };
   }
 
   const isInside = canonicalTarget === normalizedRoot || canonicalTarget.startsWith(normalizedRoot + path.sep);
@@ -679,7 +703,7 @@ async function isCanonicalPathSafe(relativePathOrAbsolute: string): Promise<{
       fullPath: resolvedTarget,
       canonicalPath: canonicalTarget,
       relativePath: '',
-      error: 'Güvenlik İhlali: Dosya veya symlink hedefi proje klasörü dışındadır (Symlink/Junction Kaçış Koruması).',
+      error: mt('pathOutsideProject'),
     };
   }
 
@@ -699,7 +723,7 @@ function evaluateAccessPolicy(relativePath: string, mode: 'read' | 'patch'): { a
     }
     return {
       allowed: false,
-      reason: 'Güvenlik Politikası: Çevre değişkeni (.env) dosyalarına erişim güvenlik gerekçesiyle tamamen engellenmiştir.',
+      reason: mt('envBlocked'),
     };
   }
 
@@ -707,7 +731,7 @@ function evaluateAccessPolicy(relativePath: string, mode: 'read' | 'patch'): { a
   if (normRel.split('/').includes('.git')) {
     return {
       allowed: false,
-      reason: 'Güvenlik Politikası: .git dahili verilerine doğrudan dosya erişimi yasaktır. Lütfen readGitStatus veya readGitDiff kullanın.',
+      reason: mt('gitDirBlocked'),
     };
   }
 
@@ -716,7 +740,7 @@ function evaluateAccessPolicy(relativePath: string, mode: 'read' | 'patch'): { a
   if (normRel.split('/').some((part) => blockedDirs.includes(part))) {
     return {
       allowed: false,
-      reason: 'Güvenlik Politikası: Bağımlılık ve derleme çıktı klasörlerine doğrudan erişim engellenmiştir.',
+      reason: mt('buildDirBlocked'),
     };
   }
 
@@ -724,8 +748,14 @@ function evaluateAccessPolicy(relativePath: string, mode: 'read' | 'patch'): { a
   if (/\.(pem|key|id_rsa|pfx|pkcs12)$/i.test(baseName)) {
     return {
       allowed: false,
-      reason: 'Güvenlik Politikası: Kriptografik anahtar ve sertifika dosyalarına erişim yasaktır.',
+      reason: mt('keyFileBlocked'),
     };
+  }
+
+  // 5. Package-manager and credential settings: they hold access tokens and can change what a
+  // later command runs (an .npmrc "script-shell" turns "npm test" into any program).
+  if (CREDENTIAL_OR_RUNNER_CONFIG.test(normRel)) {
+    return { allowed: false, reason: mt('runnerConfigBlocked') };
   }
 
   return { allowed: true };
@@ -742,9 +772,9 @@ async function atomicWriteFile(targetPath: string, content: string): Promise<voi
 
 // Workspace Dialog & Status
 ipcMain.handle('workspace:open', async () => {
-  if (!mainWindow) return { success: false, error: 'Pencere hazır değil.' };
+  if (!mainWindow) return { success: false, error: mt('windowNotReady') };
   const res = await dialog.showOpenDialog(mainWindow, {
-    title: 'Emir Code - Proje Klasörü Seçin',
+    title: mt('chooseFolderTitle'),
     properties: ['openDirectory'],
   });
 
@@ -770,16 +800,16 @@ ipcMain.handle('workspace:status', async () => {
 
 ipcMain.handle('workspace:setPath', async (_, targetPath: string) => {
   if (!targetPath || typeof targetPath !== 'string') {
-    return { success: false, error: 'Geçersiz klasör yolu.' };
+    return { success: false, error: mt('invalidFolderPath') };
   }
   try {
     const resolved = path.resolve(targetPath);
     if (!fs.existsSync(resolved)) {
-      return { success: false, error: 'Klasör bulunamadı.' };
+      return { success: false, error: mt('folderNotFound') };
     }
     const stat = await fs.promises.stat(resolved);
     if (!stat.isDirectory()) {
-      return { success: false, error: 'Belirtilen yol bir klasör değil.' };
+      return { success: false, error: mt('notAFolder') };
     }
     currentWorkspaceRoot = resolved;
     canonicalWorkspaceRoot = await fs.promises.realpath(resolved);
@@ -789,7 +819,7 @@ ipcMain.handle('workspace:setPath', async (_, targetPath: string) => {
       folderName: path.basename(currentWorkspaceRoot),
     };
   } catch (err: any) {
-    return { success: false, error: err?.message || 'Klasör açılamadı.' };
+    return { success: false, error: err?.message || mt('folderOpenFailed') };
   }
 });
 
@@ -954,7 +984,7 @@ async function scanDirectoryTree(dirPath: string, currentDepth: number, maxDepth
 
 ipcMain.handle('workspace:listFiles', async (_, options?: { subPath?: string; maxDepth?: number }) => {
   if (!canonicalWorkspaceRoot) {
-    return { success: false, error: 'Henüz bir proje klasörü açılmadı.' };
+    return { success: false, error: mt('noProjectOpen') };
   }
 
   try {
@@ -983,7 +1013,7 @@ ipcMain.handle('workspace:readFile', async (_, relativePath: string) => {
   try {
     const stats = await fs.promises.stat(check.canonicalPath);
     if (stats.size > 2 * 1024 * 1024) {
-      return { success: false, error: 'Dosya boyutu çok büyük (Maksimum 2MB okunabilir).' };
+      return { success: false, error: mt('fileTooLarge') };
     }
 
     const content = await fs.promises.readFile(check.canonicalPath, 'utf-8');
@@ -1000,16 +1030,16 @@ ipcMain.handle('workspace:readFile', async (_, relativePath: string) => {
 const SEARCH_IGNORED = new Set(['node_modules', '.git', 'dist', 'dist-electron', 'release', 'build', '.next', '.venv', '__pycache__', '.turbo']);
 ipcMain.handle('workspace:search', async (_, params: { query: string; options?: { isRegex?: boolean } }) => {
   const root = canonicalWorkspaceRoot;
-  if (!root) return { success: false, error: 'Henüz bir proje klasörü açılmadı.' };
+  if (!root) return { success: false, error: mt('noProjectOpen') };
   const query = String(params?.query ?? '').trim();
-  if (!query) return { success: false, error: 'Arama metni boş.' };
+  if (!query) return { success: false, error: mt('searchTextEmpty') };
   let matches: (line: string) => boolean;
   if (params?.options?.isRegex) {
     try {
       const re = new RegExp(query, 'i');
       matches = (line) => re.test(line);
     } catch (err: any) {
-      return { success: false, error: `Geçersiz düzenli ifade: ${err.message}` };
+      return { success: false, error: mt('invalidRegex', { error: err.message }) };
     }
   } else {
     const needle = query.toLowerCase();
@@ -1055,7 +1085,7 @@ ipcMain.handle('workspace:search', async (_, params: { query: string; options?: 
 // User-Initiated Safe Directory Creator
 ipcMain.handle('workspace:createDirectory', async (_, relativePath: string) => {
   if (!canonicalWorkspaceRoot) {
-    return { success: false, error: 'Aktif bir çalışma alanı bulunmuyor.' };
+    return { success: false, error: mt('noProjectOpen') };
   }
   const check = await isCanonicalPathSafe(relativePath);
   if (!check.safe) return { success: false, error: check.error };
@@ -1067,14 +1097,14 @@ ipcMain.handle('workspace:createDirectory', async (_, relativePath: string) => {
     await fs.promises.mkdir(check.fullPath, { recursive: true });
     return { success: true };
   } catch (err: any) {
-    return { success: false, error: err?.message || 'Klasör oluşturulamadı.' };
+    return { success: false, error: err?.message || mt('folderCreateFailed') };
   }
 });
 
 // User-Initiated Safe File / Directory Deletion
 ipcMain.handle('workspace:deleteItem', async (_, relativePath: string) => {
   if (!canonicalWorkspaceRoot) {
-    return { success: false, error: 'Aktif bir çalışma alanı bulunmuyor.' };
+    return { success: false, error: mt('noProjectOpen') };
   }
   const check = await isCanonicalPathSafe(relativePath);
   if (!check.safe) return { success: false, error: check.error };
@@ -1083,7 +1113,7 @@ ipcMain.handle('workspace:deleteItem', async (_, relativePath: string) => {
   if (!acl.allowed) return { success: false, error: acl.reason };
 
   if (check.canonicalPath === canonicalWorkspaceRoot) {
-    return { success: false, error: 'Kök çalışma alanı dizini silinemez.' };
+    return { success: false, error: mt('rootCannotBeDeleted') };
   }
 
   try {
@@ -1095,7 +1125,7 @@ ipcMain.handle('workspace:deleteItem', async (_, relativePath: string) => {
     }
     return { success: true };
   } catch (err: any) {
-    return { success: false, error: err?.message || 'Silme işlemi başarısız.' };
+    return { success: false, error: err?.message || mt('deleteFailed') };
   }
 });
 
@@ -1137,8 +1167,7 @@ ipcMain.handle(
             conflict: true,
             currentHash: diskHash,
             expectedBaseHash,
-            error:
-              'Çakışma Tespiti: Dosya ajan tarafından okunduktan sonra dışarıdan değiştirilmiştir. Lütfen diffi güncel dosya ile yenileyin.',
+            error: mt('changedSinceRead'),
           };
         }
       } else if (operation === 'create') {
@@ -1149,14 +1178,14 @@ ipcMain.handle(
           return {
             success: false,
             conflict: true,
-            error: `Oluşturulmak istenen "${relativePath}" dosyası diskte zaten mevcut. Mevcut dosyayı değiştirmek için 'propose_edit' kullanın veya açıkça 'overwrite: true' belirtin.`,
+            error: mt('fileAlreadyExists', { path: relativePath }),
           };
         }
       }
     } else if (operation === 'edit' || operation === 'delete') {
       return {
         success: false,
-        error: `Hedef dosya (${relativePath}) diskte bulunamadı.`,
+        error: mt('targetMissing', { path: relativePath }),
       };
     }
 
@@ -1203,16 +1232,16 @@ ipcMain.handle(
   ) => {
     const record = mutationTokens.get(token);
     if (!record) {
-      return { success: false, error: 'Yetkilendirme Reddi: Geçersiz veya bulunamayan Transaction Token.' };
+      return { success: false, error: mt('tokenInvalid') };
     }
 
     if (record.consumed) {
-      return { success: false, error: 'Güvenlik İhlali: Bu işlem tokenı daha önce kullanılmıştır (Replay Saldırısı Engellendi).' };
+      return { success: false, error: mt('tokenUsed') };
     }
 
     if (Date.now() > record.expiresAt) {
       mutationTokens.delete(token);
-      return { success: false, error: 'Zaman Aşımı: Transaction onay tokenının süresi dolmuştur (TTL: 5dk).' };
+      return { success: false, error: mt('tokenExpired') };
     }
 
     const check = await isCanonicalPathSafe(relativePath);
@@ -1222,7 +1251,7 @@ ipcMain.handle(
     const normCheckRel = check.relativePath.replace(/\\/g, '/').replace(/^\.\//, '');
 
     if (normRecordRel !== normCheckRel || record.operation !== operation) {
-      return { success: false, error: 'Güvenlik İhlali: Token ile talep edilen dosya/eylem parametreleri eşleşmiyor.' };
+      return { success: false, error: mt('tokenMismatch') };
     }
 
     try {
@@ -1239,7 +1268,7 @@ ipcMain.handle(
             conflict: true,
             currentHash: diskHash,
             expectedBaseHash: record.expectedBaseHash,
-            error: 'Çakışma Tespiti: Dosya onay anından hemen önce dışarıdan değiştirilmiştir. İşlem iptal edildi.',
+            error: mt('changedBeforeWrite'),
           };
         }
       }
@@ -1283,264 +1312,197 @@ ipcMain.handle(
   }
 );
 
-// Read-Only Git Services (Rigid Args & Jail Directory)
-ipcMain.handle('workspace:readGit', async (_, { action }: { action: 'status' | 'diff' | 'log' }) => {
-  if (!canonicalWorkspaceRoot) {
-    return { success: false, error: 'Aktif çalışma alanı yok.' };
-  }
+// Programs the agent runs (run_command). commandPolicy.ts decides what may start; the program runs
+// in the project folder with a reduced environment and a time limit, inside the isolated
+// environment of sandbox.ts when the run asks for it and the system supports it.
+type CommandResultCode = 'policy' | 'no_package_json' | 'timeout' | 'spawn_failed' | 'exit' | 'sandbox';
+interface CommandResult {
+  success: boolean;
+  exitCode: number | null;
+  output: string;
+  error?: string;
+  /** Why it failed, for the agent (the texts are translated, so it must not match on them). */
+  code?: CommandResultCode;
+  /** It ran in the isolated environment. */
+  sandboxed?: boolean;
+}
 
-  let gitArgs: string[] = [];
-  if (action === 'status') {
-    gitArgs = ['status', '--porcelain=v1'];
-  } else if (action === 'diff') {
-    gitArgs = ['diff'];
-  } else if (action === 'log') {
-    gitArgs = ['log', '-n', '10', '--oneline'];
-  } else {
-    return { success: false, error: 'Geçersiz Git eylemi.' };
-  }
+const MAX_COMMAND_OUTPUT = 2 * 1024 * 1024;
 
+/** Stops a program and every program it started. */
+function killProcessTree(child: ReturnType<typeof spawn>): void {
+  if (!child.pid) {
+    child.kill();
+    return;
+  }
+  if (process.platform === 'win32') {
+    exec(`taskkill /pid ${child.pid} /T /F`, () => {});
+    return;
+  }
+  try {
+    process.kill(-child.pid, 'SIGKILL');
+  } catch {
+    try {
+      child.kill('SIGKILL');
+    } catch {
+      // already gone
+    }
+  }
+}
+
+function runProcess(command: string, args: string[], options: { cwd: string; shell: boolean; timeoutMs: number; env: NodeJS.ProcessEnv }): Promise<CommandResult> {
   return new Promise((resolve) => {
-    const child = spawn('git', gitArgs, {
-      cwd: canonicalWorkspaceRoot!,
-      windowsHide: true,
-    });
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(command, args, {
+        cwd: options.cwd,
+        env: options.env,
+        windowsHide: true,
+        shell: options.shell,
+        // Its own process group on POSIX, so a timeout stops the programs it started too.
+        detached: process.platform !== 'win32',
+      });
+    } catch (err: any) {
+      resolve({ success: false, exitCode: null, output: '', error: mt('spawnFailed', { error: err?.message || String(err) }), code: 'spawn_failed' });
+      return;
+    }
 
     let output = '';
-    let error = '';
+    let settled = false;
+    const settle = (result: CommandResult) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+    const timer = setTimeout(() => {
+      killProcessTree(child);
+      settle({
+        success: false,
+        exitCode: 124,
+        output: `${output}\n${mt('commandTimedOut', { seconds: Math.round(options.timeoutMs / 1000) })}`.trim(),
+        error: mt('timedOut'),
+        code: 'timeout',
+      });
+    }, options.timeoutMs);
 
-    child.stdout.on('data', (d) => (output += d.toString()));
-    child.stderr.on('data', (d) => (error += d.toString()));
-
+    const collect = (d: Buffer) => {
+      if (output.length < MAX_COMMAND_OUTPUT) output += d.toString();
+    };
+    child.stdout?.on('data', collect);
+    child.stderr?.on('data', collect);
     child.on('close', (code) => {
-      resolve({
+      settle({
         success: code === 0,
+        exitCode: code ?? 0,
         output: output.trim(),
-        error: code !== 0 ? error.trim() : undefined,
+        error: code !== 0 ? mt('exitCode', { code: String(code) }) : undefined,
+        code: code !== 0 ? 'exit' : undefined,
       });
     });
-
     child.on('error', (err) => {
-      resolve({ success: false, output: '', error: err.message });
+      settle({ success: false, exitCode: null, output: '', error: mt('spawnFailed', { error: err.message }), code: 'spawn_failed' });
     });
   });
-});
+}
 
-// Safe Process Execution with Strict Environment Allowlist & Windows Tree Kill
 ipcMain.handle(
   'workspace:runApprovedCommand',
   async (
     _,
-    {
-      binary,
-      args,
-      timeoutMs = 30000,
-    }: {
-      binary: string;
-      args: string[];
-      timeoutMs?: number;
-    }
-  ) => {
-    if (!canonicalWorkspaceRoot) {
-      return { success: false, exitCode: 1, output: '', error: 'Aktif proje klasörü yok.' };
-    }
+    { binary, args, timeoutMs = 60000, isolation }: { binary: string; args: string[]; timeoutMs?: number; isolation?: IsolationOptions }
+  ): Promise<CommandResult> => {
+    const root = canonicalWorkspaceRoot;
+    if (!root) return { success: false, exitCode: 1, output: '', error: mt('noProjectOpen'), code: 'policy' };
 
-    const cleanBinary = binary.trim().toLowerCase();
-
-    // 1. NPX IS STRICTLY FORBIDDEN
-    if (cleanBinary === 'npx' || args.some((a) => a.toLowerCase().includes('npx'))) {
-      return {
-        success: false,
-        exitCode: 1,
-        output: '',
-        error: 'Güvenlik Politikası: "npx" komutu paket indirme ve keyfi kod çalıştırma riski nedeniyle kesinlikle engellenmiştir.',
-      };
-    }
-
-    // 2. Allowed Executable Whitelist
-    // `node` runs project scripts like `python` does; both still need user approval for anything but tests.
-    const ALLOWED_BINARIES = new Set(['npm', 'node', 'cargo', 'pytest', 'python']);
-    if (!ALLOWED_BINARIES.has(cleanBinary)) {
-      return {
-        success: false,
-        exitCode: 1,
-        output: '',
-        error: `Güvenlik Politikası: "${cleanBinary}" yürütülebilir dosyasına izin verilmiyor.`,
-      };
-    }
-
-    // 3. Strict Argument Validation (No Shell Injection characters)
-    const dangerousPattern = /[;&|`$<>\r\n]/;
-    for (const arg of args) {
-      if (dangerousPattern.test(arg)) {
-        return {
-          success: false,
-          exitCode: 1,
-          output: '',
-          error: `Güvenlik Koruması: Argümanda yasaklı yönlendirme/zincirleme karakterleri tespit edildi: "${arg}"`,
-        };
-      }
-    }
-
-    // 4. npm specific subcommand validation
-    if (cleanBinary === 'npm') {
-      const sub = (args[0] || '').toLowerCase();
-      const validSubcommands = ['test', 'run'];
-      if (!validSubcommands.includes(sub)) {
-        return {
-          success: false,
-          exitCode: 1,
-          output: '',
-          error: `Güvenlik Politikası: npm altında sadece test ve tanımlı betikler çalıştırılabilir. Verilen: "${sub}"`,
-        };
-      }
-      const pkgJsonPath = path.join(canonicalWorkspaceRoot, 'package.json');
-      if (!fs.existsSync(pkgJsonPath)) {
-        return {
-          success: false,
-          exitCode: 1,
-          output: '',
-          error: `Proje klasöründe "package.json" dosyası mevcut değil. npm komutları çalıştırılamaz.`,
-        };
-      }
-      if (sub === 'run') {
-        const scriptName = (args[1] || '').toLowerCase();
-        const allowedScripts = ['test', 'build', 'lint', 'typecheck', 'check'];
-        if (!allowedScripts.includes(scriptName)) {
-          return {
-            success: false,
-            exitCode: 1,
-            output: '',
-            error: `Güvenlik Politikası: "npm run ${scriptName}" izin verilen betikler (test, build, lint, typecheck) arasında değil.`,
-          };
-        }
-      }
-    }
-
-    // 5. Strict Environment ALLOWLIST (No host env leakage)
-    const STRICT_ENV: NodeJS.ProcessEnv = {
-      PATH: process.env.PATH || '',
-      SystemRoot: process.env.SystemRoot || '',
-      COMSPEC: process.env.COMSPEC || '',
-      PATHEXT: process.env.PATHEXT || '',
-      TEMP: process.env.TEMP || process.env.TMPDIR || '/tmp',
-      TMP: process.env.TMP || process.env.TMPDIR || '/tmp',
-      NODE_ENV: 'test',
-      // Output is decoded as UTF-8; without this, Python on Windows prints in the ANSI code page
-      // and Turkish text reaches the agent as "Kullan�m".
-      PYTHONIOENCODING: 'utf-8',
-      // POSIX / Linux essentials
-      HOME: process.env.HOME || os.homedir() || '',
-      USER: process.env.USER || '',
-      SHELL: process.env.SHELL || '/bin/sh',
-      LANG: process.env.LANG || 'C.UTF-8',
-      LC_ALL: process.env.LC_ALL || '',
-      XDG_DATA_HOME: process.env.XDG_DATA_HOME || '',
-      XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME || '',
-      XDG_CACHE_HOME: process.env.XDG_CACHE_HOME || '',
-    };
-
-    // npm is a .cmd shim on Windows. Node refuses to spawn .cmd files without a shell
-    // (CVE-2024-27980), so the direct spawn always failed with "spawn npm ENOENT". Run it through
-    // cmd.exe as one command string, after rejecting every cmd metacharacter in the arguments.
-    const useWindowsShell = process.platform === 'win32' && cleanBinary === 'npm';
-    if (useWindowsShell) {
-      const cmdUnsafe = /["%^!()]/;
-      const badArg = args.find((a) => cmdUnsafe.test(a));
-      if (badArg !== undefined) {
-        return {
-          success: false,
-          exitCode: 1,
-          output: '',
-          error: `Güvenlik Koruması: Windows komut satırında izin verilmeyen karakter içeren argüman: "${badArg}"`,
-        };
-      }
-    }
-
-    // 6. Spawn Process with Tree Kill & Timeout
-    return new Promise((resolve) => {
-      const child = useWindowsShell
-        ? spawn(['npm.cmd', ...args.map((a) => (/\s/.test(a) ? `"${a}"` : a))].join(' '), {
-            cwd: canonicalWorkspaceRoot!,
-            env: STRICT_ENV,
-            windowsHide: true,
-            shell: true,
-          })
-        : spawn(cleanBinary, args, {
-            cwd: canonicalWorkspaceRoot!,
-            env: STRICT_ENV,
-            windowsHide: true,
-            shell: false,
-          });
-
-      let output = '';
-      let isTimedOut = false;
-
-      const timer = setTimeout(() => {
-        isTimedOut = true;
-        if (child.pid) {
-          if (process.platform === 'win32') {
-            exec(`taskkill /pid ${child.pid} /T /F`, () => {});
-          } else {
-            try {
-              process.kill(-child.pid, 'SIGKILL');
-            } catch {
-              exec(`pkill -P ${child.pid} ; kill -9 ${child.pid}`, () => {});
-            }
-          }
-        } else {
-          child.kill();
-        }
-        resolve({
-          success: false,
-          exitCode: 124,
-          output: output + '\n[ZAMAN AŞIMI]: Süreç belirlenen sınırı (30sn) aştığı için ağaç bazlı sonlandırıldı.',
-          error: 'Zaman aşımı',
-        });
-      }, Math.min(timeoutMs, 60000));
-
-      child.stdout.on('data', (d) => {
-        if (output.length < 2 * 1024 * 1024) output += d.toString();
-      });
-
-      child.stderr.on('data', (d) => {
-        if (output.length < 2 * 1024 * 1024) output += d.toString();
-      });
-
-      child.on('close', (code) => {
-        clearTimeout(timer);
-        if (isTimedOut) return;
-        resolve({
-          success: code === 0,
-          exitCode: code ?? 0,
-          output: output.trim(),
-          error: code !== 0 ? `İşlem hata kodu ${code} ile sonlandı.` : undefined,
-        });
-      });
-
-      child.on('error', (err) => {
-        clearTimeout(timer);
-        if (isTimedOut) return;
-        resolve({
-          success: false,
-          exitCode: 1,
-          output: '',
-          error: `Süreç başlatılamadı: ${err.message}`,
-        });
-      });
+    const cleanArgs = Array.isArray(args) ? args.map((a) => String(a)) : [];
+    const check = checkCommand(String(binary || ''), cleanArgs, {
+      hasPackageJson: fs.existsSync(path.join(root, 'package.json')),
+      platform: process.platform,
     });
+    if (!check.ok) {
+      return {
+        success: false,
+        exitCode: 1,
+        output: '',
+        error: mt(check.key, check.params),
+        code: check.code === 'no_package_json' ? 'no_package_json' : 'policy',
+      };
+    }
+
+    const cleanBinary = String(binary).trim().toLowerCase();
+    const limitMs = Math.min(Math.max(Number(timeoutMs) || 60000, 1000), 60000);
+    // The isolated environment where it is available (sandbox.ts). npm on Windows runs through
+    // cmd.exe as one command string (Node refuses to spawn .cmd files without a shell,
+    // CVE-2024-27980); the policy has rejected every cmd metacharacter in its arguments.
+    const plan = await sandbox.plan(cleanBinary, cleanArgs, root, isolationOptions(isolation));
+    const result = await runProcess(plan.command, plan.args, {
+      cwd: root,
+      shell: plan.shell,
+      timeoutMs: limitMs,
+      env: { ...commandEnvironment(), ...(plan.env || {}) },
+    });
+    result.sandboxed = plan.isolated;
+    if (plan.isolated && isSandboxSetupFailure(result.exitCode, result.output)) {
+      const reason = result.output.split(/\r?\n/).find((l) => l.includes('emir-sandbox:'))?.replace(/^.*emir-sandbox:\s*/, '') || '';
+      return { ...result, success: false, error: mt('sandboxUnavailable', { error: reason }), code: 'sandbox' };
+    }
+    return result;
   }
 );
+
+// ---------------------------------------------------------------------------
+// Isolated environment of agent commands (sandbox.ts)
+// ---------------------------------------------------------------------------
+const sandbox = new Sandbox(app.isPackaged ? path.join(process.resourcesPath, 'sandbox') : path.join(app.getAppPath(), 'native', 'windows', 'bin'));
+
+function isolationOptions(value: unknown): IsolationOptions {
+  const v = (value || {}) as Partial<IsolationOptions>;
+  return { enabled: v.enabled !== false, network: v.network === true };
+}
+
+const reasonText = (reason?: IsolationReason) => (reason ? mt(reason) : undefined);
+
+ipcMain.handle('sandbox:status', async (_event, options: unknown) => {
+  const status = await sandbox.status(isolationOptions(options));
+  return {
+    ...status,
+    reasonText: reasonText(status.reason),
+    python: status.python && { ...status.python, reasonText: reasonText(status.python.reason) },
+    node: status.node && { ...status.node, reasonText: reasonText(status.node.reason) },
+  };
+});
+
+ipcMain.handle('sandbox:plan', async (_event, { binary, args, options }: { binary: string; args: string[]; options?: unknown }) => {
+  const root = canonicalWorkspaceRoot;
+  if (!root) return { isolated: false, reasonText: mt('noProjectOpen') };
+  const plan = await sandbox.plan(String(binary || '').trim().toLowerCase(), Array.isArray(args) ? args.map(String) : [], root, isolationOptions(options));
+  return { isolated: plan.isolated, reason: plan.reason, reasonText: reasonText(plan.reason) };
+});
+
+ipcMain.handle('sandbox:allowPython', async () => {
+  const res = await sandbox.allowPython();
+  sandbox.reset();
+  return res;
+});
+
+// Read-only git for the agent (git_status / git_diff); see git.ts for the settings it switches off.
+ipcMain.handle('workspace:readGit', async (_, { action }: { action: 'status' | 'diff' | 'log' }) => {
+  const root = canonicalWorkspaceRoot;
+  if (!root) return { success: false, error: mt('noProjectOpen') };
+  if (action !== 'status' && action !== 'diff' && action !== 'log') return { success: false, error: mt('invalidGitAction') };
+  return readOnlyGit(action, root);
+});
 
 // Safe Transactional Rollback (Handles Create, Edit, and Delete with Hash Checks)
 ipcMain.handle(
   'workspace:rollbackTransaction',
   async (_, { transactionId, force }: { transactionId: string; force?: boolean }) => {
-    if (!canonicalWorkspaceRoot) return { success: false, error: 'Aktif çalışma alanı yok.' };
+    if (!canonicalWorkspaceRoot) return { success: false, error: mt('noProjectOpen') };
 
     const snapshot = fileSnapshots.get(transactionId);
     if (!snapshot) {
-      return { success: false, error: `Belirtilen Transaction ID (${transactionId}) için snapshot bulunamadı.` };
+      return { success: false, error: mt('snapshotMissing') };
     }
 
     const check = await isCanonicalPathSafe(snapshot.relativePath);
@@ -1561,7 +1523,7 @@ ipcMain.handle(
             return {
               success: false,
               conflict: true,
-              error: 'Çakışma: Ajan tarafından oluşturulan dosya kullanıcı tarafından düzenlenmiş. Veri kaybını önlemek için silinmedi.',
+              error: mt('rollbackCreatedEdited'),
             };
           }
           await fs.promises.unlink(check.canonicalPath);
@@ -1571,7 +1533,7 @@ ipcMain.handle(
           return {
             success: false,
             conflict: true,
-            error: 'Çakışma: Ajanın değiştirdiği dosya sonradan tekrar değiştirilmiş. Kullanıcı kodunu korumak için geri alma durduruldu.',
+            error: mt('rollbackChangedAgain'),
           };
         }
         await atomicWriteFile(check.canonicalPath, snapshot.originalContent);
@@ -1602,7 +1564,7 @@ ipcMain.handle('system:isLinuxIntegrated', async () => {
 
 ipcMain.handle('system:integrateLinuxDesktop', async () => {
   if (process.platform !== 'linux') {
-    return { success: false, error: 'Bu işlem yalnızca Linux işletim sisteminde geçerlidir.' };
+    return { success: false, error: mt('linuxOnly') };
   }
 
   try {
@@ -1677,310 +1639,86 @@ Keywords=AI;Agent;Code;Ollama;Editor;IDE;
 
     return {
       success: true,
-      message: 'Emir Code masaüstü kısayolu, uygulama menüsü ve terminal komutu (~/.local/bin/emir-code) başarıyla oluşturuldu!',
+      message: mt('desktopIntegrationDone'),
     };
   } catch (err: any) {
-    return { success: false, error: `Masaüstü entegrasyonu başarısız: ${err.message}` };
+    return { success: false, error: mt('desktopIntegrationFailed', { error: err.message }) };
   }
 });
 
 // ==========================================
-// Emir Code: Zero-Trust Web Access & Search Bridge
+// Web search and page reading (electron/web.ts)
 // ==========================================
-function isPrivateIpAddress(ip: string): boolean {
-  if (!ip) return true;
-  const clean = ip.trim().toLowerCase();
-  if (clean === '::1' || clean === '::' || clean === '0:0:0:0:0:0:0:1') return true;
-  if (clean.startsWith('::ffff:')) {
-    return isPrivateIpAddress(clean.replace('::ffff:', ''));
-  }
-  if (clean.startsWith('fc') || clean.startsWith('fd') || clean.startsWith('fe80:')) return true;
+// Every request has an id: a run stops its own requests when it is stopped, and turning web access
+// off stops all of them.
+const activeWebRequests = new Map<string, AbortController>();
 
-  const parts = clean.split('.').map((p) => parseInt(p, 10));
-  if (parts.length === 4 && parts.every((p) => !isNaN(p) && p >= 0 && p <= 255)) {
-    const [a, b] = parts;
-    if (a === 0 || a === 127 || a === 10) return true;
-    if (a === 172 && b >= 16 && b <= 31) return true;
-    if (a === 192 && b === 168) return true;
-    if (a === 169 && b === 254) return true;
-    if (a === 100 && b >= 64 && b <= 127) return true;
-    if (a >= 224) return true;
-    return false;
+function webErrorText(err: unknown): string {
+  if (err instanceof WebError) {
+    const params = err.inner ? { ...err.params, reason: webErrorText(err.inner) } : err.params;
+    return mt(err.key as Parameters<typeof mt>[0], params);
   }
-  return false;
+  return String((err as any)?.message || err);
 }
 
-async function validateUrlForWebAccess(urlStr: string): Promise<{ valid: boolean; reason?: string; parsed?: URL; verifiedIps?: string[] }> {
-  if (!urlStr || typeof urlStr !== 'string') {
-    return { valid: false, reason: 'URL belirtilmedi.' };
-  }
-  let parsed: URL;
-  try {
-    parsed = new URL(urlStr.trim());
-  } catch {
-    return { valid: false, reason: 'Geçersiz URL formatı.' };
-  }
-
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    return { valid: false, reason: `Yasaklı protokol: ${parsed.protocol}` };
-  }
-
-  const hostname = parsed.hostname.toLowerCase();
-  if (
-    hostname === 'localhost' ||
-    hostname.endsWith('.localhost') ||
-    hostname.endsWith('.local') ||
-    hostname.endsWith('.internal') ||
-    hostname === '127.0.0.1' ||
-    hostname === '0.0.0.0' ||
-    hostname === '::1'
-  ) {
-    return { valid: false, reason: `SSRF Koruması: ${hostname} adresine erişim engellendi.` };
-  }
-
-  if (isPrivateIpAddress(hostname)) {
-    return { valid: false, reason: `SSRF Koruması: Özel IP adresine erişim engellendi (${hostname}).` };
-  }
-
-  const verifiedIps: string[] = [];
-  try {
-    const lookups = await dns.promises.lookup(hostname, { all: true });
-    if (!lookups || lookups.length === 0) {
-      return { valid: false, reason: 'DNS çözümleme hatası: Kayıt bulunamadı.' };
-    }
-    for (const entry of lookups) {
-      if (isPrivateIpAddress(entry.address)) {
-        return { valid: false, reason: `SSRF Koruması: Alan adı özel IP'ye çözümlendi (${entry.address}).` };
-      }
-      verifiedIps.push(entry.address);
-    }
-  } catch (err: any) {
-    return { valid: false, reason: `DNS çözümleme hatası: ${err.message}` };
-  }
-
-  return { valid: true, parsed, verifiedIps };
+function trackWebRequest(requestId: unknown) {
+  const id = typeof requestId === 'string' && requestId ? requestId : crypto.randomUUID();
+  const controller = new AbortController();
+  activeWebRequests.set(id, controller);
+  return { signal: controller.signal, done: () => activeWebRequests.delete(id) };
 }
 
-function cleanHtmlContent(html: string): { title: string; text: string } {
-  let title = '';
-  const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-  if (titleMatch) {
-    title = titleMatch[1].replace(/<[^>]+>/g, '').trim();
-  }
-
-  let text = html
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ')
-    .replace(/<svg[\s\S]*?<\/svg>/gi, ' ')
-    .replace(/<nav[\s\S]*?<\/nav>/gi, ' ')
-    .replace(/<footer[\s\S]*?<\/footer>/gi, ' ')
-    .replace(/<iframe[\s\S]*?<\/iframe>/gi, ' ')
-    .replace(/<h[1-2][^>]*>([\s\S]*?)<\/h[1-2]>/gi, '\n\n## $1\n\n')
-    .replace(/<h[3-6][^>]*>([\s\S]*?)<\/h[3-6]>/gi, '\n\n### $1\n\n')
-    .replace(/<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, '$2 ($1)')
-    .replace(/<pre[^>]*><code[^>]*>([\s\S]*?)<\/code><\/pre>/gi, '\n```\n$1\n```\n')
-    .replace(/<code[^>]*>([\s\S]*?)<\/code>/gi, '`$1`')
-    .replace(/<p[^>]*>/gi, '\n\n')
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<li[^>]*>/gi, '\n* ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&nbsp;/g, ' ')
-    .replace(/[ \t]+/g, ' ')
-    .replace(/\n\s*\n\s*\n+/g, '\n\n')
-    .trim();
-
-  return { title: title || 'Belge', text };
-}
-
-// In-flight request tracking for instant cancellation from UI or settings
-const activeWebControllers = new Set<AbortController>();
-
-ipcMain.handle('web:abortAll', async () => {
-  for (const c of activeWebControllers) {
-    try {
-      c.abort('Kullanıcı web erişimini durdurdu');
-    } catch {}
-  }
-  activeWebControllers.clear();
+ipcMain.handle('web:abort', async (_event, requestId: unknown) => {
+  if (typeof requestId !== 'string') return false;
+  activeWebRequests.get(requestId)?.abort();
+  activeWebRequests.delete(requestId);
   return true;
 });
 
-ipcMain.handle('web:search', async (_event, { query, options }: { query: string; options?: { limit?: number; timeoutMs?: number } }) => {
-  const trimmed = (query || '').trim();
-  if (!trimmed) {
-    throw new Error('Arama sorgusu boş olamaz.');
-  }
-
-  const limit = Math.min(Math.max(options?.limit || 5, 1), 10);
-  const timeoutMs = options?.timeoutMs || 10000;
-
-  const controller = new AbortController();
-  activeWebControllers.add(controller);
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    const response = await fetch('https://lite.duckduckgo.com/lite/', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        Accept: 'text/html,application/xhtml+xml',
-      },
-      body: `q=${encodeURIComponent(trimmed)}`,
-      signal: controller.signal,
-    });
-
-    clearTimeout(timeoutId);
-
-    if (!response.ok) {
-      throw new Error(`Arama servisi hatası: HTTP ${response.status}`);
-    }
-
-    const html = await response.text();
-
-    const results: Array<{ id: string; title: string; url: string; snippet: string; source: string }> = [];
-    const blockRegex =
-      /<a[^>]+href=["']([^"']+)["'][^>]*class=['"]result-link['"][^>]*>([\s\S]*?)<\/a>[\s\S]*?<td[^>]*class=['"]result-snippet['"][^>]*>([\s\S]*?)<\/td>/gi;
-    let match: RegExpExecArray | null;
-    let counter = 1;
-
-    while ((match = blockRegex.exec(html)) !== null && results.length < limit) {
-      let rawUrl = match[1];
-      if (rawUrl.includes('uddg=')) {
-        try {
-          const u = new URL(rawUrl, 'https://lite.duckduckgo.com');
-          const uddg = u.searchParams.get('uddg');
-          if (uddg) rawUrl = decodeURIComponent(uddg);
-        } catch {}
-      }
-
-      const title = match[2].replace(/<[^>]+>/g, '').trim();
-      const snippet = match[3].replace(/<[^>]+>/g, '').trim();
-
-      const check = await validateUrlForWebAccess(rawUrl);
-      if (!check.valid) continue;
-
-      let source = '';
-      try {
-        source = new URL(rawUrl).hostname;
-      } catch {}
-
-      const sourceId = `web-${String(counter).padStart(3, '0')}`;
-      counter++;
-
-      results.push({
-        id: sourceId,
-        title: title || 'Arama Sonucu',
-        url: rawUrl,
-        snippet: snippet || '',
-        source: source || 'web',
-      });
-    }
-
-    return results;
-  } catch (err: any) {
-    clearTimeout(timeoutId);
-    if (err.name === 'AbortError') {
-      throw new Error(`Web arama zaman aşımına uğradı veya kullanıcı tarafından durduruldu (${timeoutMs}ms).`);
-    }
-    throw new Error(`Arama başarısız: ${err.message}`);
-  } finally {
-    activeWebControllers.delete(controller);
-  }
+ipcMain.handle('web:abortAll', async () => {
+  for (const controller of activeWebRequests.values()) controller.abort();
+  activeWebRequests.clear();
+  return true;
 });
 
-ipcMain.handle('web:fetchUrl', async (_event, { url, options }: { url: string; options?: { maxBytes?: number; timeoutMs?: number } }) => {
-  const validation = await validateUrlForWebAccess(url);
-  if (!validation.valid || !validation.parsed) {
-    throw new Error(validation.reason || 'Geçersiz veya yasaklı URL.');
-  }
-
-  const maxBytes = options?.maxBytes || 512 * 1024;
-  const timeoutMs = options?.timeoutMs || 10000;
-  const MAX_REDIRECTS = 3;
-
-  let currentUrl = validation.parsed.href;
-  let redirectCount = 0;
-
-  while (redirectCount <= MAX_REDIRECTS) {
-    const controller = new AbortController();
-    activeWebControllers.add(controller);
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
+ipcMain.handle(
+  'web:search',
+  async (_event, { query, options }: { query: string; options?: { limit?: number; timeoutMs?: number; requestId?: string } }) => {
+    const request = trackWebRequest(options?.requestId);
     try {
-      const response = await fetch(currentUrl, {
-        method: 'GET',
-        headers: {
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 EmirCode/1.4',
-          Accept: 'text/html,text/plain,application/xhtml+xml;q=0.9,*/*;q=0.8',
-        },
-        redirect: 'manual',
-        signal: controller.signal,
+      return await searchWeb(query, {
+        limit: options?.limit,
+        timeoutMs: options?.timeoutMs,
+        signal: request.signal,
+        untitled: mt('untitledResult'),
       });
-
-      clearTimeout(timeoutId);
-
-      if ([301, 302, 303, 307, 308].includes(response.status)) {
-        redirectCount++;
-        if (redirectCount > MAX_REDIRECTS) {
-          throw new Error('Yönlendirme sınırı aşıldı.');
-        }
-
-        const location = response.headers.get('location');
-        if (!location) throw new Error('Yönlendirme başlığı (Location) bulunamadı.');
-
-        const nextUrl = new URL(location, currentUrl).href;
-        const redirectCheck = await validateUrlForWebAccess(nextUrl);
-        if (!redirectCheck.valid) {
-          throw new Error(`Yönlendirme engellendi: ${redirectCheck.reason}`);
-        }
-
-        currentUrl = nextUrl;
-        continue;
-      }
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const buffer = await response.arrayBuffer();
-      const bytes = Math.min(buffer.byteLength, maxBytes);
-      const textDecoder = new TextDecoder('utf-8', { fatal: false });
-      let rawText = textDecoder.decode(buffer.slice(0, bytes));
-      if (buffer.byteLength > maxBytes) {
-        rawText += '\n\n[İçerik boyutu sınırına ulaşıldığı için kalan kısım kırpıldı]';
-      }
-
-      const { title, text } = cleanHtmlContent(rawText);
-
-      return {
-        title,
-        url: currentUrl,
-        content: text,
-        status: response.status,
-        sizeBytes: buffer.byteLength,
-      };
-    } catch (err: any) {
-      clearTimeout(timeoutId);
-      if (err.name === 'AbortError') {
-        throw new Error(`Web isteği zaman aşımına uğradı veya kullanıcı tarafından durduruldu (${timeoutMs}ms).`);
-      }
-      throw err;
+    } catch (err) {
+      throw new Error(webErrorText(err));
     } finally {
-      activeWebControllers.delete(controller);
+      request.done();
     }
   }
+);
 
-  throw new Error('Maksimum yönlendirme sınırına ulaşıldı.');
-});
+ipcMain.handle(
+  'web:fetchUrl',
+  async (_event, { url, options }: { url: string; options?: { maxBytes?: number; timeoutMs?: number; requestId?: string } }) => {
+    const request = trackWebRequest(options?.requestId);
+    try {
+      return await fetchPage(url, {
+        maxBytes: Math.min(Math.max(Number(options?.maxBytes) || 512 * 1024, 1024), 2 * 1024 * 1024),
+        timeoutMs: options?.timeoutMs,
+        signal: request.signal,
+        untitled: mt('untitledPage'),
+        truncatedNote: mt('contentTruncated'),
+      });
+    } catch (err) {
+      throw new Error(webErrorText(err));
+    } finally {
+      request.done();
+    }
+  }
+);
 
 // ---------------------------------------------------------------------------
 // Model library bridge: the Models window lists models from ollama.com and verifies a tag against
@@ -2001,12 +1739,12 @@ async function fetchLibrarySource(url: string, accept: string, maxBytes: number)
       signal: controller.signal,
     });
     const host = new URL(res.url || url).hostname;
-    if (!LIBRARY_HOSTS.has(host)) throw new Error(`Beklenmeyen yönlendirme: ${host}`);
+    if (!LIBRARY_HOSTS.has(host)) throw new Error(mt('unexpectedRedirect', { host }));
     const body = Buffer.from(await res.arrayBuffer());
-    if (body.length > maxBytes) throw new Error('ollama.com yanıtı beklenenden büyük.');
+    if (body.length > maxBytes) throw new Error(mt('libraryTooLarge'));
     return { status: res.status, body };
   } catch (err: any) {
-    if (err?.name === 'AbortError') throw new Error('ollama.com yanıt vermedi (zaman aşımı).');
+    if (err?.name === 'AbortError') throw new Error(mt('libraryTimedOut'));
     throw err;
   } finally {
     clearTimeout(timer);
@@ -2020,7 +1758,7 @@ ipcMain.handle('models:library', async () => {
 });
 
 ipcMain.handle('models:tags', async (_event, name: string) => {
-  if (typeof name !== 'string' || !LIBRARY_MODEL_RE.test(name) || name.includes('/')) throw new Error('Geçersiz model adı.');
+  if (typeof name !== 'string' || !LIBRARY_MODEL_RE.test(name) || name.includes('/')) throw new Error(mt('invalidModelName'));
   const { status, body } = await fetchLibrarySource(`https://ollama.com/library/${name}/tags`, 'text/html', 6 * 1024 * 1024);
   if (status === 404) return '';
   if (status !== 200) throw new Error(`ollama.com: HTTP ${status}`);
@@ -2030,7 +1768,7 @@ ipcMain.handle('models:tags', async (_event, name: string) => {
 /** Whether a tag exists, its exact download size and its digest (sha256 of the manifest, as `ollama list` shows it). */
 ipcMain.handle('models:manifest', async (_event, { name, tag }: { name: string; tag: string }) => {
   if (typeof name !== 'string' || typeof tag !== 'string' || !LIBRARY_MODEL_RE.test(name) || !LIBRARY_TAG_RE.test(tag)) {
-    return { status: 'error', error: 'Geçersiz model etiketi.' };
+    return { status: 'error', error: mt('invalidModelTag') };
   }
   try {
     const repo = name.includes('/') ? name : `library/${name}`;
@@ -2050,6 +1788,7 @@ ipcMain.handle('models:manifest', async (_event, { name, tag }: { name: string; 
 });
 
 app.whenReady().then(() => {
+  initMainLanguage(app.getLocale());
   createWindow();
 
   app.on('activate', () => {

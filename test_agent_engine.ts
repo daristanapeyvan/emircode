@@ -61,6 +61,8 @@ const sent: Array<{ system?: string; messages: Array<{ role: string; content: st
   capabilities: ['completion', 'tools'],
 });
 
+let commandApprovals = 0;
+
 const lastUserMessage = (call: number) => {
   const msgs = sent[call]?.messages || [];
   return [...msgs].reverse().find((m) => m.role === 'user')?.content || '';
@@ -74,6 +76,7 @@ async function run(goal: string, seed: Record<string, string>, replies: Reply[],
   (globalThis as any).window = { electronAPI: api };
   script = [...replies];
   sent.length = 0;
+  commandApprovals = 0;
   const steps: any[] = [];
   let status = '';
   let subtasks: any[] = [];
@@ -88,7 +91,10 @@ async function run(goal: string, seed: Record<string, string>, replies: Reply[],
       onLog: () => {},
       onRequestChangesetApproval: async () => true,
       onRequestDeleteApproval: async () => true,
-      onRequestCommandApproval: async () => true,
+      onRequestCommandApproval: async () => {
+        commandApprovals++;
+        return true;
+      },
       onRequestClarification: async (q) => (q.options && q.options[0]) || 'tamam',
       onSubtasksUpdated: (list) => {
         subtasks = list.map((t) => ({ ...t }));
@@ -157,6 +163,7 @@ async function main() {
     settings: {
       ...DEFAULT_SETTINGS,
       securityProfile: 'autonomous',
+      language: 'tr',
       webAccess: { enabled: false, chatEnabled: false, codingEnabled: false },
     },
     hardware: {
@@ -224,7 +231,7 @@ async function main() {
   );
   check(!/CHECKLIST/.test(firstTask), 'The request is not split into a checklist', firstTask);
   check(!nav.steps.some((s) => /kontrol listesine alındı/.test(String(s.content))), 'No split notice is shown to the user');
-  check(/çalışmayan bağlantılar/.test(lastUserMessage(1)) && /"Services" \(satır 16\)/.test(lastUserMessage(1)), 'finish is refused while the menu links lead nowhere, naming each link', lastUserMessage(1));
+  check(/links that do not work/.test(lastUserMessage(1)) && /"Services" \(line 16\)/.test(lastUserMessage(1)), 'finish is refused while the menu links lead nowhere, naming each link', lastUserMessage(1));
   check(nav.status === 'finished', 'The run finishes once the links work', nav.status);
   check((await deadMenuLinks('index.html', nav.read('index.html'), async () => null)).length === 0, 'The written page has working menu links');
 
@@ -272,7 +279,7 @@ async function main() {
     cafePage
   );
   check(cafePage.includes(`&copy; ${year} Kahve Durağı`), 'The stale footer year is updated');
-  check(cafe.steps.some((s) => s.title === 'Tasarım Teması' && /Tasarım teması: "/.test(String(s.content))), 'The timeline names the applied theme');
+  check(cafe.steps.some((s) => s.title === 'Tasarım teması' && /Tasarım teması: "/.test(String(s.content))), 'The timeline names the applied theme');
   check(cafe.steps.some((s) => s.type === 'final_answer' && /theme\/theme\.css/.test(String(s.content))), 'The summary lists the theme file');
   check(cafe.status === 'finished', 'The run still finishes normally', cafe.status);
 
@@ -330,7 +337,7 @@ async function main() {
     wizardRun.read('menu.html').includes('href="theme/theme.css"') && wizardRun.read('index.html').includes('href="theme/theme.css"'),
     'Every page of the run joins the theme'
   );
-  check(wizardRun.steps.some((s) => s.title === 'Tasarım Teması' && /sihirbazda seçildi/.test(String(s.content))), 'The timeline says the theme came from the wizard');
+  check(wizardRun.steps.some((s) => s.title === 'Tasarım teması' && /sihirbazda seçildi/.test(String(s.content))), 'The timeline says the theme came from the wizard');
   const noTheme = await run(compiled.prompt, {}, [writeCafe, { thought: 'Bitti.', action: 'finish', summary: 'Hazır.' }], {
     displayGoal: compiled.displayGoal,
     checklist: [],
@@ -382,7 +389,7 @@ async function main() {
   );
   const miniTask = sent[0]?.messages[0]?.content || '';
   const miniMarker = fs.existsSync(path.join(miniRun.dir, 'theme', 'theme.css')) ? miniRun.read('theme/theme.css').match(/emir-theme (\{[^}]*\})/) : null;
-  check(miniRun.status === 'finished' && /ACCEPTANCE CHECKS/.test(miniTask) && /gömülü stil/.test(miniTask), 'Mini app: the single-file page is still checked (inline style and script)', miniTask.slice(0, 400));
+  check(miniRun.status === 'finished' && /ACCEPTANCE CHECKS/.test(miniTask) && /styles inside the page/.test(miniTask), 'Mini app: the single-file page is still checked (inline style and script)', miniTask.slice(0, 400));
   check(
     !!miniMarker && getTheme(JSON.parse(miniMarker[1]).id)?.category === 'genel' && miniRun.read('index.html').includes('href="theme/theme.css"') && miniRun.subtasks.length === 1,
     "Mini app: a theme of the tool's category is applied; one task, not split into its feature list"
@@ -436,15 +443,16 @@ if __name__ == "__main__":
   );
   const kept = await run('Betiği tamamla.', { 'arac.py': 'print("benim")\n' }, [finishNow], seedOptions);
   check(kept.read('arac.py') === 'print("benim")\n', 'Seed file: an existing file is never overwritten');
-  await run('Betiği yaz.', { 'modul.py': 'x = 1\n' }, [{ thought: 'Modüle bakayım.', action: 'read_file', path: 'modul.py' }, finishNow], {
+  const readModule = { thought: 'Modüle bakayım.', action: 'read_file', path: 'modul.py' };
+  await run('Betiği yaz.', { 'modul.py': 'x = 1\n' }, [readModule, readModule, finishNow], {
     checklist: ['yeni.py — betiği yaz', 'yeni.py — dene'],
     contracts: false,
     design: { enabled: false },
   });
   check(
-    /Next checklist item: 1\. yeni\.py — betiği yaz — "yeni\.py" does not exist yet: create it now with write_file/.test(lastUserMessage(1)),
-    'A model re-reading a preloaded file is pointed to the next checklist item and the file it has to create',
-    lastUserMessage(1).slice(0, 500)
+    /Next checklist item: 1\. yeni\.py — betiği yaz — "yeni\.py" does not exist yet: create it now with write_file/.test(lastUserMessage(2)),
+    'A model re-reading a file it already read is pointed to the next checklist item and the file it has to create',
+    lastUserMessage(2).slice(0, 500)
   );
   const faked = await run(
     'Betiği yaz.',
@@ -533,7 +541,7 @@ if __name__ == "__main__":
     design: { enabled: false },
   });
   check(
-    idle.status === 'error' && idle.steps.some((s) => /DÖNGÜ TESPİT/.test(String(s.content))),
+    idle.status === 'error' && idle.steps.some((s) => /aynı eylemleri art arda/.test(String(s.content))),
     'No checks: a model that wrote nothing and only repeats a command is still stopped as a loop',
     idle.status
   );
@@ -547,7 +555,7 @@ if __name__ == "__main__":
     { checklist: ['yeni.js — yaz'], contracts: false, design: { enabled: false } }
   );
   check(
-    other.status === 'error' && other.steps.some((s) => /DÖNGÜ TESPİT/.test(String(s.content))),
+    other.status === 'error' && other.steps.some((s) => /aynı eylemleri art arda/.test(String(s.content))),
     'No checks: repeating a command that does not run a file the model wrote is no evidence; still a loop',
     other.status
   );
@@ -571,13 +579,13 @@ if __name__ == "__main__":
     { displayGoal: pomodoro.displayGoal, checklist: pomodoro.checklist, design: { enabled: false }, contracts: pomodoro.contracts }
   );
   check(
-    /placeholder instead of real content/.test(lastUserMessage(1)) && /\(satır \d+\) boş[\s\S]*Yeni <script> bloğu eklemeyin/.test(lastUserMessage(1)),
+    /placeholder instead of real content/.test(lastUserMessage(1)) && /\(line \d+\) is empty[\s\S]*Do not add a new <script> block/.test(lastUserMessage(1)),
     'An empty <script> is a file error, and the check says to write the code inside that block instead of adding one',
     lastUserMessage(1).slice(0, 900)
   );
   check(/\[COPIES ONLY\]: this change only added 3 lines that were already in "index\.html"/.test(lastUserMessage(2)), 'Appending a copy of a block the page already has is reported as adding nothing new', lastUserMessage(2).slice(0, 400));
   check(
-    appended.status === 'error' && appended.steps.some((s) => /DÖNGÜ TESPİT/.test(String(s.content))) && script.length >= 4,
+    appended.status === 'error' && appended.steps.some((s) => /aynı eylemleri art arda/.test(String(s.content))) && script.length >= 4,
     'Three such copies in a row reach the loop brake (the app run went on for 35 steps)',
     { status: appended.status, left: script.length }
   );
@@ -681,6 +689,103 @@ if __name__ == "__main__":
     'Nor is its preview of the folder it already changed (it proposed renaming the renamed files, and the model started over)',
     lastUserMessage(4).slice(0, 400)
   );
+
+  // -------------------------------------------------------------------------
+  console.log('\n--- The same breaking edit again and again ---');
+  const breaking = { thought: 'Stil ekliyorum.', action: 'edit_file', path: 'index.html', find: '.product { padding: 16px; }', replace: '.product { padding: 16px; }}\n    h1 { text-align: center; }' };
+  const repeatedRun = await run('başlığı ortala', { 'index.html': SHOP }, [breaking, breaking, breaking, breaking, breaking, breaking]);
+  check(repeatedRun.read('index.html') === SHOP, 'A breaking edit is never applied');
+  check(
+    /refused 2 times for the same reason[\s\S]*write the COMPLETE file with write_file[\s\S]*The current "index\.html" \(unchanged\)/.test(lastUserMessage(2)),
+    'After the second identical refusal the model gets the current lines and another way (write_file)',
+    lastUserMessage(2).slice(0, 700)
+  );
+  check(sent.length === 4, `The loop brake stops the run after four identical refusals (model calls: ${sent.length})`);
+  check(repeatedRun.steps.some((st) => st.type === 'system_notice' && /aynı eylemleri art arda/.test(String(st.content))), 'The user sees why the run stopped');
+
+  // -------------------------------------------------------------------------
+  console.log('\n--- The previous task of the session ---');
+  const previousTask = { request: 'Galeri bölümüne fotoğraf ekle ve yorumları grid yap', finished: true, changedFiles: ['index.html'] };
+  await run('başlığı ortala', { 'index.html': SHOP }, [], { previousTask });
+  const newTaskMessage = sent[0]?.messages[0]?.content || '';
+  check(
+    newTaskMessage.includes('another task changed these files: index.html') && !newTaskMessage.includes('Galeri bölümüne'),
+    'A new request only learns which files the previous task changed, not what it was',
+    newTaskMessage.slice(0, 500)
+  );
+  check(newTaskMessage.indexOf('EARLIER IN THIS SESSION') < newTaskMessage.indexOf('TASK:\nbaşlığı ortala'), 'The earlier task comes before the TASK, so the TASK is the last word');
+  await run('devam et', { 'index.html': SHOP }, [], { previousTask });
+  const continued = sent[0]?.messages[0]?.content || '';
+  check(continued.includes('The user asked: "Galeri bölümüne fotoğraf ekle ve yorumları grid yap"'), '"devam et" gets the previous request', continued.slice(0, 500));
+  check(!/Outcome:/.test(continued), "The previous run's own summary is never shown (it was copied as the model's thought)");
+
+  // -------------------------------------------------------------------------
+  console.log('\n--- Test commands in the autonomous profile ---');
+  const pkg = JSON.stringify({ name: 'p', version: '1.0.0', scripts: { test: 'node -v' } }, null, 2);
+  await run('testleri çalıştır', { 'package.json': pkg }, [
+    { thought: 'Testleri çalıştırıyorum.', action: 'run_command', command: 'npm test' },
+    { thought: 'Bitti.', action: 'finish', summary: 'Testler çalıştı.' },
+  ]);
+  check(commandApprovals === 0, 'Before any code is written, a test command runs without approval');
+  await run('fonksiyon ekle ve testleri çalıştır', { 'package.json': pkg }, [
+    { thought: 'Kodu yazıyorum.', action: 'write_file', path: 'lib.js', content: 'module.exports = function add(a, b) {\n  return a + b;\n};\n' },
+    { thought: 'Testleri çalıştırıyorum.', action: 'run_command', command: 'npm test' },
+    { thought: 'Bitti.', action: 'finish', summary: 'Eklendi.' },
+  ]);
+  check(commandApprovals === 1, `After the run wrote code, the same test command asks the user (approvals: ${commandApprovals})`);
+  const inline = await run('bir şey dene', {}, [
+    { thought: 'Deniyorum.', action: 'run_command', command: 'node -e "console.log(1)"' },
+    { thought: 'Bitti.', action: 'finish', summary: 'Tamam.' },
+  ]);
+  check(
+    commandApprovals === 0 && /\[NOT ALLOWED\]: "node -e" runs code written on the command line/.test(lastUserMessage(1)),
+    'Inline code is refused before the user is asked',
+    lastUserMessage(1).slice(0, 300)
+  );
+  check(inline.steps.some((st) => st.type === 'system_notice' && /Komut çalıştırılmadı/.test(String(st.content))), 'The user sees that the command was refused');
+
+  // -------------------------------------------------------------------------
+  console.log('\n--- Done, but re-sending the finished change instead of finish ---');
+  const greeting = { thought: 'Metni değiştiriyorum.', action: 'write_file', path: 'notes.md', content: '# Selam\n' };
+  const resent = await run('başlığı selam yap', { 'notes.md': '# Merhaba\n' }, [greeting, greeting, greeting, greeting]);
+  const resentFinal = resent.steps.find((st) => st.type === 'final_answer');
+  check(resent.read('notes.md') === '# Selam\n', 'The change itself is applied once');
+  check(
+    resent.status === 'finished' && /zaten bulunduğu halde yeniden gönderdi/.test(String(resentFinal?.content)),
+    'The run ends as completed with a note, not as an error',
+    resentFinal?.content
+  );
+
+  // -------------------------------------------------------------------------
+  console.log('\n--- Reading a file that is already in the task message ---');
+  // The E2E report: a 7B model asked for the preloaded page three times, was refused each time and
+  // the follow-up stopped as a loop before it changed anything.
+  const readPage = { thought: 'Önce sayfayı okuyorum.', action: 'read_file', path: 'index.html' };
+  const centered = SHOP.replace('    .product { padding: 16px; }', '    .product { padding: 16px; }\n    h3 { text-align: center; }');
+  const preRead = await run('başlıkları ortala', { 'index.html': SHOP }, [
+    readPage,
+    { thought: 'Başlıkları ortalıyorum.', action: 'write_file', path: 'index.html', content: centered },
+    { thought: 'Tamam.', action: 'finish', summary: 'Başlıklar ortalandı.' },
+  ]);
+  check(/CURRENT FILE CONTENTS/.test(lastUserMessage(0)), 'The page is preloaded into the task message');
+  check(/"index\.html" \(\d+ lines/.test(lastUserMessage(1)) && !/\[REPEATED\]/.test(lastUserMessage(1)), 'The first explicit read of the preloaded page is served', lastUserMessage(1).slice(0, 200));
+  check(preRead.status === 'finished' && /text-align: center/.test(preRead.read('index.html')), 'and the task goes on to the change', preRead.status);
+  const reReads = await run('başlıkları ortala', { 'index.html': SHOP }, [readPage, readPage, readPage, readPage, readPage]);
+  check(/\[REPEATED\]: you already read "index\.html" at step 1/.test(lastUserMessage(2)), 'A second read of the unchanged page is refused as a repeat', lastUserMessage(2).slice(0, 200));
+  check(reReads.status !== 'finished', 'and endless re-reading still stops the task', reReads.status);
+
+  // -------------------------------------------------------------------------
+  console.log('\n--- The agent speaks the interface language ---');
+  useSettingsStore.setState((state: any) => ({ settings: { ...state.settings, language: 'en' } }));
+  const english = await run('center the title', { 'index.html': SHOP }, [breaking, breaking, breaking, breaking, breaking]);
+  check(
+    english.steps.some((st) => st.type === 'system_notice' && /repeated the same actions 3 times in a row/.test(String(st.content))) &&
+      english.steps.some((st) => /The edit of "index\.html" was not applied/.test(String(st.content))),
+    'With an English interface the notices are English',
+    english.steps.filter((st) => st.type === 'system_notice').map((st) => st.content).slice(-2)
+  );
+  check(!english.steps.some((st) => /[çğışÇĞİŞ]/.test(`${st.title || ''} ${st.content}`)), 'and no Turkish text is left in the steps');
+  useSettingsStore.setState((state: any) => ({ settings: { ...state.settings, language: 'tr' } }));
 
   console.log('\n===========================================');
   if (failures.length > 0) {

@@ -31,7 +31,7 @@ Kenar çubuğunun üstünden **Sohbet** ile **Kod** arasında geçersiniz.
 | Güncel bilgi sormak (Web açıkken) | `Linus Torvalds kimdir?` · `Node.js'in güncel LTS sürümü hangisi?` |
 | Dosya veya görsel hakkında sormak | Ataş düğmesiyle bir dosya ya da görsel ekleyip `bu dosyadaki hataları bul` |
 
-- Mesaj kutusundaki **Web** (dünya simgesi) açıkken güncel bilgi gerektiren sorular önce DuckDuckGo'da aranır, cevap arama sonuçlarından yazılır; mesajda neyin arandığı görünür. Model yine de "internete erişimim yok" derse uygulama aramayı kendisi yapar ve cevabı yeniden üretir.
+- Mesaj kutusundaki **Web** (dünya simgesi) açıkken güncel bilgi gerektiren sorular (kişiler, haberler, fiyatlar, hava durumu) önce DuckDuckGo'da aranır, ilk sonucun sayfası okunur ve cevap bunlardan yazılır; mesajda neyin arandığı ve okunduğu görünür. Programlama soruları modelin kendisi tarafından cevaplanır; webde aranmalarını istiyorsanız bunu açıkça söyleyin ("webde ara: …"). Model yine de "internete erişimim yok" derse uygulama aramayı kendisi yapar ve cevabı yeniden üretir.
 - Açık sohbetin üretim ayarları Ayarlar › Üretim'dedir. Hazır önayarlar: Dengeli, Kesin, Yaratıcı, Kodlama.
 - Mesaj kutusundaki **Sistem yönergeleri** düğmesinde Genel asistan, Kıdemli geliştirici ve Çok kısa hazır gelir; kendi yönergenizi de yazabilirsiniz.
 - Görsel sorabilmek için görsel girdisini destekleyen bir model gerekir (ör. `llama3.2-vision`, `gemma3`).
@@ -71,7 +71,7 @@ Kod sekmesinde **Yeni Proje** ile yeni bir proje başlatın ya da **Var olan bir
 3. Web sayfası isteklerinde görev ancak sayfada gerçek CSS kuralları, istek etkileşim gerektiriyorsa çalışan JavaScript, mobil görünüm (viewport) etiketi ve var olan dosyalara giden bağlantılar varsa "tamamlandı" sayılır. Menü bağlantılarının çalışmasını istediğinizde her bağlantının bir bölüme, sayfaya ya da JavaScript işlevine gittiği de kontrol edilir. Eksik kalırsa model düzeltmeye geri gönderilir; yine olmazsa görev, geçmeyen kontroller listelenerek "eksik" biter.
 4. Çalışan bir dosyayı bozacak değişiklik uygulanmaz. `package.json` gibi dosyalarda mevcut anahtarlar silinmez, bozuk JSON yazılmaz. Siz istemedikçe mevcut testler değiştirilemez; test başarısızsa ajan kodu düzeltmek zorundadır.
 5. Model aynı adımı tekrarlarsa uyarılır. Art arda 3 tekrar ya da 10 adım boyunca ilerleme olmazsa görev bir mesajla durdurulur; otomatik kontrollerin hepsi o ana kadar geçmişse görev bir notla tamamlanmış sayılır.
-6. Aynı oturumdaki bir sonraki istek, öncekinde ne istendiğini ve hangi dosyaların değiştiğini bilir. "Şimdi stil ekle" demeniz yeterlidir.
+6. Aynı oturumdaki bir sonraki istek, öncekinde hangi dosyaların değiştiğini bilir; "şimdi stil ekle" demeniz yeterlidir. Önceki işi sürdürmesini istediğinizde ("devam et", "onları da düzelt") önceki isteği de görür.
 
 Ajan çalışırken mesaj kutusuna yeni bir talimat yazıp **Talimatı gönder** ile araya girebilirsiniz; talimat çalışan göreve eklenir.
 
@@ -87,9 +87,19 @@ Proje çubuğundaki **Onay** seçicisinden ya da Ayarlar › Genel › Ajan onay
 | :--- | :--- | :--- | :--- | :--- |
 | Sıkı (varsayılan) | Sizin onayınızla | Sizin onayınızla | Sizin onayınızla | Evet |
 | Dengeli | Onay istenmeden | Sizin onayınızla | Sizin onayınızla | Evet |
-| Otonom | Onay istenmeden | Test komutları (`npm test`, `pytest`, `cargo test`) onay istenmeden, diğerleri sizin onayınızla | Sizin onayınızla | Hayır, kendisi karar verir |
+| Otonom | Onay istenmeden | Yalıtılmış çalışan komutlar onay istenmeden. Yalıtımsız çalışan test komutları (`npm test`, `pytest`, `cargo test`) yalnızca görev henüz kod yazmamışken onay istenmeden; sonrasında ve diğer komutlarda sizin onayınızla | Sizin onayınızla | Hayır, kendisi karar verir |
 
-Hiçbir seviyede ajan proje klasörünün dışına yazamaz. `.env` dosyaları, `.git`, `node_modules`, derleme çıktı klasörleri ile anahtar ve sertifika dosyaları ajana kapalıdır. Çalıştırabileceği komutlar yalnızca `npm test`, `npm run test|build|lint|typecheck|check`, `node`, `python`, `pytest` ve `cargo`'dur; `npx` ve kabuk komutları engellenir.
+Hiçbir seviyede ajan proje klasörünün dışına yazamaz. `.env` dosyaları, `.git`, `node_modules`, derleme çıktı klasörleri, anahtar ve sertifika dosyaları ile paket yöneticisi kimlik bilgileri (`.npmrc`, `.pypirc`, `.netrc` ve benzerleri) ajana kapalıdır. Çalıştırabileceği komutlar yalnızca `npm test`, `npm run test|build|lint|typecheck|check`, `node`, `python`, `pytest` ve `cargo`'dur; `npx`, kabuk komutları, npm seçenekleri, komut satırına yazılmış kod (`node -e`, `python -c`) ve `python -m pip` engellenir. Onay penceresinde bir npm komutunun `package.json` içindeki hangi betiği çalıştıracağı da yazar.
+
+### Yalıtılmış komutlar
+Ayarlar › Ajan › **Yalıtılmış komutlar** (varsayılan olarak açık) ajanın çalıştırdığı programları yalıtılmış bir ortamda başlatır. Program orada yalnızca proje klasörünü görür; diğer dosyalarınızı göremez ve **Yalıtılmış komutlara internet** açılmadıkça ağa bağlanamaz.
+
+- **Windows:** Python, `pytest` ve `node dosya.js` yalıtılmış çalışır (AppContainer). `npm` ve `cargo` başka programlar başlattığı için yalıtımsız çalışır; onay penceresinde "Yalıtımsız çalışır:" yazar. İnternet izni açıkken bile yerel ağ ve Ollama gibi yerel servisler erişilemez kalır.
+- **Linux:** `bwrap` (bubblewrap) kuruluysa her komut yalıtılmış çalışır. İnternet izni açıkken program bilgisayarın ağını olduğu gibi kullanır; yerel servisler de erişilebilir olur.
+- Aynı ayar sayfasındaki **Bu bilgisayarda** satırı, bu bilgisayarda neyin yalıtılmış çalıştığını gösterir.
+- Python yalıtılmış programların okuyamadığı bir klasöre kuruluysa (ör. `C:\Python314`) aynı yerde bir **Python** satırı ve **İzin ver** düğmesi çıkar. Düğme, Windows yönetici onayı istedikten sonra bu klasöre Program Files'ın yalıtılmış uygulamalar için sahip olduğu okuma iznini verir. Emir Code bunu kendiliğinden yapmaz; o zamana kadar Python komutları yalıtımsız çalışır.
+
+Ayrıntılar ve sınırlar: [SECURITY_MODEL.md](./SECURITY_MODEL.md#isolated-environment-of-commands) (İngilizce).
 
 ---
 
@@ -239,11 +249,14 @@ Ayarlar › Ajan'dan bağlam uzunluğunu, adım başına en fazla çıktıyı ve
 **İlk adım neden uzun sürüyor?**
 Model belleğe yüklenir ve görevin tamamını bir kez okur; GPU'suz bir bilgisayarda bu 1–3 dakika sürebilir. Sonraki adımlar Ollama'nın önbelleğini kullandığı için daha hızlıdır.
 
-**"DÖNGÜ TESPİT EDİLDİ" ya da "İLERLEME YOK" mesajı aldım.**
+**Görev "Durduruldu: model aynı eylemleri … tekrarladı" ya da "hiçbir dosya değişmedi" mesajıyla bitti.**
 Model kendini tekrar etmeye başladı ya da ilerleyemedi. İsteği daha somut yazın (dosya adı, beklenen sonuç) veya daha büyük bir model deneyin.
 
-**Görev "Görev Eksik Tamamlandı" diye bitti.**
+**Görev "Görev eksik tamamlandı" diye bitti.**
 Ajan işi yaptı ama otomatik kontrollerin bir kısmı geçmedi; kartta hangilerinin geçmediği yazar. Aynı oturumda `şunu da düzelt: …` diyerek devam edebilirsiniz.
+
+**Onay penceresinde "Yalıtımsız çalışır:" yazıyor.**
+Komut bu bilgisayarda yalıtılmış ortamda çalıştırılamıyor: Windows'ta `npm` ve `cargo` her zaman, Python ise okunamayan bir klasördeyse (bkz. Yalıtılmış komutlar). Komutun ne yapacağını okuyup öyle onaylayın.
 
 **Uygulamayı kapatıp açtım, "Değişiklikleri geri al" çalışmıyor.**
 Önceki dosya içerikleri yalnızca bellekte tutulur ve uygulama kapanınca silinir. Geri almayı uygulamayı kapatmadan yapın; kalıcı bir geri dönüş noktası için projede git kullanın.
@@ -255,4 +268,4 @@ Windows simgeleri önbellekte tutar. Uygulamayı görev çubuğundan kaldırıp 
 AppImage için FUSE 2 gerekir: Ubuntu 24.04'te `sudo apt install libfuse2t64`, 22.04'te `sudo apt install libfuse2`. Ubuntu 23.10 ve sonrasındaki sandbox kısıtlamasını Emir Code algılar ve uygulamayı sandbox olmadan başlatır.
 
 **Kodum internete gider mi?**
-Hayır. Modeller bilgisayarınızda çalışır. Emir Code internete yalnızca şunlar için bağlanır: web erişimi (aramalar DuckDuckGo'ya gider, ajan web sayfası da açabilir), Model Yöneticisi (Keşfet ve Yüklü sekmeleri açıkken model listesi için ollama.com, doğrulama için Ollama kayıt deposu) ve siz istediğinizde kurulum sihirbazının Ollama ya da Node.js indirmesi. Web erişimi varsayılan olarak açıktır; Ayarlar › Web erişimi'nden tamamen ya da sohbet ve ajan için ayrı ayrı kapatabilirsiniz.
+Hayır. Modeller bilgisayarınızda çalışır. Emir Code internete yalnızca şunlar için bağlanır: web erişimi (aramalar DuckDuckGo'ya gider; sohbet ilk sonucun sayfasını okur, ajan web sayfası açabilir; bilgisayarınızdaki ya da yerel ağdaki adresler hiçbir zaman açılmaz), Model Yöneticisi (Keşfet ve Yüklü sekmeleri açıkken model listesi için ollama.com, doğrulama için Ollama kayıt deposu) ve siz istediğinizde kurulum sihirbazının Ollama ya da Node.js indirmesi. Web erişimi varsayılan olarak açıktır; Ayarlar › Web erişimi'nden tamamen ya da sohbet ve ajan için ayrı ayrı kapatabilirsiniz.

@@ -33,6 +33,12 @@ export interface CommandApprovalItem {
   binary: string;
   args: string[];
   reason: string;
+  /** For npm: the package.json script the command really runs. */
+  script?: string;
+  /** It will run in the isolated environment. */
+  isolated?: boolean;
+  /** What isolation means for it, or why it runs without (interface language). */
+  isolationNote?: string;
 }
 
 export interface ClarificationItem {

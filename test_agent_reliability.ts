@@ -49,6 +49,7 @@ import {
 } from './src/lib/agent/FileSanity';
 import { TaskCompiler, mentionsPhrase } from './src/lib/agent/TaskContract';
 import { TaskValidator, looksJsonEscaped, extractMenuLinks, deadMenuLinks } from './src/lib/agent/TaskValidator';
+import { renderCheck } from './src/lib/agent/checkTexts';
 import {
   parseParameterSize,
   parameterSizeFromName,
@@ -564,9 +565,9 @@ async function run() {
   report = await TaskValidator.validate(inlineContract[0], async (p) =>
     p === 'index.html' ? STYLED_PAGE.replace(/<script>[\s\S]*?<\/script>/, '<script> <h1>Merhaba Dünya!</h1></script>') : null
   );
-  check(!report.passed && report.missingEvidence.some((m) => m.includes('HTML işaretlemesi')), 'A <script> that only contains HTML does not satisfy the JavaScript requirement');
+  check(!report.passed && report.missingEvidence.some((m) => m.includes('HTML markup instead of JavaScript')), 'A <script> that only contains HTML does not satisfy the JavaScript requirement');
   report = await TaskValidator.validate(inlineContract[0], async (p) => (p === 'index.html' ? escapedPage : null));
-  check(!report.passed && report.missingEvidence.some((m) => m.includes('kaçış')), 'Escaped (corrupted) page fails validation with an explicit message');
+  check(!report.passed && report.missingEvidence.some((m) => m.includes('JSON escape sequences')), 'Escaped (corrupted) page fails validation with an explicit message');
 
   // Menu links ("Home About Services Contact — get these working", phi4 / qwen2.5-coder in-app report)
   const navPage = (links: string, extra = '') =>
@@ -588,7 +589,9 @@ async function run() {
   });
   check(navContracts.length === 1 && navContracts[0].criteria.some((c) => c.type === 'links_work'), 'Naming the menu links in a request adds the "links work" acceptance check');
   report = await TaskValidator.validate(navContracts[0], async (p) => (p === 'index.html' ? deadNav : null));
-  check(!report.passed && report.missingEvidence.some((m) => /"Services" \(satır 9\)/.test(m)), 'The links check names every dead link with its line', report.missingEvidence);
+  check(!report.passed && report.missingEvidence.some((m) => /"Services" \(line 9\)/.test(m)), 'The links check names every dead link with its line', report.missingEvidence);
+  const linksTr = report.missingTexts.map((t) => renderCheck(t, 'tr'));
+  check(linksTr.some((m) => /çalışmayan bağlantılar/.test(m) && /"Services" \(satır 9\)/.test(m)), 'The same finding reads in Turkish for a Turkish interface', linksTr);
   check(
     TaskCompiler.compile('navbar linkleri çalışsın', { projectFiles: ['index.html'] })[0]?.criteria.some((c) => c.type === 'links_work'),
     '"navbar linkleri çalışsın" adds the links check'
@@ -601,7 +604,7 @@ async function run() {
   report = await TaskValidator.validate(modularContract[0], async (p) => unlinkedFiles[p] ?? null);
   const bodyLine = unlinkedPage.slice(0, unlinkedPage.lastIndexOf('</body>')).split('\n').length;
   check(
-    !report.passed && report.missingEvidence.some((m) => m.includes('index.js') && m.includes('<script src="index.js"></script>') && m.includes(`satır ${bodyLine}`)),
+    !report.passed && report.missingEvidence.some((m) => m.includes('index.js') && m.includes('<script src="index.js"></script>') && m.includes(`line ${bodyLine}`)),
     'A script file that exists but is not linked is named with the exact tag and line to add (seen with gemma2:2b in E2E)',
     report.missingEvidence
   );
@@ -614,7 +617,7 @@ async function run() {
   const firstScriptLine = emptyScripts.slice(0, emptyScripts.indexOf('<script>')).split('\n').length;
   check(
     !report.passed &&
-      report.missingEvidence.some((m) => m.includes(`(satır ${firstScriptLine}) boş`) && m.includes('Yeni <script> bloğu eklemeyin') && m.includes(`(satır ${firstScriptLine + 3})`)),
+      report.missingEvidence.some((m) => m.includes(`(line ${firstScriptLine}) is empty`) && m.includes('Do not add a new <script> block') && m.includes(`(lines ${firstScriptLine + 3})`)),
     'A <script> holding only a comment is named by line: write the code inside it, add no new block, remove the extra empty ones',
     report.missingEvidence
   );
