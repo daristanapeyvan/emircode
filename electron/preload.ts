@@ -46,10 +46,17 @@ export interface SandboxStatus {
   /** Windows: whether Python and Node can run isolated on this computer. */
   python?: InterpreterIsolation;
   node?: InterpreterIsolation;
+  /** Windows: the separate account that isolates every command (set up once by an administrator). */
+  full?: { configured: boolean; working: boolean; network: 'blocked' | 'open' | 'unknown'; error?: string };
 }
 
 export interface CommandIsolationPlan {
+  /** Fully isolated: the user's files and, unless allowed, the network are out of reach. */
   isolated: boolean;
+  /** `write`: it only cannot change anything outside the project. */
+  level?: 'full' | 'write' | 'none';
+  /** Something the user should know although the command is isolated (interface language). */
+  warningText?: string;
   reason?: string;
   reasonText?: string;
 }
@@ -166,6 +173,9 @@ export interface ElectronAPI {
   planCommand?: (binary: string, args: string[], options: IsolationSettings) => Promise<CommandIsolationPlan>;
   /** Windows: lets isolated programs read the Python folder (an administrator prompt). */
   allowPythonIsolation?: () => Promise<{ ok: boolean; error?: string }>;
+  /** Windows: sets up or removes the separate account of full isolation (an administrator prompt). */
+  setupFullIsolation?: () => Promise<{ ok: boolean; error?: string }>;
+  removeFullIsolation?: () => Promise<{ ok: boolean; error?: string }>;
 
   // Model library (ollama.com list and tags, registry verification)
   modelLibrary?: () => Promise<string>;
@@ -246,6 +256,8 @@ const electronAPI: ElectronAPI = {
   getSandboxStatus: (options) => ipcRenderer.invoke('sandbox:status', options),
   planCommand: (binary, args, options) => ipcRenderer.invoke('sandbox:plan', { binary, args, options }),
   allowPythonIsolation: () => ipcRenderer.invoke('sandbox:allowPython'),
+  setupFullIsolation: () => ipcRenderer.invoke('sandbox:setupFull'),
+  removeFullIsolation: () => ipcRenderer.invoke('sandbox:removeFull'),
 
   // Model Library Bridge
   modelLibrary: () => ipcRenderer.invoke('models:library'),

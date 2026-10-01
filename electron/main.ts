@@ -8,7 +8,7 @@ import { mt, setMainLanguage, initMainLanguage } from './i18n';
 import { checkCommand, CREDENTIAL_OR_RUNNER_CONFIG } from './commandPolicy';
 import { WebError, searchWeb, fetchPage } from './web';
 import { readOnlyGit } from './git';
-import { Sandbox, IsolationOptions, IsolationReason, isSandboxSetupFailure, commandEnvironment } from './sandbox';
+import { Sandbox, IsolationOptions, IsolationReason, IsolationWarning, isSandboxSetupFailure, commandEnvironment } from './sandbox';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -1436,6 +1436,12 @@ ipcMain.handle(
     // cmd.exe as one command string (Node refuses to spawn .cmd files without a shell,
     // CVE-2024-27980); the policy has rejected every cmd metacharacter in its arguments.
     const plan = await sandbox.plan(cleanBinary, cleanArgs, root, isolationOptions(isolation));
+    // Opening the project folder to the isolated program can take a while the first time (a large
+    // folder), so it is not part of the command's time limit.
+    const prepared = await sandbox.prepare(plan);
+    if (!prepared.ok) {
+      return { success: false, exitCode: 125, output: '', error: mt('sandboxUnavailable', { error: prepared.error || '' }), code: 'sandbox', sandboxed: false };
+    }
     const result = await runProcess(plan.command, plan.args, {
       cwd: root,
       shell: plan.shell,
@@ -1443,7 +1449,7 @@ ipcMain.handle(
       env: { ...commandEnvironment(), ...(plan.env || {}) },
     });
     result.sandboxed = plan.isolated;
-    if (plan.isolated && isSandboxSetupFailure(result.exitCode, result.output)) {
+    if (plan.level !== 'none' && isSandboxSetupFailure(result.exitCode, result.output)) {
       const reason = result.output.split(/\r?\n/).find((l) => l.includes('emir-sandbox:'))?.replace(/^.*emir-sandbox:\s*/, '') || '';
       return { ...result, success: false, error: mt('sandboxUnavailable', { error: reason }), code: 'sandbox' };
     }
@@ -1461,7 +1467,7 @@ function isolationOptions(value: unknown): IsolationOptions {
   return { enabled: v.enabled !== false, network: v.network === true };
 }
 
-const reasonText = (reason?: IsolationReason) => (reason ? mt(reason) : undefined);
+const reasonText = (reason?: IsolationReason | IsolationWarning) => (reason ? mt(reason) : undefined);
 
 ipcMain.handle('sandbox:status', async (_event, options: unknown) => {
   const status = await sandbox.status(isolationOptions(options));
@@ -1477,8 +1483,12 @@ ipcMain.handle('sandbox:plan', async (_event, { binary, args, options }: { binar
   const root = canonicalWorkspaceRoot;
   if (!root) return { isolated: false, reasonText: mt('noProjectOpen') };
   const plan = await sandbox.plan(String(binary || '').trim().toLowerCase(), Array.isArray(args) ? args.map(String) : [], root, isolationOptions(options));
-  return { isolated: plan.isolated, reason: plan.reason, reasonText: reasonText(plan.reason) };
+  return { isolated: plan.isolated, level: plan.level, reason: plan.reason, reasonText: reasonText(plan.reason), warningText: reasonText(plan.warning) };
 });
+
+// Windows: the separate account that isolates every command. Both ask for an administrator.
+ipcMain.handle('sandbox:setupFull', async () => sandbox.setupFull());
+ipcMain.handle('sandbox:removeFull', async () => sandbox.removeFull());
 
 ipcMain.handle('sandbox:allowPython', async () => {
   const res = await sandbox.allowPython();

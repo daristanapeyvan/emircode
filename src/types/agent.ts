@@ -37,8 +37,12 @@ export interface CommandApprovalItem {
   script?: string;
   /** It will run in the isolated environment. */
   isolated?: boolean;
+  /** `write`: it only cannot change anything outside the project; `none`: it runs like any program. */
+  isolationLevel?: 'full' | 'write' | 'none';
   /** What isolation means for it, or why it runs without (interface language). */
   isolationNote?: string;
+  /** Something the user should know although it is isolated (interface language). */
+  isolationWarning?: string;
 }
 
 export interface ClarificationItem {

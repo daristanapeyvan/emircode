@@ -34,7 +34,7 @@ jobs:
       - name: Run Test Suites
         run: npm test
 
-      # The isolated environment of agent commands, tried for real: an AppContainer on Windows,
+      # The isolated environment of agent commands, tried for real: emir-sandbox.exe on Windows,
       # bubblewrap on Linux (Ubuntu restricts unprivileged user namespaces; the runner allows them).
       - name: Build Command Isolation Launcher (Windows)
         if: runner.os == 'Windows'
@@ -47,8 +47,16 @@ jobs:
           sudo apt-get install -y -qq bubblewrap
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
 
+      # Full isolation on Windows runs commands as a separate local account, which an administrator
+      # sets up once. The runner is an administrator, so the test tries the real thing here.
+      - name: Set Up Full Isolation (Windows)
+        if: runner.os == 'Windows'
+        run: native/windows/bin/emir-sandbox.exe --setup
+
       - name: Run Command Isolation Tests
         run: node ./scripts/run-ts-test.mjs test_sandbox.ts
+        env:
+          EMIR_REQUIRE_FULL: ${{ runner.os == 'Windows' && '1' || '' }}
 
       - name: Check Shell Script Syntax
         shell: bash

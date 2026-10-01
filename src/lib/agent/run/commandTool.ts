@@ -109,8 +109,8 @@ export async function handleRunCommand(ctx: RunContext, { assistantText, parsed,
       }
     }
   }
-  // Where it will run: in the isolated environment (only the project folder, no network unless
-  // allowed) or not, and why not.
+  // Where it will run: isolated (only the project folder, no network unless allowed),
+  // write-protected (it cannot change anything outside the project) or neither, and why.
   const isolation = useSettingsStore.getState().settings.commandIsolation || { enabled: true, network: false };
   const isolationPlan = await Promise.resolve(window.electronAPI?.planCommand?.(binary, args, isolation)).catch(() => undefined);
   const isolated = !!isolationPlan?.isolated;
@@ -121,7 +121,9 @@ export async function handleRunCommand(ctx: RunContext, { assistantText, parsed,
     reason: String(parsed.rawJson?.thought || payload.reason || '').slice(0, 300),
     script,
     isolated,
+    isolationLevel: isolationPlan?.level || (isolated ? 'full' : 'none'),
     isolationNote: isolated ? et(isolation.network ? 'isolatedWithNetwork' : 'isolatedNoNetwork') : isolationPlan?.reasonText,
+    isolationWarning: isolationPlan?.warningText,
   };
   const isSafeCommand =
     (binary === 'npm' && (args[0] === 'test' || (args[0] === 'run' && args[1] === 'test'))) ||

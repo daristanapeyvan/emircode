@@ -39,7 +39,7 @@ The cart total is wrong after a discount is applied. Fix it and verify with npm 
 
 What happens:
 1. The agent reads the relevant files, fixes the calculation and proposes `npm test`.
-2. Under Strict and Balanced you approve the command. Under Autonomous an isolated command runs without asking; `npm test` runs without isolation on Windows, so after the fix it asks, because it would run the code the model just wrote. The dialog shows the script from `package.json` that `npm test` runs.
+2. Under Strict and Balanced you approve the command. Under Autonomous an isolated command runs without asking. On Windows without full isolation, `npm test` runs write-protected, so after the fix it asks, because it would run the code the model just wrote. The dialog shows the script from `package.json` that `npm test` runs.
 3. If a test fails, the output goes back to the model. When the output points into the project (`src/cart.js:14`, a Python traceback), the model also gets the numbered lines around that location.
 4. A command that failed is not run again until a file has changed.
 5. Existing test files cannot be changed unless the request asks for test changes, so the model has to fix the code instead of the failing assertion.

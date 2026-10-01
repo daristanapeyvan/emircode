@@ -5,21 +5,22 @@ All notable changes to this project are documented in this file. The format foll
 ## [Unreleased]
 
 ### Added
-- Isolated commands (Settings › Agent, on by default): programs the agent runs see only the project folder and have no network unless "Internet for isolated commands" is on. On Windows, Python, `pytest` and `node` scripts run in an AppContainer with a job object (64 processes, 4 GB); npm and cargo start other programs and run without isolation. On Linux every command runs in bubblewrap when it is installed.
-- Settings › Agent shows what this computer supports. When Python is installed in a folder that isolated programs cannot read, an **Allow** button grants that folder read access after a Windows administrator prompt; the app never changes it on its own.
-- The approval dialog says when a command runs without isolation, and for `npm test` and `npm run` shows the script from `package.json` that will run.
+- Isolated commands (Settings › Agent, on by default): programs the agent runs work in the project folder, cannot open your other files and have no network unless "Internet for isolated commands" is on. On Linux every command runs in bubblewrap when it is installed.
+- Full isolation on Windows (Settings › Agent › Full isolation): after a one-time setup with administrator approval, every command, npm and cargo included, runs under a separate hidden Windows account with a restricted token whose network is blocked, also when the Windows firewall is switched off. The setup adds two local accounts, a group, two network filters and a firewall rule; **Remove** deletes them. Connections to this computer itself (localhost) are not blocked.
+- Windows without that setup: Python and `node` scripts run isolated in an AppContainer; npm, cargo and test runners run write-protected (low integrity level, job object, own desktop): they cannot change anything outside the project, but they can read your files and use the network.
+- Settings › Agent shows what applies on this computer. The approval dialog says whether a command runs isolated, write-protected or without isolation, warns when the folder next to the project is open to every account of the computer, and for `npm test` and `npm run` shows the script from `package.json` that will run.
 - Chat with Web reads the first result page as well as the search results, and the message shows what was searched and read. Stopping an answer cancels its web requests.
 - The log of every agent step shows how long the model took to load, to read the prompt (with the token count) and to answer.
 - `npm run test:sandbox` tries the isolated environment for real; CI runs it on Windows and Ubuntu.
 
 ### Changed
-- Autonomous approval: isolated commands run without asking. A test command that runs without isolation starts on its own only until the task has written code, because after that it would run code the model wrote.
+- Autonomous approval: isolated commands run without asking. A test command that does not run isolated starts on its own only until the task has written code, because after that it would run code the model wrote.
 - A follow-up request in the same session always learns which files the previous request changed, but gets the previous request itself only when it continues it ("continue", "devam et"). An unrelated request no longer picks up the old work.
 - Web questions in chat are recognised by whole words, so "web sitesi oluştur" or "google maps api" no longer start a search. Programming questions go to the web only when you ask for a search, and an "I'm not sure" in an answer to a code question no longer replaces the answer with search results.
 - All web requests run in the main process; the renderer's own search code was removed. Pages are read as a stream up to the size limit, compressed pages are decompressed, the character set is taken from the response or the page, and only text formats are read. A changed DuckDuckGo page layout is reported as an error instead of "no results".
 - The agent engine's messages, the main process's errors and the check results shown in the interface follow the interface language; the model always gets English instructions and check results. Design theme names and categories are translated too.
 - The agent engine was split into the loop and one module per tool (`src/lib/agent/run/`), and command refusals carry a code instead of being recognised by their text.
-- Documentation rewritten to match the app: README, the Turkish guide, the examples, architecture, security model, security policy, contributing guide and GitHub templates. The security model describes the isolated environment and states the limits that remain, for example that npm and cargo run without isolation on Windows.
+- Documentation rewritten to match the app: README, the Turkish guide, the examples, architecture, security model, security policy, contributing guide and GitHub templates. The security model describes the isolated environment and states the limits that remain, for example that npm and cargo are only write-protected on Windows until full isolation is set up.
 - The package description in `package.json` describes what the app does, and `GEMINI.md` (instructions for an AI assistant) is no longer part of the repository.
 
 ### Fixed

@@ -1,9 +1,14 @@
 /**
  * test_sandbox.ts
  * The isolated environment of agent commands, tried for real on the system the test runs on:
- * Windows (AppContainer via native/windows/bin/emir-sandbox.exe, built by scripts/build-sandbox.cjs)
- * and Linux (bubblewrap, when installed and allowed). A program in it must reach the project folder
- * and nothing else: not a file next to the project, not the home folder, not the network.
+ * Windows (native/windows/bin/emir-sandbox.exe, built by scripts/build-sandbox.cjs) and Linux
+ * (bubblewrap, when installed and allowed). A program in it must reach the project folder and
+ * nothing else: not a file next to the project, not the home folder, not the network.
+ *
+ * On Windows a whole process tree (npm test) is isolated only by the separate account, which an
+ * administrator sets up once ("emir-sandbox.exe --setup"). Where it is set up, the test tries it;
+ * where it is not, the tree must at least run write-protected. EMIR_REQUIRE_FULL=1 (CI) makes a
+ * missing or broken setup a failure.
  *
  * Run: node scripts/build-sandbox.cjs && node scripts/run-ts-test.mjs test_sandbox.ts
  */
@@ -33,7 +38,7 @@ function runPlan(plan: { command: string; args: string[]; shell: boolean; env?: 
     let output = '';
     child.stdout?.on('data', (d) => (output += d));
     child.stderr?.on('data', (d) => (output += d));
-    const timer = setTimeout(() => child.kill(), 30000);
+    const timer = setTimeout(() => child.kill(), 90000);
     child.on('close', (code) => {
       clearTimeout(timer);
       resolve({ code, output });
@@ -45,15 +50,27 @@ function runPlan(plan: { command: string; args: string[]; shell: boolean; env?: 
   });
 }
 
+/** The probe's result: the last line of the output that is a JSON object (npm prints around it). */
+function probeResult(output: string): Record<string, string> {
+  const line = output.split(/\r?\n/).reverse().find((l) => l.trim().startsWith('{'));
+  try {
+    return line ? JSON.parse(line) : {};
+  } catch {
+    return {};
+  }
+}
+
+// Isolated programs get a home folder of their own, so the probe is told where the real one is.
 const PROBE = `
 const fs = require('fs'), path = require('path'), os = require('os'), net = require('net');
+const REAL_HOME = ${JSON.stringify(os.homedir())};
 const r = {};
 const t = (n, f) => { try { f(); r[n] = 'allowed'; } catch (e) { r[n] = 'denied'; } };
 t('readInside', () => fs.readFileSync(path.join(process.cwd(), 'probe.js')));
 t('writeInside', () => fs.writeFileSync(path.join(process.cwd(), 'written.txt'), 'x'));
 t('readNextToProject', () => fs.readFileSync(path.join(process.cwd(), '..', 'secret.txt')));
 t('writeNextToProject', () => fs.writeFileSync(path.join(process.cwd(), '..', 'escaped.txt'), 'x'));
-t('listHome', () => { const entries = fs.readdirSync(os.homedir()); if (entries.length === 0) throw new Error('empty'); });
+t('listHome', () => { const entries = fs.readdirSync(REAL_HOME); if (entries.length === 0) throw new Error('empty'); });
 try { require('child_process').execFileSync(process.execPath, ['-v'], { stdio: 'pipe', timeout: 5000 }); r.childProcess = 'allowed'; }
 catch (e) { r.childProcess = e.code === 'EMIRCODE_ISOLATED' ? 'refused clearly' : 'failed: ' + (e.code || e.message); }
 const s = net.connect({ host: '1.1.1.1', port: 443 });
@@ -88,43 +105,67 @@ async function main() {
   fs.mkdirSync(project);
   fs.writeFileSync(path.join(base, 'secret.txt'), 'secret');
   fs.writeFileSync(path.join(project, 'probe.js'), PROBE);
+  fs.writeFileSync(path.join(project, 'package.json'), JSON.stringify({ name: 'probe', version: '1.0.0', scripts: { test: 'node probe.js' } }));
+  const off = { enabled: true, network: false };
+  const windows = process.platform === 'win32';
+  const full = status.full;
   try {
-    if (process.platform === 'win32') {
-      check(status.node?.isolated === true, 'Node can run isolated on this computer', status.node);
-      console.log(`   (Python here: ${status.python?.isolated ? 'isolated' : status.python?.reason || 'not found'})`);
-      const npm = await sandbox.plan('npm', ['test'], project, { enabled: true, network: false });
-      check(!npm.isolated && npm.reason === 'isolationStartsPrograms', 'npm runs without isolation on Windows, with the reason', npm);
-      const runner = await sandbox.plan('node', ['--test'], project, { enabled: true, network: false });
-      check(!runner.isolated && runner.reason === 'isolationTestRunner', "Node's test runner runs without isolation on Windows", runner);
+    if (windows) {
+      console.log(`   (Python in an AppContainer here: ${status.python?.isolated ? 'isolated' : status.python?.reason || 'not found'})`);
+      console.log(`   (full isolation here: ${full?.working ? `working, network ${full.network}` : full?.configured ? `set up but not starting: ${full.error}` : 'not set up'})`);
+      if (process.env.EMIR_REQUIRE_FULL === '1') check(!!full?.working, 'Full isolation is set up and starts programs (required on this system)', full);
     }
-    const off = await sandbox.plan('node', ['probe.js'], project, { enabled: false, network: false });
-    check(!off.isolated && off.reason === 'isolationOff', 'With the setting off nothing is isolated', off);
+    const disabled = await sandbox.plan('node', ['probe.js'], project, { enabled: false, network: false });
+    check(!disabled.isolated && disabled.level === 'none' && disabled.reason === 'isolationOff', 'With the setting off nothing is isolated', disabled);
 
-    const plan = await sandbox.plan('node', ['probe.js'], project, { enabled: true, network: false });
-    check(plan.isolated, 'node probe.js is planned isolated', plan);
+    // One program (node probe.js).
+    const plan = await sandbox.plan('node', ['probe.js'], project, off);
+    check(plan.isolated && plan.level === 'full', 'node probe.js is planned isolated', plan);
+    check((await sandbox.prepare(plan)).ok, 'The project folder is opened to the isolated program');
     const res = await runPlan(plan, project);
-    let r: Record<string, string> = {};
-    try {
-      r = JSON.parse(res.output.trim().split('\n').pop() || '{}');
-    } catch {
-      r = {};
-    }
+    const r = probeResult(res.output);
     check(res.code === 0 && r.readInside === 'allowed' && r.writeInside === 'allowed', 'Inside the project the program reads and writes', { code: res.code, r, out: res.output.slice(0, 300) });
     check(r.readNextToProject === 'denied' && r.writeNextToProject === 'denied', 'A file next to the project can be neither read nor written', r);
     check(!fs.existsSync(path.join(base, 'escaped.txt')), 'Nothing was written outside the project');
     check(r.listHome === 'denied', 'The home folder is out of reach (Windows: denied; Linux: an empty private one)', r);
-    check(r.internet === 'denied', 'No internet without the network setting', r);
-    if (process.platform === 'win32') {
-      check(r.childProcess === 'refused clearly', 'Starting another program fails at once with a clear message instead of hanging', r);
+    if (windows && full?.working && full.network !== 'blocked') {
+      console.log(`   (the firewall does not block the account's network here: ${full.network}; internet: ${r.internet})`);
     } else {
-      check(r.childProcess === 'allowed', 'On Linux a program may start others inside the isolation', r);
+      check(r.internet === 'denied', 'No internet without the network setting', r);
+    }
+    if (windows && !full?.working) {
+      check(r.childProcess === 'refused clearly', 'In an AppContainer, starting another program fails at once with a clear message instead of hanging', r);
+    } else {
+      check(r.childProcess === 'allowed', 'A program may start others inside the isolation', r);
     }
 
     const withNet = await sandbox.plan('node', ['probe.js'], project, { enabled: true, network: true });
-    const netRes = await runPlan(withNet, project);
-    const rn = JSON.parse(netRes.output.trim().split('\n').pop() || '{}');
+    await sandbox.prepare(withNet);
+    const rn = probeResult((await runPlan(withNet, project)).output);
     console.log(`   (with the network setting the internet is: ${rn.internet}; CI runners may block it)`);
     check(rn.readNextToProject === 'denied', 'The network setting does not open the file system', rn);
+
+    // A process tree (npm test starts cmd.exe, which starts node, which starts node).
+    if (windows) {
+      section(full?.working ? 'A process tree under the separate account' : 'A process tree, write-protected (full isolation is not set up)');
+      const npm = await sandbox.plan('npm', ['test'], project, off);
+      const runner = await sandbox.plan('node', ['--test'], project, off);
+      check((await sandbox.prepare(npm)).ok, 'The project folder is prepared for npm test', npm);
+      fs.rmSync(path.join(project, 'written.txt'), { force: true });
+      const tree = await runPlan(npm, project);
+      const t = probeResult(tree.output);
+      check(tree.code === 0 && t.writeInside === 'allowed' && t.childProcess === 'allowed', 'npm test runs: the tree starts, writes into the project and starts programs of its own', { code: tree.code, t, out: tree.output.slice(-600) });
+      check(t.writeNextToProject === 'denied' && !fs.existsSync(path.join(base, 'escaped.txt')), 'It cannot write next to the project', t);
+      if (full?.working) {
+        check(npm.level === 'full' && runner.level === 'full', 'npm and the test runner are planned fully isolated', { npm: npm.level, runner: runner.level });
+        check(t.readNextToProject === 'denied' && t.listHome === 'denied', "It cannot read a file next to the project or the user's home folder", t);
+        if (full.network === 'blocked') check(t.internet === 'denied', 'It has no internet', t);
+      } else {
+        check(npm.level === 'write' && !npm.isolated && npm.reason === 'isolationWriteOnly', 'npm is planned write-protected, and says so', npm);
+        check(runner.level === 'write' && !runner.isolated, "Node's test runner is planned write-protected", runner);
+        console.log(`   (write-protected programs can read the user's files: readNextToProject=${t.readNextToProject}; internet=${t.internet})`);
+      }
+    }
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
   }

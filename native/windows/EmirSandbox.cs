@@ -1,13 +1,22 @@
-// EmirSandbox.cs - runs one program of the coding agent inside a Windows AppContainer.
+// EmirSandbox.cs - runs one program of the coding agent isolated. Three ways (--mode):
 //
-// An AppContainer process can read and write only what its container is granted: here the project
-// folder (read and write) and the folders of the program it runs (read). It cannot reach the user's
-// other files, and without the internetClient capability it has no network (loopback included).
-// A job object stops the program and everything it started when the launcher ends (the app kills
-// the launcher on timeout) and caps the number of processes and the memory they use.
+// appcontainer (this file): a Windows AppContainer. The program can read and write only what the
+//   container is granted: the project folder (read and write) and the folders of the program it
+//   runs (read). It cannot reach the user's other files, and without the internetClient capability
+//   it has no network (loopback included). Programs that start other programs through named pipes
+//   (Node, Rust) cannot run in it.
+// user (Accounts.cs, Restricted.cs): a local account of its own with a restricted token, for whole
+//   process trees. Needs the one-time setup (--setup).
+// low (Restricted.cs): the low integrity level: nothing outside the project can be changed.
 //
-// Usage: emir-sandbox.exe --root <project folder> [--read <folder>]... [--net] -- <program> [args...]
-//        emir-sandbox.exe --check --root <project folder> [--read <folder>]...
+// In every mode a job object stops the program and everything it started when the launcher ends
+// (the app kills the launcher on timeout) and caps the number of processes and their memory.
+//
+// Usage: emir-sandbox.exe [--mode <mode>] --root <project folder> [--read <folder>]... [--net] -- <program> [args...]
+//        emir-sandbox.exe [--mode <mode>] --check --root <project folder> [--read <folder>]...
+//        emir-sandbox.exe --mode <low|user> --prepare --root <project folder> [--read <folder>]...
+//        emir-sandbox.exe --audit --root <project folder>
+//        emir-sandbox.exe --setup | --remove | --account-status
 // Exit code: the program's own exit code; 125 when the isolated environment could not be set up
 // (the reason is printed to stderr after "emir-sandbox:").
 //
@@ -22,7 +31,7 @@ using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text;
 
-internal static class EmirSandbox
+internal static partial class EmirSandbox
 {
     private const string ProfileName = "EmirCode.Sandbox";
     private const string ProfileDisplayName = "Emir Code isolated commands";
@@ -44,8 +53,15 @@ internal static class EmirSandbox
     private static int Run(string[] argv)
     {
         string root = null;
+        string mode = "appcontainer";
+        string action = null;
+        string file = null;
+        string group = null;
         bool net = false;
         bool check = false;
+        bool prepare = false;
+        bool netProbe = false;
+        bool audit = false;
         var reads = new List<string>();
         int i = 0;
         for (; i < argv.Length; i++)
@@ -54,17 +70,54 @@ internal static class EmirSandbox
             if (a == "--") { i++; break; }
             if (a == "--root" && i + 1 < argv.Length) root = argv[++i];
             else if (a == "--read" && i + 1 < argv.Length) reads.Add(argv[++i]);
+            else if (a == "--mode" && i + 1 < argv.Length) mode = argv[++i];
+            else if (a == "--group" && i + 1 < argv.Length) group = argv[++i];
             else if (a == "--net") net = true;
             else if (a == "--check") check = true;
+            else if (a == "--prepare") prepare = true;
+            else if (a == "--net-probe") netProbe = true;
+            else if (a == "--audit") audit = true;
+            else if (a == "--stage2" || a == "--setup" || a == "--remove" || a == "--account-status") action = a.Substring(2);
+            else if ((a == "--setup-elevated" || a == "--remove-elevated") && i + 1 < argv.Length) { action = a.Substring(2); file = argv[++i]; }
             else throw new ArgumentException("unknown option " + a);
         }
+        if (action == "setup") return SetupAccounts();
+        if (action == "remove") return RemoveAccounts();
+        if (action == "setup-elevated") return SetupElevated(file);
+        if (action == "remove-elevated") return RemoveElevated(file);
+        if (action == "account-status") return AccountStatus();
+
         if (root == null || !Directory.Exists(root)) throw new ArgumentException("the project folder does not exist");
-        if (!check && i >= argv.Length) throw new ArgumentException("no program given");
+        if (audit)
+        {
+            // Other folders next to the project are reachable by every account of this computer,
+            // so also by the account of isolated programs. The app warns the user.
+            string parent = Path.GetDirectoryName(Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar));
+            if (parent != null && OpenToAllUsers(parent)) Console.WriteLine("parent-open");
+            return 0;
+        }
+        bool noProgram = check || prepare || netProbe;
+        if (!noProgram && i >= argv.Length) throw new ArgumentException("no program given");
+        if (action == "stage2" || mode != "appcontainer")
+        {
+            string program = noProgram ? null : argv[i];
+            var programArgs = new string[noProgram ? 0 : argv.Length - i - 1];
+            if (!noProgram) Array.Copy(argv, i + 1, programArgs, 0, programArgs.Length);
+            if (action == "stage2") return RunStage2(root, group, program, programArgs, check, netProbe);
+            if (mode == "low") return RunLow(root, program, programArgs, prepare, check);
+            if (mode == "user") return RunAsSandboxAccount(root, reads, net, program, programArgs, prepare, check, netProbe);
+            throw new ArgumentException("unknown mode " + mode);
+        }
+        if (prepare) throw new ArgumentException("--prepare needs --mode low or --mode user");
 
         IntPtr sid = ContainerSid();
         try
         {
-            var identity = new SecurityIdentifier(sid);
+            // Folders are opened to a capability of the container, not to the container itself: a
+            // rule for an AppContainer's own identity makes Windows refuse low-integrity programs
+            // (the write-protected mode) every access to the folder.
+            SecurityIdentifier identity = ProjectCapability();
+            RemoveRule(root, new SecurityIdentifier(sid));
             Grant(root, identity, FileSystemRights.Modify | FileSystemRights.Synchronize);
             foreach (string dir in reads)
             {
@@ -130,7 +183,33 @@ internal static class EmirSandbox
         return result;
     }
 
-    /// Gives the container access to a folder and everything in it, once (the rule is kept).
+    /// The capability that project folders are opened to ("emirCodeProject", derived the way Windows
+    /// derives the identities of named capabilities: the SHA-256 of the upper-case name).
+    private static SecurityIdentifier ProjectCapability()
+    {
+        byte[] hash;
+        using (var sha = System.Security.Cryptography.SHA256.Create()) hash = sha.ComputeHash(Encoding.Unicode.GetBytes("EMIRCODEPROJECT"));
+        var text = new StringBuilder("S-1-15-3-1024");
+        for (int k = 0; k < 8; k++) text.Append('-').Append(BitConverter.ToUInt32(hash, k * 4));
+        return new SecurityIdentifier(text.ToString());
+    }
+
+    /// Takes the rules of an identity off a folder and its content again (when the folder has any).
+    private static void RemoveRule(string dir, SecurityIdentifier sid)
+    {
+        var info = new DirectoryInfo(dir);
+        DirectorySecurity security = info.GetAccessControl(AccessControlSections.Access);
+        bool found = false;
+        foreach (FileSystemAccessRule rule in security.GetAccessRules(true, false, typeof(SecurityIdentifier)))
+        {
+            if (rule.IdentityReference.Equals(sid)) found = true;
+        }
+        if (!found) return;
+        security.PurgeAccessRules(sid);
+        info.SetAccessControl(security);
+    }
+
+    /// Gives an identity access to a folder and everything in it, once (the rule is kept).
     private static void Grant(string dir, SecurityIdentifier sid, FileSystemRights rights)
     {
         var info = new DirectoryInfo(dir);
@@ -151,6 +230,7 @@ internal static class EmirSandbox
     private static int Launch(IntPtr containerSid, bool net, string cwd, string program, string[] args)
     {
         IntPtr capabilitySid = IntPtr.Zero;
+        IntPtr projectSid = IntPtr.Zero;
         IntPtr capabilities = IntPtr.Zero;
         IntPtr securityCapabilities = IntPtr.Zero;
         IntPtr attributeList = IntPtr.Zero;
@@ -160,13 +240,17 @@ internal static class EmirSandbox
         try
         {
             var sc = new SECURITY_CAPABILITIES { AppContainerSid = containerSid };
+            int entry = Marshal.SizeOf(typeof(SID_AND_ATTRIBUTES));
+            capabilities = Marshal.AllocHGlobal(entry * 2);
+            if (!ConvertStringSidToSid(ProjectCapability().Value, out projectSid)) throw new Win32Exception();
+            Marshal.StructureToPtr(new SID_AND_ATTRIBUTES { Sid = projectSid, Attributes = SE_GROUP_ENABLED }, capabilities, false);
+            sc.Capabilities = capabilities;
+            sc.CapabilityCount = 1;
             if (net)
             {
                 if (!ConvertStringSidToSid("S-1-15-3-1", out capabilitySid)) throw new Win32Exception(); // internetClient
-                capabilities = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(SID_AND_ATTRIBUTES)));
-                Marshal.StructureToPtr(new SID_AND_ATTRIBUTES { Sid = capabilitySid, Attributes = SE_GROUP_ENABLED }, capabilities, false);
-                sc.Capabilities = capabilities;
-                sc.CapabilityCount = 1;
+                Marshal.StructureToPtr(new SID_AND_ATTRIBUTES { Sid = capabilitySid, Attributes = SE_GROUP_ENABLED }, IntPtr.Add(capabilities, entry), false);
+                sc.CapabilityCount = 2;
             }
             securityCapabilities = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(SECURITY_CAPABILITIES)));
             Marshal.StructureToPtr(sc, securityCapabilities, false);
@@ -257,6 +341,7 @@ internal static class EmirSandbox
             if (securityCapabilities != IntPtr.Zero) Marshal.FreeHGlobal(securityCapabilities);
             if (capabilities != IntPtr.Zero) Marshal.FreeHGlobal(capabilities);
             if (capabilitySid != IntPtr.Zero) LocalFree(capabilitySid);
+            if (projectSid != IntPtr.Zero) LocalFree(projectSid);
         }
     }
 

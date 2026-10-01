@@ -55,7 +55,7 @@ npm run build:linux       # Linux: deb, rpm, AppImage, tar.gz
 | Chat and web search | `src/stores/chatStore.ts`, `src/lib/web/` |
 | File access, tokens, running commands | `electron/main.ts`, `electron/preload.ts` |
 | Which commands may run | `electron/commandPolicy.ts` |
-| Isolated environment of commands | `electron/sandbox.ts`, `native/windows/` (launcher and Node guard), `scripts/build-sandbox.cjs` |
+| Isolated environment of commands | `electron/sandbox.ts`, `native/windows/` (the launcher: AppContainer, separate account, write protection; the Node guard), `scripts/build-sandbox.cjs` |
 | Web requests, read-only git, texts of the main process | `electron/web.ts`, `electron/git.ts`, `electron/i18n.ts` |
 | Packaging hooks | `scripts/afterPack.js` (Windows icon, Linux launcher), `scripts/postbuild.js` |
 | Creation wizards | `src/lib/wizard/`, `src/components/agent/wizard/`, `src/stores/siteWizardStore.ts`, `src/stores/toolWizardStore.ts` |

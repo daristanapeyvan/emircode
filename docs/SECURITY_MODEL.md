@@ -66,13 +66,13 @@ This prevents stale writes (the file changed after the agent read it), replays a
 | Create or edit a file | Asks | Applied | Applied |
 | Delete a file | Asks | Asks | Asks |
 | A command that runs isolated | Asks | Asks | Runs |
-| A test command (`npm test`, `npm run test`, `pytest`, `cargo test`) that runs without isolation | Asks | Asks | Runs only while the task has written no code or command settings; otherwise asks |
-| Any other command that runs without isolation | Asks | Asks | Asks |
+| A test command (`npm test`, `npm run test`, `pytest`, `cargo test`) that runs write-protected or without isolation | Asks | Asks | Runs only while the task has written no code or command settings; otherwise asks |
+| Any other command that runs write-protected or without isolation | Asks | Asks | Asks |
 | Questions to the user (`ask_user`) | Shown in the task | Shown in the task | Not offered |
 
-A test command runs the project's code. Without isolation, a test run after the agent wrote code (or `package.json`, `conftest.py`, `pytest.ini`, `pyproject.toml`, `Cargo.toml`, `build.rs` and similar) would run what the model just wrote, so in that case the user decides.
+A test command runs the project's code. Outside the isolated environment, a test run after the agent wrote code (or `package.json`, `conftest.py`, `pytest.ini`, `pyproject.toml`, `Cargo.toml`, `build.rs` and similar) would run what the model just wrote, so in that case the user decides.
 
-The approval dialog shows the command, the `package.json` script that `npm` will really run, and whether the command runs isolated (or why it does not). The folder check, the access rules, the token check and the command rules apply at every level.
+The approval dialog shows the command, the `package.json` script that `npm` will really run, and whether the command runs isolated, write-protected or neither, with the reason. The folder check, the access rules, the token check and the command rules apply at every level.
 
 ---
 
@@ -89,25 +89,56 @@ The approval dialog shows the command, the `package.json` script that `npm` will
 - **Environment.** Only `PATH`, the Windows system variables (`SystemRoot`, `COMSPEC`, `PATHEXT`), temporary folders, `HOME`, `USER`, `SHELL`, the locale and the XDG folders are passed on, plus `NODE_ENV=test` and `PYTHONIOENCODING=utf-8`. Other variables, such as tokens in your environment, are not.
 - **Limits.** A command runs in the project folder, is stopped after 60 seconds together with the programs it started, and at most 2 MB of output is read.
 
-These rules decide what may start. What a started program does is limited by the isolated environment (next section) where it is available, and otherwise only by the user's approval: a program that runs without isolation has the same rights as the user.
+These rules decide what may start. What a started program does is limited by the isolated environment (next section) as far as this computer provides it, and otherwise only by the user's approval: a program that runs without isolation has the same rights as the user.
 
 ---
 
 ## Isolated environment of commands
 
-Settings › Agent › **Isolated commands** (on by default) runs commands in an isolated environment where the system supports it. A program there sees the project folder (read and write) and the folders of the program itself (read). It does not see the user's other files and has no network unless **Internet for isolated commands** is turned on. With that setting, Windows still keeps local services such as Ollama out of reach; Linux does not (see below). The same settings page shows what this computer supports.
+Settings › Agent › **Isolated commands** (on by default) runs commands in an isolated environment as far as the system provides one. The same settings page shows what applies on this computer. A command runs in one of three ways, and the approval dialog says which:
 
-**Windows: AppContainer.** `emir-sandbox.exe` (built from `native/windows/EmirSandbox.cs`, shipped in `resources/sandbox`) starts the program in the AppContainer `EmirCode.Sandbox`:
-- The container gets an access rule on the project folder (modify, inherited by its contents) and a read rule on the program's folder when that folder belongs to the user. These rules stay on the folders.
-- Folders under Program Files and Windows are readable by every AppContainer already. Python installed by an administrator elsewhere (`C:\Python3xx`) is not: Settings › Agent then shows a **Python** row whose **Allow** button gives that folder the read rule that Program Files has for isolated apps, after a Windows administrator prompt. Until then Python commands run without isolation.
-- Without the network setting the container has no network at all; with it, it gets the `internetClient` capability: the internet, but neither the local network nor `localhost`.
-- A job object limits the program and everything it starts to 64 processes and 4 GB of memory, and stops them all when the launcher is stopped (on the 60-second limit or when the task is stopped).
-- **What runs isolated:** `python` and `pytest` (as `python -m pytest`), and `node file.js`. Node cannot start other programs in an AppContainer (it needs named pipes there), so a small guard makes such calls fail at once with a clear message instead of waiting forever.
-- **What runs without isolation:** `npm` and `cargo`, which always start other programs, and Node's test runner (`node --test`, `--watch`, `--run`). The approval dialog says so.
+| | Files outside the project | Network | Other programs and the desktop |
+| :--- | :--- | :--- | :--- |
+| **Isolated** | Not readable, not writable | Blocked unless **Internet for isolated commands** is on | Out of reach |
+| **Write-protected** (Windows only) | Readable, not writable | Open | Cannot be changed |
+| **Without isolation** | Like any program of the user | Open | Like any program of the user |
 
-**Linux: bubblewrap.** When `bwrap` is installed and the system allows unprivileged user namespaces, every command runs in it: the whole system is mounted read-only, the home folders are replaced by empty private ones (only the project folder and the folders of language tools such as `.nvm`, `.pyenv`, `.cargo` and `.local/lib` come back, read-only), `/tmp` is private and the network is cut unless allowed. When it is allowed, the program uses this computer's network as it is, including local services such as Ollama on `localhost`. Programs may start other programs inside the isolation. Files outside the home folders that every user can read (for example under `/etc` or on another disk) stay readable.
+Isolated programs get a home and temp folder of their own, so tools write their caches and settings there and not into the user's profile.
 
-**Elsewhere** (macOS is not a target of Emir Code), when the tool is missing, or with the setting off, commands run as before, without isolation.
+### Windows
+
+`emir-sandbox.exe` (built from `native/windows/`, shipped in `resources/sandbox`) starts every command. What it can do depends on whether full isolation is set up.
+
+**Full isolation (Settings › Agent › Full isolation › Set up).** Needs a Windows administrator once. The setup adds to this computer:
+- two hidden local accounts, `EmirCodeSandbox` and `EmirCodeSandboxNet`, with random passwords (this user's copy is encrypted with DPAPI), no logon over the network or Remote Desktop;
+- the local group `EmirCodeSandboxUsers` holding both;
+- a block on every outgoing connection of `EmirCodeSandbox`, except connections to this computer itself: two filters in the Windows Filtering Platform (applied whether or not the Windows firewall is switched on) and a rule of the Windows firewall.
+
+**Remove** on the same page deletes all of it again. Uninstalling Emir Code does not; remove it there first.
+
+Every command then runs isolated, whole process trees (`npm`, `cargo`, test runners) included:
+- The launcher logs the account on and starts the program as that account, with a restricted token, on a desktop of its own, inside a job object (128 processes, 8 GB, clipboard and window access cut, everything stopped with the launcher). The desktop is in the user's window station, where the account gets only what a process needs to start (no clipboard, no screen, no other desktops); that rule stays on the station until the user signs out.
+- The account is not the user: it cannot open the user's profile (documents, desktop, application data, keys). The restricted token further limits it to what the account itself, the sandbox group, `Users` and `Everyone` are granted; rights given only to `Authenticated Users` (the default on other drives and on folders created under `C:\`) do not count, so those places are read-only.
+- The project folder and the private home folder are opened to the sandbox group (modify, inherited). The folders above the project inside the user's profile get a rule for the folder itself that allows reading its attributes only, because programs such as Node walk the path of their files folder by folder. Tool folders in the user's profile that the command needs (`.cargo`, `.rustup`, the npm and Python user folders) are opened read-only. These rules stay on the folders.
+- Without the network setting the command runs as `EmirCodeSandbox`, whose connections are blocked; with it, as `EmirCodeSandboxNet`.
+
+Limits of full isolation:
+- **Localhost stays reachable.** Connections to this computer itself are left open, because test suites start servers on `localhost` and connect to them. An isolated program can therefore also talk to local services such as Ollama or a local database.
+- **Whatever every account of this computer can reach stays reachable**: Windows and installed programs can be read, a few shared places such as `C:\ProgramData` can be written to, and so can any folder whose access rules include `Users` or `Everyone`. When the folder that holds the project is such a folder, the approval dialog warns that the neighbouring folders are reachable.
+- **The network block is tested, not assumed.** The app tries a real connection (to `1.1.1.1`, port 443, as the isolated account; nothing is sent). When it goes through, Settings › Agent says so, and commands are treated as not isolated for the Autonomous level.
+- The Secondary Logon service of Windows must not be disabled.
+
+**Without full isolation**, a command runs in one of two ways:
+- **Isolated in an AppContainer:** `python`, `pytest` (as `python -m pytest`) and `node file.js`. The container reads and writes only the project folder (opened to a capability of the container, `S-1-15-3-1024-…`) and has no network at all, `localhost` included; with the network setting it gets the `internetClient` capability. Node cannot start other programs in an AppContainer (the named pipes it needs are not allowed there), so a small guard makes such calls fail at once with a clear message. Python installed by an administrator outside Program Files (`C:\Python3xx`) cannot be read by AppContainers; the **Python** row in Settings › Agent offers to add the read rule that Program Files has, after an administrator prompt, and until then Python runs write-protected.
+- **Write-protected:** `npm`, `cargo`, Node's test runner, and whatever cannot run in the AppContainer. The program runs at the low integrity level in a job object, on a window station and desktop of its own. Windows refuses its writes to everything of the normal level, so it cannot change files, registry keys or other programs outside the project (the project folder is marked as writable for it; the mark stays on the folder). It can still read the user's files and use the network. This limits damage; it does not keep anything secret, and the app does not call it isolation.
+
+### Linux: bubblewrap
+
+When `bwrap` is installed and the system allows unprivileged user namespaces, every command runs in it: the whole system is mounted read-only, the home folders are replaced by empty private ones (only the project folder and the folders of language tools such as `.nvm`, `.pyenv`, `.cargo` and `.local/lib` come back, read-only), `/tmp` is private and the network is cut unless allowed. When it is allowed, the program uses this computer's network as it is, including local services such as Ollama on `localhost`. Programs may start other programs inside the isolation. Files outside the home folders that every user can read (for example under `/etc` or on another disk) stay readable.
+
+### Elsewhere
+
+On other systems (macOS is not a target of Emir Code), when the tool is missing, or with the setting off, commands run without isolation.
 
 ---
 

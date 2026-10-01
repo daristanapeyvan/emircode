@@ -12,7 +12,8 @@ const path = require('node:path');
 if (process.platform !== 'win32') process.exit(0);
 
 const root = path.resolve(__dirname, '..');
-const source = path.join(root, 'native', 'windows', 'EmirSandbox.cs');
+const sourceDir = path.join(root, 'native', 'windows');
+const sources = fs.readdirSync(sourceDir).filter((f) => f.endsWith('.cs')).map((f) => path.join(sourceDir, f));
 const outDir = path.join(root, 'native', 'windows', 'bin');
 const output = path.join(outDir, 'emir-sandbox.exe');
 const windir = process.env.WINDIR || 'C:\\Windows';
@@ -27,7 +28,7 @@ if (!csc) {
 }
 
 fs.mkdirSync(outDir, { recursive: true });
-const res = spawnSync(csc, ['/nologo', '/target:exe', '/platform:anycpu', '/optimize+', `/out:${output}`, source], { encoding: 'utf8' });
+const res = spawnSync(csc, ['/nologo', '/target:exe', '/platform:anycpu', '/optimize+', '/r:System.Security.dll', `/out:${output}`, ...sources], { encoding: 'utf8' });
 if (res.status !== 0) {
   console.error(res.stdout || res.stderr);
   process.exit(res.status || 1);

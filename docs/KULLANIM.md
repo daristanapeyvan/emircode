@@ -87,17 +87,28 @@ Proje çubuğundaki **Onay** seçicisinden ya da Ayarlar › Genel › Ajan onay
 | :--- | :--- | :--- | :--- | :--- |
 | Sıkı (varsayılan) | Sizin onayınızla | Sizin onayınızla | Sizin onayınızla | Evet |
 | Dengeli | Onay istenmeden | Sizin onayınızla | Sizin onayınızla | Evet |
-| Otonom | Onay istenmeden | Yalıtılmış çalışan komutlar onay istenmeden. Yalıtımsız çalışan test komutları (`npm test`, `pytest`, `cargo test`) yalnızca görev henüz kod yazmamışken onay istenmeden; sonrasında ve diğer komutlarda sizin onayınızla | Sizin onayınızla | Hayır, kendisi karar verir |
+| Otonom | Onay istenmeden | Yalıtılmış çalışan komutlar onay istenmeden. Yalıtılmış çalışmayan test komutları (`npm test`, `pytest`, `cargo test`) yalnızca görev henüz kod yazmamışken onay istenmeden; sonrasında ve diğer komutlarda sizin onayınızla | Sizin onayınızla | Hayır, kendisi karar verir |
 
 Hiçbir seviyede ajan proje klasörünün dışına yazamaz. `.env` dosyaları, `.git`, `node_modules`, derleme çıktı klasörleri, anahtar ve sertifika dosyaları ile paket yöneticisi kimlik bilgileri (`.npmrc`, `.pypirc`, `.netrc` ve benzerleri) ajana kapalıdır. Çalıştırabileceği komutlar yalnızca `npm test`, `npm run test|build|lint|typecheck|check`, `node`, `python`, `pytest` ve `cargo`'dur; `npx`, kabuk komutları, npm seçenekleri, komut satırına yazılmış kod (`node -e`, `python -c`) ve `python -m pip` engellenir. Onay penceresinde bir npm komutunun `package.json` içindeki hangi betiği çalıştıracağı da yazar.
 
 ### Yalıtılmış komutlar
-Ayarlar › Ajan › **Yalıtılmış komutlar** (varsayılan olarak açık) ajanın çalıştırdığı programları yalıtılmış bir ortamda başlatır. Program orada yalnızca proje klasörünü görür; diğer dosyalarınızı göremez ve **Yalıtılmış komutlara internet** açılmadıkça ağa bağlanamaz.
+Ayarlar › Ajan › **Yalıtılmış komutlar** (varsayılan olarak açık) ajanın çalıştırdığı programları yalıtılmış bir ortamda başlatır: program proje klasöründe çalışır, diğer dosyalarınızı açamaz ve **Yalıtılmış komutlara internet** açılmadıkça ağa bağlanamaz. Bunun bu bilgisayarda ne kadar sağlandığı aynı sayfadaki **Bu bilgisayarda** satırında yazar; onay penceresi de her komutun nasıl çalışacağını söyler.
 
-- **Windows:** Python, `pytest` ve `node dosya.js` yalıtılmış çalışır (AppContainer). `npm` ve `cargo` başka programlar başlattığı için yalıtımsız çalışır; onay penceresinde "Yalıtımsız çalışır:" yazar. İnternet izni açıkken bile yerel ağ ve Ollama gibi yerel servisler erişilemez kalır.
-- **Linux:** `bwrap` (bubblewrap) kuruluysa her komut yalıtılmış çalışır. İnternet izni açıkken program bilgisayarın ağını olduğu gibi kullanır; yerel servisler de erişilebilir olur.
-- Aynı ayar sayfasındaki **Bu bilgisayarda** satırı, bu bilgisayarda neyin yalıtılmış çalıştığını gösterir.
-- Python yalıtılmış programların okuyamadığı bir klasöre kuruluysa (ör. `C:\Python314`) aynı yerde bir **Python** satırı ve **İzin ver** düğmesi çıkar. Düğme, Windows yönetici onayı istedikten sonra bu klasöre Program Files'ın yalıtılmış uygulamalar için sahip olduğu okuma iznini verir. Emir Code bunu kendiliğinden yapmaz; o zamana kadar Python komutları yalıtımsız çalışır.
+| Nasıl çalışır? | Proje dışındaki dosyalar | Ağ |
+| :--- | :--- | :--- |
+| Yalıtılmış | Okuyamaz, yazamaz | Kapalı (izin vermedikçe) |
+| Yazma korumalı (yalnızca Windows) | Okuyabilir, yazamaz | Açık |
+| Yalıtımsız | Sizin programlarınız gibi | Açık |
+
+**Windows'ta tam yalıtım.** Ayarlar › Ajan › Tam yalıtım › **Kur** düğmesi, Windows yönetici onayından sonra bilgisayara iki gizli yerel hesap (`EmirCodeSandbox`, `EmirCodeSandboxNet`) ve bir grup (`EmirCodeSandboxUsers`) ekler, ilk hesabın ağını engeller (Windows güvenlik duvarı kapalı olsa da geçerli olan bir filtre ve bir güvenlik duvarı kuralıyla). Bundan sonra `npm` ve `cargo` dahil her komut bu ayrı hesapla çalışır: profilinizi (Belgeler, Masaüstü, uygulama verileri, anahtarlar) açamaz, yalnızca proje klasörüne yazar ve ağı kesilir. **Kaldır** düğmesi hepsini siler; Emir Code'u kaldırmadan önce buradan kaldırın.
+
+Tam yalıtımın sınırları:
+- Bilgisayarın kendisine yapılan bağlantılar (localhost; ör. Ollama ya da yerel bir veritabanı) engellenmez.
+- Bilgisayardaki her hesabın erişebildiği yerler erişilebilir kalır: Windows ve kurulu programlar okunabilir, `C:\ProgramData` gibi ortak yerlere ve erişim kurallarında "Users" ya da "Everyone" bulunan klasörlere yazılabilir. Projenin bulunduğu klasör böyleyse onay penceresi uyarır.
+
+**Windows'ta kurulum yapılmamışsa:** Python, `pytest` ve `node dosya.js` yalıtılmış çalışır (AppContainer; ağ tamamen kapalıdır). `npm`, `cargo` ve test çalıştırıcıları yazma korumalı çalışır: proje dışında hiçbir şeyi değiştiremezler, ama dosyalarınızı okuyabilir ve ağı kullanabilirler. Python yalıtılmış programların okuyamadığı bir klasöre kuruluysa (ör. `C:\Python314`) o da yazma korumalı çalışır; **Python** satırındaki **İzin ver** düğmesi, yönetici onayından sonra klasöre gereken okuma iznini verir.
+
+**Linux:** `bwrap` (bubblewrap) kuruluysa her komut yalıtılmış çalışır. İnternet izni açıkken program bilgisayarın ağını olduğu gibi kullanır; yerel servisler de erişilebilir olur.
 
 Ayrıntılar ve sınırlar: [SECURITY_MODEL.md](./SECURITY_MODEL.md#isolated-environment-of-commands) (İngilizce).
 
@@ -255,8 +266,8 @@ Model kendini tekrar etmeye başladı ya da ilerleyemedi. İsteği daha somut ya
 **Görev "Görev eksik tamamlandı" diye bitti.**
 Ajan işi yaptı ama otomatik kontrollerin bir kısmı geçmedi; kartta hangilerinin geçmediği yazar. Aynı oturumda `şunu da düzelt: …` diyerek devam edebilirsiniz.
 
-**Onay penceresinde "Yalıtımsız çalışır:" yazıyor.**
-Komut bu bilgisayarda yalıtılmış ortamda çalıştırılamıyor: Windows'ta `npm` ve `cargo` her zaman, Python ise okunamayan bir klasördeyse (bkz. Yalıtılmış komutlar). Komutun ne yapacağını okuyup öyle onaylayın.
+**Onay penceresinde "Yazma korumalı çalışır" yazıyor.**
+Windows'ta `npm`, `cargo` ve test çalıştırıcıları başka programlar başlatır; bunları ancak ayrı bir hesap yalıtabilir. Ayarlar › Ajan › Tam yalıtım › **Kur** bu hesabı oluşturur (bkz. Yalıtılmış komutlar). O zamana kadar bu komutlar proje dışında hiçbir şeyi değiştiremez, ama dosyalarınızı okuyabilir ve ağı kullanabilir.
 
 **Uygulamayı kapatıp açtım, "Değişiklikleri geri al" çalışmıyor.**
 Önceki dosya içerikleri yalnızca bellekte tutulur ve uygulama kapanınca silinir. Geri almayı uygulamayı kapatmadan yapın; kalıcı bir geri dönüş noktası için projede git kullanın.
@@ -268,4 +279,4 @@ Windows simgeleri önbellekte tutar. Uygulamayı görev çubuğundan kaldırıp 
 AppImage için FUSE 2 gerekir: Ubuntu 24.04'te `sudo apt install libfuse2t64`, 22.04'te `sudo apt install libfuse2`. Ubuntu 23.10 ve sonrasındaki sandbox kısıtlamasını Emir Code algılar ve uygulamayı sandbox olmadan başlatır.
 
 **Kodum internete gider mi?**
-Hayır. Modeller bilgisayarınızda çalışır. Emir Code internete yalnızca şunlar için bağlanır: web erişimi (aramalar DuckDuckGo'ya gider; sohbet ilk sonucun sayfasını okur, ajan web sayfası açabilir; bilgisayarınızdaki ya da yerel ağdaki adresler hiçbir zaman açılmaz), Model Yöneticisi (Keşfet ve Yüklü sekmeleri açıkken model listesi için ollama.com, doğrulama için Ollama kayıt deposu) ve siz istediğinizde kurulum sihirbazının Ollama ya da Node.js indirmesi. Web erişimi varsayılan olarak açıktır; Ayarlar › Web erişimi'nden tamamen ya da sohbet ve ajan için ayrı ayrı kapatabilirsiniz.
+Hayır. Modeller bilgisayarınızda çalışır. Emir Code internete yalnızca şunlar için bağlanır: web erişimi (aramalar DuckDuckGo'ya gider; sohbet ilk sonucun sayfasını okur, ajan web sayfası açabilir; bilgisayarınızdaki ya da yerel ağdaki adresler hiçbir zaman açılmaz), Model Yöneticisi (Keşfet ve Yüklü sekmeleri açıkken model listesi için ollama.com, doğrulama için Ollama kayıt deposu), siz istediğinizde kurulum sihirbazının Ollama ya da Node.js indirmesi ve, Windows'ta tam yalıtım kuruluysa, yalıtımı denetlerken yalıtılmış hesaptan `1.1.1.1` adresine yapılan tek bir bağlantı denemesi (engellendiğini görmek için; veri gönderilmez). Web erişimi varsayılan olarak açıktır; Ayarlar › Web erişimi'nden tamamen ya da sohbet ve ajan için ayrı ayrı kapatabilirsiniz.

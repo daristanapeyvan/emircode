@@ -62,10 +62,10 @@ The Model Manager (**Ctrl+Shift+M**) lists the Ollama library from ollama.com by
 - **Approval** (project bar, or Settings › General › Agent approvals):
   - *Strict* (default): you approve every file change, deletion and command.
   - *Balanced*: file changes are applied without asking; commands and deletions need your approval.
-  - *Autonomous*: file changes and commands that run isolated are applied without asking, and the agent answers its own questions. A test command (`npm test`, `pytest`, `cargo test`) that runs without isolation starts on its own only until the task has written code; after that it asks, because it would run that code. Deleting a file still needs your approval.
+  - *Autonomous*: file changes and commands that run isolated are applied without asking, and the agent answers its own questions. A test command (`npm test`, `pytest`, `cargo test`) that does not run isolated starts on its own only until the task has written code; after that it asks, because it would run that code. Deleting a file still needs your approval.
 - The agent can only change files inside the project folder. `.env` files, `.git`, `node_modules`, build output folders, key or certificate files and package manager credentials (`.npmrc`, `.pypirc`, `.netrc` and similar) are off limits.
 - It can only run `npm test`, `npm run test|build|lint|typecheck|check`, `node`, `python`, `pytest` and `cargo`. `npx`, shell commands, npm options, code written on the command line (`node -e`, `python -c`) and `python -m pip` are blocked.
-- **Isolated commands** (Settings › Agent, on by default): programs the agent runs see only the project folder and have no internet unless you allow it. On Windows this covers Python and `node` scripts (AppContainer); npm and cargo run without isolation, and the approval dialog says so. On Linux every command runs in bubblewrap when it is installed. Settings › Agent shows what this computer supports.
+- **Isolated commands** (Settings › Agent, on by default): programs the agent runs work in the project folder, cannot open your other files and have no network unless you allow it. On Linux every command runs in bubblewrap when it is installed. On Windows, **Full isolation** (set up once in Settings › Agent, with administrator approval) runs every command under a separate Windows account. Without it, Python and `node` scripts run isolated, while npm, cargo and test runners run write-protected: they cannot change anything outside the project, but they can read your files and use the network. The approval dialog says how each command runs.
 - Links in chat answers open in your browser.
 
 Keyboard shortcuts: Ctrl+N new chat (in the Code tab: new task in the open project) · Ctrl+Shift+N new project · Ctrl+K command palette · Ctrl+Shift+M models · Ctrl+, settings.
@@ -130,7 +130,7 @@ Where Chromium's sandbox cannot start (AppImage and archive copies on systems th
 ### Troubleshooting
 - **The first agent step is slow.** The model is loaded and reads the whole task once; on a CPU this can take 1–3 minutes. Later steps reuse Ollama's cache.
 - **The task stopped because the model repeated itself or made no progress.** Write the request more concretely (file names, expected result) or try a larger model.
-- **The approval dialog says a command runs without isolation.** On Windows only Python and `node` scripts run isolated; npm and cargo start other programs, which the isolated environment does not allow. Settings › Agent shows the state for each program. If Python is installed in a folder the isolated environment cannot read, the **Allow** button there grants read access to that folder after a Windows administrator prompt.
+- **The approval dialog says a command runs write-protected.** On Windows, npm, cargo and test runners start other programs, which only a separate account can isolate. Settings › Agent › Full isolation › **Set up** creates that account after a Windows administrator prompt (two hidden local accounts and a network block for one of them; **Remove** deletes them again). Until then such commands cannot change anything outside the project, but they can read your files and use the network.
 - **The task ended with an amber card.** The agent finished, but some automatic checks did not pass; the card lists them. Continue in the same session, for example "also fix: …".
 - **The taskbar shows an old icon after an update.** Windows caches icons; unpin and pin the app again, or sign out and back in.
 - **No answer from Ollama.** Check that Ollama is running and that Settings › Ollama › Ollama address is correct (default `http://localhost:11434`).
@@ -144,7 +144,8 @@ Where Chromium's sandbox cannot start (AppImage and archive copies on systems th
 - Emir Code connects to the internet only for:
   - web access, which is on by default and can be switched off completely or separately for chat and the agent in Settings › Web access. Searches go to DuckDuckGo; chat reads the first result page and the agent can open web pages. Addresses on this computer or the local network are never opened;
   - the Model Manager, which reads the model list from ollama.com and checks tags with registry.ollama.ai (the source `ollama pull` uses) while its Discover or Installed tab is open;
-  - the setup wizard, when you ask it to download Ollama or Node.js.
+  - the setup wizard, when you ask it to download Ollama or Node.js;
+  - on Windows with full isolation set up, one connection attempt to `1.1.1.1` from the isolated account when the app checks the isolation, to see that it is blocked. Nothing is sent.
 - Pages the agent creates with a design theme load their fonts from Google Fonts unless Settings › Web design › Web fonts is off.
 
 ---

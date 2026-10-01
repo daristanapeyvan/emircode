@@ -45,9 +45,12 @@ export const CommandApprovalModal: React.FC = () => {
         )}
         {pendingCommand.isolationNote && (
           <p className={pendingCommand.isolated ? 'text-zinc-400 leading-relaxed' : 'text-amber-400 leading-relaxed'}>
-            {pendingCommand.isolated ? pendingCommand.isolationNote : `${t.agent.commandNotIsolated} ${pendingCommand.isolationNote}`}
+            {pendingCommand.isolated || (pendingCommand.isolationLevel && pendingCommand.isolationLevel !== 'none')
+              ? pendingCommand.isolationNote
+              : `${t.agent.commandNotIsolated} ${pendingCommand.isolationNote}`}
           </p>
         )}
+        {pendingCommand.isolationWarning && <p className="text-amber-400 leading-relaxed">{pendingCommand.isolationWarning}</p>}
         {pendingCommand.reason && <p className="text-zinc-300 leading-relaxed">{pendingCommand.reason}</p>}
       </div>
     </Modal>

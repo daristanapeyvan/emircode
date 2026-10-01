@@ -13,8 +13,8 @@ export const IsolationSettings: React.FC = () => {
   const t = getTranslations(settings.language);
   const isolation = settings.commandIsolation || DEFAULT_SETTINGS.commandIsolation;
   const [status, setStatus] = useState<SandboxStatus | null>(null);
-  const [allowing, setAllowing] = useState(false);
-  const [allowError, setAllowError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState('');
 
   const refresh = async () => {
     const api = window.electronAPI?.getSandboxStatus;
@@ -34,38 +34,59 @@ export const IsolationSettings: React.FC = () => {
 
   const set = (patch: Partial<typeof isolation>) => updateSettings({ commandIsolation: { ...isolation, ...patch } });
 
+  const windows = status?.method === 'appcontainer';
+  const full = status?.full;
+  const fullWorks = !!full?.working;
+
   // What this computer supports: a short note on the left, the state of each program on the right.
   const hereNote = !status
     ? t.settings.isolationChecking
     : !status.supported
       ? status.reasonText || ''
-      : status.method === 'appcontainer'
-        ? t.settings.isolationWindows
+      : windows
+        ? fullWorks
+          ? t.settings.isolationWindowsFull
+          : t.settings.isolationWindows
         : t.settings.isolationLinux;
-  const stateOf = (item?: { isolated: boolean }) => (item?.isolated ? t.settings.isolationStateOn : t.settings.isolationStateOff);
+  const stateOf = (item?: { isolated: boolean }) => (item?.isolated ? t.settings.isolationStateOn : t.settings.isolationStateWrite);
+  const found = (item?: { reason?: string }) => !!item && item.reason !== 'isolationInterpreterMissing';
   const hereState: string[] = !status
     ? []
     : !status.supported
       ? [t.settings.isolationUnavailable]
       : !isolation.enabled
         ? [t.settings.isolationOffShort]
-        : status.method === 'appcontainer'
-          ? [format(t.settings.isolationNodeState, { state: stateOf(status.node) }), format(t.settings.isolationPythonState, { state: stateOf(status.python) })]
-          : [t.settings.isolationStateOn];
+        : !windows
+          ? [t.settings.isolationStateOn]
+          : fullWorks
+            ? [format(t.settings.isolationAllState, { state: t.settings.isolationStateOn })]
+            : [
+                ...(found(status.node) ? [format(t.settings.isolationNodeState, { state: stateOf(status.node) })] : []),
+                ...(found(status.python) ? [format(t.settings.isolationPythonState, { state: stateOf(status.python) })] : []),
+                format(t.settings.isolationNpmState, { state: t.settings.isolationStateWrite }),
+              ];
 
-  const pythonBlocked = status?.python && !status.python.isolated && status.python.reason === 'isolationInterpreterUnreadable';
+  const pythonBlocked = !fullWorks && status?.python && !status.python.isolated && status.python.reason === 'isolationInterpreterUnreadable';
 
-  const allowPython = async () => {
-    setAllowing(true);
-    setAllowError('');
+  /** An action that asks Windows for an administrator; the status is read again afterwards. */
+  const run = async (action?: () => Promise<{ ok: boolean; error?: string }>) => {
+    if (!action) return;
+    setBusy(true);
+    setActionError('');
     try {
-      const res = await window.electronAPI?.allowPythonIsolation?.();
-      if (res && !res.ok) setAllowError(format(t.settings.isolationAllowFailed, { error: res.error || '' }));
+      const res = await action();
+      if (res && !res.ok) setActionError(format(t.settings.isolationActionFailed, { error: res.error || '' }));
       await refresh();
     } finally {
-      setAllowing(false);
+      setBusy(false);
     }
   };
+
+  const fullNotes = [
+    full?.configured && !full.working ? format(t.settings.isolationFullError, { error: full.error || '' }) : '',
+    fullWorks && full?.network === 'open' && !isolation.network ? t.settings.isolationFullNetworkOpen : '',
+    actionError,
+  ].filter(Boolean);
 
   return (
     <>
@@ -81,15 +102,25 @@ export const IsolationSettings: React.FC = () => {
           ))}
         </span>
       </SettingsRow>
+      {windows && status?.supported && (
+        <SettingsRow label={t.settings.isolationFull} description={[t.settings.isolationFullDesc, ...fullNotes].join(' ')}>
+          {full?.configured ? (
+            <Button variant="secondary" size="sm" onClick={() => run(window.electronAPI?.removeFullIsolation)} disabled={busy}>
+              {t.settings.isolationFullRemove}
+            </Button>
+          ) : (
+            <Button variant="secondary" size="sm" onClick={() => run(window.electronAPI?.setupFullIsolation)} disabled={busy}>
+              {t.settings.isolationFullSetUp}
+            </Button>
+          )}
+        </SettingsRow>
+      )}
       <SettingsRow label={t.settings.isolationNetwork} description={t.settings.isolationNetworkDesc}>
         <Toggle checked={isolation.network} disabled={!isolation.enabled || status?.supported === false} onChange={(checked) => set({ network: checked })} />
       </SettingsRow>
       {pythonBlocked && (
-        <SettingsRow
-          label={t.settings.isolationPython}
-          description={`${format(t.settings.isolationPythonDesc, { path: status?.python?.path || 'python' })}${allowError ? ` ${allowError}` : ''}`}
-        >
-          <Button variant="secondary" size="sm" onClick={allowPython} disabled={allowing}>
+        <SettingsRow label={t.settings.isolationPython} description={format(t.settings.isolationPythonDesc, { path: status?.python?.path || 'python' })}>
+          <Button variant="secondary" size="sm" onClick={() => run(window.electronAPI?.allowPythonIsolation)} disabled={busy}>
             {t.settings.isolationAllow}
           </Button>
         </SettingsRow>
