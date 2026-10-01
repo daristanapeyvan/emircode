@@ -775,6 +775,17 @@ if __name__ == "__main__":
   check(reReads.status !== 'finished', 'and endless re-reading still stops the task', reReads.status);
 
   // -------------------------------------------------------------------------
+  console.log('\n--- A request written as the wanted result is a change task ---');
+  // The E2E report: "… ortalanacak, … duracak" was answered with finish at step 1 ("already centered").
+  const nothingToDo = { thought: 'Başlık zaten ortalanmış.', action: 'finish', summary: 'Hiç değişiklik gerekmiyor.' };
+  await run('h1 kahve durağı başlığı ortalanacak, hamburger menü başlığın aşağı kısmında duracak', { 'index.html': SHOP }, [nothingToDo, nothingToDo]);
+  check(/\[CHECK\]: You have not changed any file yet/.test(lastUserMessage(1)), 'finish without a change is questioned once for "… ortalanacak, … duracak"', lastUserMessage(1).slice(0, 200));
+  await run('başlık mavi olsun', { 'index.html': SHOP }, [nothingToDo, nothingToDo]);
+  check(/\[CHECK\]: You have not changed any file yet/.test(lastUserMessage(1)), 'and for "… olsun"', lastUserMessage(1).slice(0, 200));
+  const explained = await run('bu sayfa ne işe yarıyor', { 'index.html': SHOP }, [{ thought: 'Açıklıyorum.', action: 'finish', summary: 'Bir dükkan sayfası.' }]);
+  check(explained.status === 'finished' && sent.length === 1, 'A question is answered without that check', sent.length);
+
+  // -------------------------------------------------------------------------
   console.log('\n--- The agent speaks the interface language ---');
   useSettingsStore.setState((state: any) => ({ settings: { ...state.settings, language: 'en' } }));
   const english = await run('center the title', { 'index.html': SHOP }, [breaking, breaking, breaking, breaking, breaking]);

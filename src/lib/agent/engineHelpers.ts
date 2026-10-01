@@ -716,7 +716,13 @@ export function isSafePath(p: string): boolean {
   return !p.split(/[\\/]/).includes('..');
 }
 
-export const GOAL_REQUIRES_CHANGES = /oluştur|yap|ekle|düzelt|değiştir|güncelle|yaz|kur|sil|kaldır|taşı|refactor|create|build|make|add|fix|change|update|write|implement|remove|delete|rename|generate/i;
+/**
+ * The request asks for a change. Besides the verbs, Turkish requests are often written as the
+ * wanted result ("başlık ortalanacak", "menü altta dursun", "mavi olmalı"): a 7B model answered such
+ * a request with finish at step 1 ("already centered") and nothing objected.
+ */
+export const GOAL_REQUIRES_CHANGES =
+  /oluştur|yap|ekle|düzelt|değiştir|güncelle|yaz|kur|sil|kaldır|taşı|ortala|hizala|refactor|create|build|make|add|fix|change|update|write|implement|remove|delete|rename|generate|center|centre|align|move|replace|convert|\p{L}{2,}(?:[ae]c[ae]k|s[ıiuü]n|m[ae]l[ıi])(?!\p{L})/iu;
 /** The user asked to remove something, so a rewrite that drops keys/definitions may be intended. */
 export const REMOVAL_INTENT = /\bsil|kaldır|çıkar|temizle|sadeleştir|remove|delete|drop|strip|clean\s*up|get\s+rid/i;
 /** The user asked for a rewrite / a much shorter file. */

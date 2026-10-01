@@ -33,6 +33,7 @@ All notable changes to this project are documented in this file. The format foll
 - The agent engine's stop messages, notifications and completion card were Turkish in the English interface.
 - When the model kept re-sending a style or text change that was already in place, the task was stopped although the file was right; it now ends as completed when the file has no open check errors. When the same edit is refused again for the same fault, the model gets the current lines and one different way to make the change.
 - A follow-up task could stop as a loop before it changed anything: the model asked to read a file whose content was already part of the task message and was refused each time. The first such read is answered now; reading the unchanged file again is still refused.
+- A request written as the wanted result ("the title will be centered", "başlık ortalanacak", "mavi olsun") was not recognised as a change request, so a model could end the task at its first step without changing anything. Such a finish is now questioned once, as for other change requests.
 - The out-of-memory message pointed to Settings › Generation for the context length; it now points to Settings › Agent.
 
 ## [1.8.0] - 2026-09-26
