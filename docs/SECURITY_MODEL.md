@@ -134,7 +134,7 @@ Limits of full isolation:
 
 ### Linux: bubblewrap
 
-When `bwrap` is installed and the system allows unprivileged user namespaces, every command runs in it: the whole system is mounted read-only, the home folders are replaced by empty private ones (only the project folder and the folders of language tools such as `.nvm`, `.pyenv`, `.cargo` and `.local/lib` come back, read-only), `/tmp` is private and the network is cut unless allowed. When it is allowed, the program uses this computer's network as it is, including local services such as Ollama on `localhost`. Programs may start other programs inside the isolation. Files outside the home folders that every user can read (for example under `/etc` or on another disk) stay readable.
+When `bwrap` is installed and the system allows unprivileged user namespaces, every command runs in it: the whole system is mounted read-only, the home folders are replaced by empty private ones (only the project folder and the folders of language tools such as `.nvm`, `.pyenv`, `.cargo` and `.local/lib` come back, read-only), `/tmp` is private and the network is cut unless allowed. A program can write into those private folders, but what it writes there is kept in memory and is gone when it ends; only the project folder reaches the disk. When it is allowed, the program uses this computer's network as it is, including local services such as Ollama on `localhost`. Programs may start other programs inside the isolation. Files outside the home folders that every user can read (for example under `/etc` or on another disk) stay readable.
 
 ### Elsewhere
 

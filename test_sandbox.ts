@@ -130,7 +130,11 @@ async function main() {
     const res = await runPlan(plan, project);
     const r = probeResult(res.output);
     check(res.code === 0 && r.readInside === 'allowed' && r.writeInside === 'allowed', 'Inside the project the program reads and writes', { code: res.code, r, out: res.output.slice(0, 300) });
-    check(r.readNextToProject === 'denied' && r.writeNextToProject === 'denied', 'A file next to the project can be neither read nor written', r);
+    check(r.readNextToProject === 'denied', 'A file next to the project cannot be read', r);
+    // On Linux the folders around the project are private, empty copies (the home folders and /tmp):
+    // a write there succeeds but lands in memory that is gone when the program ends, never on disk.
+    if (windows) check(r.writeNextToProject === 'denied', 'A write next to the project is refused', r);
+    else console.log(`   (a write next to the project went to the private copy: ${r.writeNextToProject})`);
     check(!fs.existsSync(path.join(base, 'escaped.txt')), 'Nothing was written outside the project');
     check(r.readHome === 'denied', "A file in the user's home folder cannot be read", r);
     if (windows && full?.working && full.network !== 'blocked') {
