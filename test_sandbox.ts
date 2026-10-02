@@ -27,6 +27,8 @@ function check(condition: boolean, message: string, detail?: unknown) {
   } else {
     failures.push(message);
     console.error(`❌ ${message}${detail !== undefined ? `\n   → ${JSON.stringify(detail).slice(0, 900)}` : ''}`);
+    // On GitHub the failure becomes an annotation of the run, readable without the job log.
+    if (process.env.GITHUB_ACTIONS) console.log(`::error title=${process.platform}: ${message}::${detail !== undefined ? JSON.stringify(detail).slice(0, 700).replace(/\r?\n/g, ' ') : 'failed'}`);
   }
 }
 const section = (title: string) => console.log(`\n--- ${title} ---`);
@@ -60,17 +62,18 @@ function probeResult(output: string): Record<string, string> {
   }
 }
 
-// Isolated programs get a home folder of their own, so the probe is told where the real one is.
+// A file of the user in the real home folder. Isolated programs get a home folder of their own (on
+// Linux with the folders of language tools in it), so the probe is told where this file is.
+const HOME_SECRET = path.join(os.homedir(), `.emir-code-sandbox-test-${process.pid}.txt`);
 const PROBE = `
 const fs = require('fs'), path = require('path'), os = require('os'), net = require('net');
-const REAL_HOME = ${JSON.stringify(os.homedir())};
 const r = {};
 const t = (n, f) => { try { f(); r[n] = 'allowed'; } catch (e) { r[n] = 'denied'; } };
 t('readInside', () => fs.readFileSync(path.join(process.cwd(), 'probe.js')));
 t('writeInside', () => fs.writeFileSync(path.join(process.cwd(), 'written.txt'), 'x'));
 t('readNextToProject', () => fs.readFileSync(path.join(process.cwd(), '..', 'secret.txt')));
 t('writeNextToProject', () => fs.writeFileSync(path.join(process.cwd(), '..', 'escaped.txt'), 'x'));
-t('listHome', () => { const entries = fs.readdirSync(REAL_HOME); if (entries.length === 0) throw new Error('empty'); });
+t('readHome', () => fs.readFileSync(${JSON.stringify(HOME_SECRET)}));
 try { require('child_process').execFileSync(process.execPath, ['-v'], { stdio: 'pipe', timeout: 5000 }); r.childProcess = 'allowed'; }
 catch (e) { r.childProcess = e.code === 'EMIRCODE_ISOLATED' ? 'refused clearly' : 'failed: ' + (e.code || e.message); }
 const s = net.connect({ host: '1.1.1.1', port: 443 });
@@ -95,6 +98,7 @@ async function main() {
   const sandbox = new Sandbox(resources);
   const status = await sandbox.status({ enabled: true, network: false });
   section(`This system: ${status.method}, ${status.supported ? 'supported' : `not supported (${status.reason})`}`);
+  if (process.env.GITHUB_ACTIONS) console.log(`::notice title=${process.platform} isolation::${status.method}, ${status.supported ? 'supported' : `not supported (${status.reason})`}${status.full ? `, full isolation ${status.full.working ? `working, network ${status.full.network}` : `not working: ${status.full.error || 'not set up'}`}` : ''}`);
   if (!status.supported) {
     console.log('(no isolated environment here: the live checks are skipped)');
     return;
@@ -104,6 +108,7 @@ async function main() {
   const project = path.join(base, 'project');
   fs.mkdirSync(project);
   fs.writeFileSync(path.join(base, 'secret.txt'), 'secret');
+  fs.writeFileSync(HOME_SECRET, 'secret');
   fs.writeFileSync(path.join(project, 'probe.js'), PROBE);
   fs.writeFileSync(path.join(project, 'package.json'), JSON.stringify({ name: 'probe', version: '1.0.0', scripts: { test: 'node probe.js' } }));
   const off = { enabled: true, network: false };
@@ -127,7 +132,7 @@ async function main() {
     check(res.code === 0 && r.readInside === 'allowed' && r.writeInside === 'allowed', 'Inside the project the program reads and writes', { code: res.code, r, out: res.output.slice(0, 300) });
     check(r.readNextToProject === 'denied' && r.writeNextToProject === 'denied', 'A file next to the project can be neither read nor written', r);
     check(!fs.existsSync(path.join(base, 'escaped.txt')), 'Nothing was written outside the project');
-    check(r.listHome === 'denied', 'The home folder is out of reach (Windows: denied; Linux: an empty private one)', r);
+    check(r.readHome === 'denied', "A file in the user's home folder cannot be read", r);
     if (windows && full?.working && full.network !== 'blocked') {
       console.log(`   (the firewall does not block the account's network here: ${full.network}; internet: ${r.internet})`);
     } else {
@@ -158,7 +163,7 @@ async function main() {
       check(t.writeNextToProject === 'denied' && !fs.existsSync(path.join(base, 'escaped.txt')), 'It cannot write next to the project', t);
       if (full?.working) {
         check(npm.level === 'full' && runner.level === 'full', 'npm and the test runner are planned fully isolated', { npm: npm.level, runner: runner.level });
-        check(t.readNextToProject === 'denied' && t.listHome === 'denied', "It cannot read a file next to the project or the user's home folder", t);
+        check(t.readNextToProject === 'denied' && t.readHome === 'denied', "It cannot read a file next to the project or in the user's home folder", t);
         if (full.network === 'blocked') check(t.internet === 'denied', 'It has no internet', t);
       } else {
         check(npm.level === 'write' && !npm.isolated && npm.reason === 'isolationWriteOnly', 'npm is planned write-protected, and says so', npm);
@@ -168,6 +173,7 @@ async function main() {
     }
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
+    fs.rmSync(HOME_SECRET, { force: true });
   }
 }
 
