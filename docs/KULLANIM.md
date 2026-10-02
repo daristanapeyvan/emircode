@@ -100,6 +100,8 @@ Ayarlar › Ajan › **Yalıtılmış komutlar** (varsayılan olarak açık) aja
 | Yazma korumalı (yalnızca Windows) | Okuyabilir, yazamaz | Açık |
 | Yalıtımsız | Sizin programlarınız gibi | Açık |
 
+<p align="center"><img src="images/tr-isolation.png" alt="Ayarlar, Ajan: Yalıtılmış komutlar ve Tam yalıtım" width="820" /></p>
+
 **Windows'ta tam yalıtım.** Ayarlar › Ajan › Tam yalıtım › **Kur** düğmesi, Windows yönetici onayından sonra bilgisayara iki gizli yerel hesap (`EmirCodeSandbox`, `EmirCodeSandboxNet`) ve bir grup (`EmirCodeSandboxUsers`) ekler, ilk hesabın ağını engeller (Windows güvenlik duvarı kapalı olsa da geçerli olan bir filtre ve bir güvenlik duvarı kuralıyla). Bundan sonra `npm` ve `cargo` dahil her komut bu ayrı hesapla çalışır: profilinizi (Belgeler, Masaüstü, uygulama verileri, anahtarlar) açamaz, yalnızca proje klasörüne yazar ve ağı kesilir. **Kaldır** düğmesi hepsini siler; Emir Code'u kaldırmadan önce buradan kaldırın.
 
 Tam yalıtımın sınırları:
@@ -117,6 +119,8 @@ Ayrıntılar ve sınırlar: [SECURITY_MODEL.md](./SECURITY_MODEL.md#isolated-env
 ## Oluşturma sihirbazları
 
 Sihirbazlar **Yeni Proje** penceresinde türü seçince açılır: Website, Mini Uygulama ya da Betik. Proje klasörü sihirbazı onayladığınızda oluşturulur.
+
+<p align="center"><img src="images/tr-new-project.png" alt="Yeni Proje penceresi: Boş proje, Website, Mini Uygulama, Betik" width="620" /></p>
 
 Hiçbir sihirbaz görevi kendiliğinden başlatmaz. **Onayla**'ya bastığınızda hazırlanan istek mesaj kutusuna gelir ve üstünde küçük bir etiket görünür. İsteği okuyabilir, değiştirebilir ya da ek isteklerinizi yazabilirsiniz; gönder düğmesine siz basarsınız. Etiketteki **Sihirbazı aç** seçtiğiniz ayarlara geri götürür, **×** isteği kaldırır. İsteği düzenleseniz de seçtiğiniz tema, sayfa planı ve kontroller istekle birlikte gider.
 
@@ -217,6 +221,8 @@ Temanın renklerini değiştirmek için `theme/theme.css` dosyasının başında
 ## Model indirme
 
 `Ctrl+Shift+M` ile açılan Model Yöneticisi'nin **Keşfet** sekmesi, Ollama kütüphanesini ollama.com'dan kendiliğinden getirir.
+
+<p align="center"><img src="images/tr-models.png" alt="Model Yöneticisi, Keşfet sekmesi" width="820" /></p>
 
 - **Kategoriler:** Önerilen (ajan testlerimizde kullanılan modeller), Kodlama, Ajan ve araç kullanımı, Akıl yürütme, Görüntü ve ses, Hafif (4B ve altı), Sohbet ve genel, Gömme (arama) ve Tümü. Üstteki kutudan ada ya da açıklamaya göre arayabilirsiniz. Yalnızca ollama.com bulutunda çalışan modeller listelenmez.
 - **Boyut:** Bir modele tıklayınca tüm boyutları görünür (ör. qwen3 için 0.6B'den 235B'ye). Bu bilgisayarda rahat çalışan en büyük boyut önceden seçilidir.
