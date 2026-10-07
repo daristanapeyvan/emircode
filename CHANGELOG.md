@@ -4,6 +4,9 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+### Changed
+- The Anthropic and OpenAI SDKs are development dependencies: the main process bundles them at build time, so the packages no longer carry their `node_modules` (about 50 MB and 6,000 files less inside the app).
+
 ## [2.0.0] - 2026-10-07
 
 Emir Code 2.0: cloud models next to the local ones. Local use stays as it was: no account, no telemetry, and nothing leaves the computer until a cloud model is chosen.
