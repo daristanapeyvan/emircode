@@ -122,7 +122,7 @@ test('4. Security: Command Whitelist strictly blocks unauthorized binaries & arg
 });
 
 // 5. Empty chat: the mode's icon and a greeting; a missing model gets its hint
-test('5. UI: An empty chat shows the chat icon and a greeting; a missing model gets a download hint', () => {
+test('5. UI: An empty chat shows a plain greeting; a missing model gets a download hint', () => {
   const chatContainerSrc = fs.readFileSync(path.join(__dirname, '../src/components/chat/ChatContainer.tsx'), 'utf-8');
   assert(
     chatContainerSrc.includes('flex flex-col items-center justify-center min-h-0'),
@@ -132,7 +132,8 @@ test('5. UI: An empty chat shows the chat icon and a greeting; a missing model g
   const emptyStateSrc = fs.readFileSync(path.join(__dirname, '../src/components/chat/EmptyState.tsx'), 'utf-8');
   assert(!emptyStateSrc.includes('AppLogo'), 'EmptyState still shows the logo as decoration');
   assert(emptyStateSrc.includes('installedModels.length === 0') && emptyStateSrc.includes("openModels('discover')"), 'EmptyState lacks the way to download a model');
-  assert(emptyStateSrc.includes('<StartIcon') && emptyStateSrc.includes('emptyHeading'), 'EmptyState lacks the chat icon and greeting');
+  assert(emptyStateSrc.includes('emptyHeading'), 'EmptyState lacks the greeting');
+  assert(!emptyStateSrc.includes('StartIcon') && !emptyStateSrc.includes('emptyModelLine'), 'EmptyState decorates the greeting with an icon box or a "running on" line');
 });
 
 // 6. Mode Switcher Placement

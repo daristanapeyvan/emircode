@@ -67,7 +67,7 @@ export const ModelSelector: React.FC = () => {
       return {
         value: m.name,
         name: m.name,
-        detail: cloud ? format(c.runsAt, { company: 'ollama.com' }) : `${paramLabel ? `${paramLabel} · ` : ''}${formatBytes(m.size)}`,
+        detail: cloud ? c.providerOllamaCloud : `${paramLabel ? `${paramLabel} · ` : ''}${formatBytes(m.size)}`,
         cloud,
         running: runningSet.has(m.name) && !cloud,
       };
@@ -122,7 +122,7 @@ export const ModelSelector: React.FC = () => {
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        title={selectedOwner ? format(c.runsAt, { company: providerCompany(selectedOwner) }) : undefined}
+        title={selectedOwner ? providerCompany(selectedOwner) : undefined}
         className={cn(
           'inline-flex items-center gap-2 px-2.5 py-1 text-xs font-medium rounded border transition-colors cursor-pointer',
           'bg-zinc-800/80 hover:bg-zinc-700/80 border-zinc-700/60 text-zinc-200'
@@ -135,7 +135,7 @@ export const ModelSelector: React.FC = () => {
             title={connectionStatus === 'connecting' ? t.common.connecting : t.common.disconnected}
           />
         )}
-        {selectedOwner && <Cloud size={12} className="text-sky-400 shrink-0" strokeWidth={1.75} aria-label={c.badge} />}
+        {selectedOwner && <Cloud size={12} className="text-zinc-400 shrink-0" strokeWidth={1.75} aria-label={c.badge} />}
 
         <span className="font-mono truncate max-w-[160px]">{selectedModel ? modelShortName(selectedModel) : t.modelSelector.selectModel}</span>
 
@@ -195,7 +195,7 @@ export const ModelSelector: React.FC = () => {
                 <div key={group.id} role="group" aria-label={group.label}>
                   {(groups.length > 1 || group.id !== 'local') && (
                     <div className="px-3 pt-2 pb-1 text-[11px] font-medium text-zinc-500 flex items-center gap-1.5">
-                      {!group.local && <Cloud size={11} strokeWidth={1.75} className="text-sky-400/80" />}
+                      {!group.local && <Cloud size={11} strokeWidth={1.75} className="text-zinc-500" />}
                       {group.label}
                     </div>
                   )}

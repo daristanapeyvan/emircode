@@ -22,8 +22,8 @@ export const Toggle: React.FC<ToggleProps> = ({ checked, onChange, disabled }) =
     >
       <span
         className={cn(
-          'pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out',
-          checked ? 'translate-x-4' : 'translate-x-0'
+          'pointer-events-none inline-block h-4 w-4 transform rounded-full shadow-sm ring-0 transition duration-200 ease-in-out',
+          checked ? 'translate-x-4 bg-accent-fg' : 'translate-x-0 bg-white'
         )}
       />
     </button>

@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+## [2.1.1] - 2026-10-07
+
+A quieter look and one fix for Ollama Cloud.
+
+### Changed
+- **Calmer accents.** The send button, primary buttons, switches and sliders use one neutral accent: soft white in the dark theme, near-black in the light one. The bright blue of the send button and of switched-on composer buttons (web access) is gone; a switched-on button sits on a filled grey square. Cloud icons, server badges and user-set prices are grey instead of sky blue; a saved key keeps its green shield, its sentence is plain text.
+- **Plainer start screens.** The chat and Code start screens no longer put an icon box above the heading, and the empty chat no longer says which model runs where ("…, running on this computer"); the model selector already shows it. Ollama Cloud models in the selector say "Ollama Cloud" instead of "Runs at ollama.com".
+- The recommended models in Settings › Cloud models › Choose models are marked "recommended" instead of with a star, the agent's closing note has no emoji, and the agent's first log line for a cloud model says plainly what is sent to the provider.
+
 ### Fixed
 - An Ollama Cloud model that needs a paid Ollama plan (HTTP 403 "this model requires a subscription") was reported as "the account has no credit or quota left". It now has its own error (`plan_required`) and message: the model needs a paid plan, choose another Ollama Cloud model or upgrade at ollama.com/upgrade. Ollama Cloud errors never speak of a balance, and the same message appears for `-cloud` tags of a local Ollama.
 

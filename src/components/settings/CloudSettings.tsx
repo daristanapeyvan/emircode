@@ -138,8 +138,8 @@ const ProviderCard: React.FC<{ provider: BuiltinCloudProviderId; t: CloudTexts }
         </a>
       </div>
 
-      <p className={cn('flex items-center gap-1.5 text-[11px]', status?.configured ? 'text-emerald-400/90' : 'text-zinc-500')}>
-        {status?.configured ? <ShieldCheck size={13} strokeWidth={1.5} className="shrink-0" /> : <KeyRound size={13} strokeWidth={1.5} className="shrink-0" />}
+      <p className={cn('flex items-center gap-1.5 text-[11px]', status?.configured ? 'text-zinc-300' : 'text-zinc-500')}>
+        {status?.configured ? <ShieldCheck size={13} strokeWidth={1.5} className="shrink-0 text-emerald-400/90" /> : <KeyRound size={13} strokeWidth={1.5} className="shrink-0" />}
         <span>{stateText}</span>
       </p>
       {status?.configured && count > 0 && (

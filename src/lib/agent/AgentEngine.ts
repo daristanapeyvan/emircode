@@ -1300,7 +1300,7 @@ export class AgentEngine {
       let content = summary.trim() || et('taskCompleted');
       if (changed.length > 0) content += `\n\n${et('changedFiles', { files: changed.join(', ') })}`;
       if (warnings.length > 0) content += `\n\n${et('unverifiedItems')}\n${warnings.map((w) => `• ${w}`).join('\n')}`;
-      if (note) content += `\n\nℹ️ ${note}`;
+      if (note) content += `\n\n${note}`;
       const usageInfo = usageMetadata();
       callbacks.onStep({
         id: `step_fin_${Date.now()}`,

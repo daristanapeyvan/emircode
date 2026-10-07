@@ -97,7 +97,7 @@ The cart total is wrong after a discount is applied. Fix it and verify with npm 
 ```
 
 What happens:
-- The first log line says that the model runs at Anthropic and that the task, the files the agent reads, command output and web results are sent there.
+- The first log line says that the task, the files the agent reads, command output and web results are sent to Anthropic.
 - The context window comes from Settings › Cloud models (Automatic: 64K tokens), not from this computer's memory, and one step may write up to 16K tokens. The full tool list is offered; there is no small-model shortcut.
 - A cloud model is a *large* model for the agent: it may take up to 60 steps, reads files in bigger pieces, and can read the cart module, its test and `package.json` in one `read_files` step instead of three. Its system prompt asks it to read everything it needs first, then change, then verify.
 - Every step goes from the agent engine through `ModelGateway` to the main process, which sends it to the Anthropic API with the key. The system prompt and the history so far are read from Anthropic's prompt cache, so a step pays the full price only for what is new.

@@ -12,7 +12,7 @@ import { cn } from '@/lib/utils/cn';
 type CloudTexts = ReturnType<typeof getTranslations>['cloud'];
 
 const SOURCE_STYLE: Record<PriceSource, string> = {
-  user: 'text-sky-300/90',
+  user: 'text-zinc-200',
   builtin: 'text-zinc-400',
   unknown: 'text-amber-400/90',
   plan: 'text-zinc-500',

@@ -203,7 +203,7 @@ const LibraryCatalog: React.FC = () => {
         <div className="flex-1 min-w-0 overflow-y-auto py-3 sm:pl-4 space-y-4">
           {category === 'cloud' && !query.trim() && (
             <p className="flex items-start gap-1.5 text-[11px] text-zinc-400 leading-relaxed">
-              <Cloud size={13} strokeWidth={1.5} className="shrink-0 mt-px text-sky-400/90" />
+              <Cloud size={13} strokeWidth={1.5} className="shrink-0 mt-px text-zinc-500" />
               {t.cloudHint}
             </p>
           )}
@@ -239,7 +239,7 @@ const ModelCard: React.FC<{ model: LibraryModel; lang: Lang; t: LibText; install
       <span className="flex items-center gap-2">
         <span className="text-[13px] font-medium text-zinc-100 truncate">{model.name}</span>
         {model.cloud && (
-          <span className="shrink-0 inline-flex items-center gap-1 text-[11px] text-sky-400/90" title={t.cloudHint}>
+          <span className="shrink-0 inline-flex items-center gap-1 text-[11px] text-zinc-400" title={t.cloudHint}>
             <Cloud size={11} strokeWidth={1.75} />
             {model.sizes.length === 0 ? t.cloudOnly : t.cloudBadge}
           </span>
@@ -523,7 +523,7 @@ const VariantRow: React.FC<{
         </span>
       </span>
       {v.group === CLOUD_GROUP ? (
-        <span className="shrink-0 inline-flex items-center gap-1 text-[11px] text-sky-400/90">
+        <span className="shrink-0 inline-flex items-center gap-1 text-[11px] text-zinc-400">
           <Cloud size={12} strokeWidth={1.5} />
           {t.cloudRuns}
         </span>
@@ -560,7 +560,7 @@ const VariantDetails: React.FC<{ option: VariantOption; lang: Lang; t: LibText; 
       {v.context && <InfoRow label={t.context} value={v.context} />}
       {v.input && <InfoRow label={t.input} value={inputLabel(v.input, t)} />}
       {v.group === CLOUD_GROUP ? (
-        <InfoRow label={t.cloudWhere} value={<span className="text-sky-400/90">{t.cloudWhereValue}</span>} />
+        <InfoRow label={t.cloudWhere} value={t.cloudWhereValue} />
       ) : bytes ? (
         <InfoRow
           label={t.thisComputer}

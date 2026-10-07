@@ -11,9 +11,9 @@
   :root {
     color-scheme: light;
     --canvas: 238 240 242;
-    --accent: 63 67 75;
-    --accent-hover: 47 50 56;
-    --accent-fg: 255 255 255;
+    --accent: 32 35 40;
+    --accent-hover: 52 56 63;
+    --accent-fg: 250 250 250;
     --hairline: 0 0 0 / 0.09;
     --zinc-50: 21 23 27;
     --zinc-100: 28 31 36;
@@ -121,9 +121,9 @@
   :root.dark {
     color-scheme: dark;
     --canvas: 18 19 22;
-    --accent: 110 112 121;
-    --accent-hover: 124 126 135;
-    --accent-fg: 255 255 255;
+    --accent: 228 228 231;
+    --accent-hover: 244 244 245;
+    --accent-fg: 24 24 27;
     --hairline: 255 255 255 / 0.07;
     --zinc-50: 250 250 250;
     --zinc-100: 244 244 245;

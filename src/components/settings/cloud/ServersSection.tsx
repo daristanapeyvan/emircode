@@ -92,10 +92,7 @@ const ServerCard: React.FC<{ server: CompatEndpointStatus; t: CloudTexts }> = ({
           <p className="text-[11px] text-zinc-500 font-mono truncate">{server.baseURL}</p>
         </div>
         <span
-          className={cn(
-            'shrink-0 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] border',
-            place === 'remote' ? 'border-sky-900/60 text-sky-300/90' : 'border-emerald-900/60 text-emerald-300/90'
-          )}
+          className="shrink-0 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] border border-zinc-700/70 text-zinc-400"
         >
           <PlaceIcon size={11} strokeWidth={1.5} />
           {place === 'computer' ? t.serverThisComputer : place === 'lan' ? t.serverLan : t.serverRemote}

@@ -11,11 +11,11 @@ import { Attachment } from '@/types/chat';
 import { DEFAULT_SETTINGS } from '@/types/settings';
 import { cn } from '@/lib/utils/cn';
 
-/** A square button of the composer; a switched-on one is blue. */
+/** A square button of the composer; a switched-on one sits on a filled square. */
 const toolClass = (active: boolean) =>
   cn(
     'inline-flex items-center justify-center w-8 h-8 shrink-0 rounded transition-colors cursor-pointer disabled:opacity-40 disabled:pointer-events-none',
-    active ? 'bg-blue-500/15 text-blue-400 hover:bg-blue-500/25' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/60'
+    active ? 'bg-zinc-800 text-zinc-100 hover:bg-zinc-750' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/60'
   );
 
 export const Composer: React.FC = () => {
@@ -202,7 +202,7 @@ export const Composer: React.FC = () => {
         onDrop={handleDrop}
         className={cn(
           'max-w-3xl mx-auto rounded-lg border bg-zinc-900 transition-colors',
-          isDragging ? 'border-blue-500' : 'border-zinc-800 focus-within:border-zinc-700'
+          isDragging ? 'border-zinc-500' : 'border-zinc-800 focus-within:border-zinc-700'
         )}
       >
         {/* Attachment preview tray */}
@@ -279,7 +279,7 @@ export const Composer: React.FC = () => {
             disabled={!content.trim() && (isStreaming || attachments.length === 0)}
             title={isStreaming ? t.chat.interruptAndSend : t.chat.send}
             aria-label={isStreaming ? t.chat.interruptAndSend : t.chat.send}
-            className="inline-flex items-center justify-center w-8 h-8 shrink-0 rounded bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-40 disabled:pointer-events-none transition-colors cursor-pointer"
+            className="inline-flex items-center justify-center w-8 h-8 shrink-0 rounded bg-accent hover:bg-accent-hover text-accent-fg disabled:bg-zinc-800 disabled:text-zinc-500 disabled:pointer-events-none transition-colors cursor-pointer"
           >
             <ArrowUp size={16} strokeWidth={2} />
           </button>

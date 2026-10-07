@@ -36,11 +36,9 @@ import {
   ChevronRight,
   X,
   ArrowUp,
-  Code2,
   Coins,
 } from 'lucide-react';
 import { Button } from '../common/Button';
-import { StartIcon } from '../common/StartIcon';
 import { IconButton } from '../common/IconButton';
 import { Tabs } from '../common/Tabs';
 import { useUIStore } from '@/stores/uiStore';
@@ -659,9 +657,8 @@ export const AgentWorkspace: React.FC = () => {
                   !workspaceRoot ? (
                     /* No project yet: create one (New Project offers the wizards) or open a folder */
                     <div className="my-auto flex flex-col items-center gap-6 py-12 text-center select-none">
-                      <StartIcon icon={<Code2 size={22} strokeWidth={1.5} />} />
-                      <div className="-mt-2 space-y-1.5">
-                        <h2 className="text-xl font-semibold text-zinc-100">{t.agent.startHeading}</h2>
+                      <div className="space-y-1.5">
+                        <h2 className="text-2xl font-medium tracking-tight text-zinc-200">{t.agent.startHeading}</h2>
                         <p className="text-xs text-zinc-400">{t.agent.emptyNoFolder}</p>
                       </div>
                       <div className="flex items-center gap-2">
@@ -676,9 +673,8 @@ export const AgentWorkspace: React.FC = () => {
                   ) : (
                     /* A project without a task yet: where it is and what is in it */
                     <div className="my-auto flex flex-col items-center gap-6 py-12 text-center select-none">
-                      <StartIcon icon={<Code2 size={22} strokeWidth={1.5} />} />
-                      <div className="-mt-2 space-y-1.5">
-                        <h2 className="text-xl font-semibold text-zinc-100">{workspaceName}</h2>
+                      <div className="space-y-1.5">
+                        <h2 className="text-2xl font-medium tracking-tight text-zinc-200">{workspaceName}</h2>
                         <p className="text-xs text-zinc-500" title={workspaceRoot}>
                           <span className="font-mono">{compactPath(workspaceRoot, 3)}</span> ·{' '}
                           {fileCount > 0 ? t.agent.fileCount.replace('{count}', String(fileCount)) : t.agent.emptyFolderLabel}
@@ -912,7 +908,7 @@ export const AgentWorkspace: React.FC = () => {
                   aria-pressed={webOn}
                   className={cn(
                     'inline-flex items-center justify-center w-8 h-8 shrink-0 rounded transition-colors cursor-pointer',
-                    webOn ? 'bg-blue-500/15 text-blue-400 hover:bg-blue-500/25' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/60'
+                    webOn ? 'bg-zinc-800 text-zinc-100 hover:bg-zinc-750' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/60'
                   )}
                 >
                   <Globe size={16} strokeWidth={1.5} />
@@ -963,7 +959,7 @@ export const AgentWorkspace: React.FC = () => {
                   disabled={!goalInput.trim() || (!isBusy && !workspaceRoot)}
                   title={isBusy ? t.agent.interruptAndSteer : t.agent.start}
                   aria-label={isBusy ? t.agent.interruptAndSteer : t.agent.start}
-                  className="inline-flex items-center justify-center w-8 h-8 shrink-0 rounded bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-40 disabled:pointer-events-none transition-colors cursor-pointer"
+                  className="inline-flex items-center justify-center w-8 h-8 shrink-0 rounded bg-accent hover:bg-accent-hover text-accent-fg disabled:bg-zinc-800 disabled:text-zinc-500 disabled:pointer-events-none transition-colors cursor-pointer"
                 >
                   <ArrowUp size={16} strokeWidth={2} />
                 </button>

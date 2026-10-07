@@ -93,7 +93,7 @@ export const ModelChooser: React.FC<{ provider: CloudProviderId; models: CloudMo
                 <span className="min-w-0 flex-1">
                   <span className={cn('block font-mono text-xs truncate', shown.has(m.id) ? 'text-zinc-100' : 'text-zinc-400')}>
                     {m.id}
-                    {recommended && <span className="ml-1.5 font-sans text-[10px] text-zinc-500">★</span>}
+                    {recommended && <span className="ml-1.5 font-sans text-[10px] text-zinc-500">{t.recommendedTag}</span>}
                   </span>
                   {detail && <span className="block text-[11px] text-zinc-500 truncate">{detail}</span>}
                 </span>

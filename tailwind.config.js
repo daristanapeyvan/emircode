@@ -13,7 +13,7 @@ export default {
     extend: {
       colors: {
         canvas: themed('canvas'),
-        // Graphite: the accent of buttons, switches and sliders (the composer keeps its blue).
+        // The accent of buttons, switches, sliders and the send button: soft white on dark, near-black on light.
         accent: {
           DEFAULT: themed('accent'),
           hover: themed('accent-hover'),
