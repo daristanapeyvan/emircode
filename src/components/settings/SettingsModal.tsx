@@ -10,6 +10,7 @@ import {
   Keyboard,
   HardDrive,
   Server,
+  Cloud,
   Info,
 } from 'lucide-react';
 import { Modal } from '../common/Modal';
@@ -23,6 +24,7 @@ import { DesignSettings } from './DesignSettings';
 import { KeyboardSettings } from './KeyboardSettings';
 import { StorageSettings } from './StorageSettings';
 import { OllamaSettings } from './OllamaSettings';
+import { CloudSettings } from './CloudSettings';
 import { AboutSettings } from './AboutSettings';
 import { useUIStore, SettingsCategory } from '@/stores/uiStore';
 import { useSettingsStore } from '@/stores/settingsStore';
@@ -45,6 +47,7 @@ export const SettingsModal: React.FC = () => {
     { id: 'keyboard', label: t.settings.keyboard, icon: <Keyboard size={14} strokeWidth={1.5} /> },
     { id: 'storage', label: t.settings.storage, icon: <HardDrive size={14} strokeWidth={1.5} /> },
     { id: 'ollama', label: t.settings.ollama, icon: <Server size={14} strokeWidth={1.5} /> },
+    { id: 'cloud', label: t.cloud.title, icon: <Cloud size={14} strokeWidth={1.5} /> },
     { id: 'about', label: t.settings.about, icon: <Info size={14} strokeWidth={1.5} /> },
   ];
 
@@ -82,6 +85,7 @@ export const SettingsModal: React.FC = () => {
         {settingsCategory === 'keyboard' && <KeyboardSettings />}
         {settingsCategory === 'storage' && <StorageSettings />}
         {settingsCategory === 'ollama' && <OllamaSettings />}
+        {settingsCategory === 'cloud' && <CloudSettings />}
         {settingsCategory === 'about' && <AboutSettings />}
       </div>
     </Modal>

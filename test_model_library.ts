@@ -9,6 +9,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
+  CLOUD_GROUP,
   MODEL_NAME_RE,
   MODEL_TAG_RE,
   builtinLibrary,
@@ -17,6 +18,7 @@ import {
   decodeEntities,
   groupVariants,
   hardwareFit,
+  isCloudTagName,
   isCommonQuant,
   isLocal,
   memoryNeedGb,
@@ -212,7 +214,30 @@ async function main() {
   check(cats('deepseek-r1').includes('reasoning') && cats('deepseek-r1').includes('agent') && cats('deepseek-r1').includes('small'), 'deepseek-r1: reasoning, tools, has a 1.5B size', cats('deepseek-r1'));
   check(cats('nomic-embed-text').join(',') === 'embedding,all', 'An embedding model is only under Embedding', cats('nomic-embed-text'));
   check(cats('llama3.2-vision').includes('vision') && cats('gemma4').includes('vision'), 'Image and audio models are under Vision & audio');
-  check(!modelsFor(models, 'all').some((m) => m.name === 'minimax-m2.7'), 'Cloud-only models are in no category');
+  check(!modelsFor(models, 'all').some((m) => m.name === 'minimax-m2.7'), 'Cloud-only models are in no local category');
+  check(
+    modelsFor(models, 'cloud').some((m) => m.name === 'minimax-m2.7') && modelsFor(models, 'cloud').some((m) => m.name === 'gemma4') && modelsFor(models, 'cloud').every((m) => m.cloud),
+    'The Cloud category lists every model ollama.com runs in its cloud, cloud-only ones included',
+    modelsFor(models, 'cloud').map((m) => m.name)
+  );
+  check(cats('gemma4').includes('cloud') && !cats('qwen3').includes('cloud'), 'A model with a cloud offer is also under Cloud', cats('gemma4'));
+  check(modelsFor(models, 'all', 'minimax').some((m) => m.name === 'minimax-m2.7'), 'A search finds cloud-only models too');
+  check(
+    isCloudTagName('120b-cloud') && isCloudTagName('cloud') && !isCloudTagName('8b') && !isCloudTagName('cloudy-7b'),
+    'Cloud tags are recognised by their name ("120b-cloud", "cloud")'
+  );
+  const withCloud = groupVariants('gpt-oss', [
+    { tag: 'gpt-oss:20b', name: '20b', group: '20b', suffix: '', quant: null, bytes: 14e9, sizeLabel: '14GB', context: '128K', input: 'Text', digest: 'aaaaaaaaaaaa' },
+    { tag: 'gpt-oss:120b', name: '120b', group: '120b', suffix: '', quant: null, bytes: 65e9, sizeLabel: '65GB', context: '128K', input: 'Text', digest: 'bbbbbbbbbbbb' },
+    { tag: 'gpt-oss:120b-cloud', name: '120b-cloud', group: CLOUD_GROUP, suffix: '120b-cloud', quant: null, bytes: null, sizeLabel: '', context: '128K', input: 'Text', digest: 'cccccccccccc' },
+    { tag: 'gpt-oss:20b-cloud', name: '20b-cloud', group: CLOUD_GROUP, suffix: '20b-cloud', quant: null, bytes: null, sizeLabel: '', context: '128K', input: 'Text', digest: 'dddddddddddd' },
+  ]);
+  check(
+    withCloud.map((g) => g.size).join(',') === `20b,120b,${CLOUD_GROUP}` && withCloud[2].options.length === 2 && withCloud[2].billions === null,
+    'Cloud tags form their own group after the sizes that run here',
+    withCloud.map((g) => `${g.size}:${g.options.length}`)
+  );
+  check(pickSize(withCloud, pc16) === '20b' && pickSize(withCloud.filter((g) => g.size === CLOUD_GROUP), pc16) === CLOUD_GROUP, 'The cloud group is preselected only for a cloud-only model');
   check(modelsFor(models, 'recommended').map((m) => m.name).join(',') === 'qwen2.5-coder,qwen3,deepseek-r1', 'Recommended models keep the order of our own benchmark', modelsFor(models, 'recommended').map((m) => m.name));
   check(modelsFor(models, 'all', 'CODER').map((m) => m.name)[0] === 'qwen2.5-coder' && modelsFor(models, 'all', 'görüntü').length === 0, 'Search looks at names and descriptions, case-insensitive');
 

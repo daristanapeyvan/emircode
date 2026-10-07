@@ -11,6 +11,7 @@ export type SettingsCategory =
   | 'design'
   | 'keyboard'
   | 'storage'
+  | 'cloud'
   | 'ollama'
   | 'advanced'
   | 'about';

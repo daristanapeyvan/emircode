@@ -18,6 +18,8 @@ export interface GenerationMetadata {
   promptEvalCount?: number;
   tokensPerSecond?: number;
   durationSeconds?: number;
+  /** Cloud models: prompt tokens the provider served from its cache. */
+  cachedPromptCount?: number;
 }
 
 export interface WebActivityLog {

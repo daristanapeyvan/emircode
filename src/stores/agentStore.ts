@@ -1,4 +1,5 @@
 import { confirmDialog, noticeDialog } from '@/lib/ui/dialogs';
+import { modelLabel } from '@/lib/providers/modelRef';
 import { create } from 'zustand';
 import {
   AgentStatus,
@@ -422,7 +423,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         id: `step_init_${startTime}`,
         timestamp: startTime,
         type: 'system_notice',
-        content: et('taskStarted', { label, model: selectedModel }),
+        content: et('taskStarted', { label, model: modelLabel(selectedModel) }),
         status: 'success',
       },
     ];

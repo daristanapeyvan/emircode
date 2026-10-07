@@ -5,8 +5,9 @@ import { ReasoningBlock } from './ReasoningBlock';
 import { MarkdownContent } from './MarkdownContent';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useChatStore } from '@/stores/chatStore';
-import { getTranslations } from '@/lib/localization/i18n';
+import { format, getTranslations } from '@/lib/localization/i18n';
 import { formatBytes } from '@/lib/utils/formatters';
+import { modelLabel, runsInCloud } from '@/lib/providers/modelRef';
 import { cleanChatContent } from '@/lib/web/WebIntentDetector';
 import { Button } from '../common/Button';
 import { cn } from '@/lib/utils/cn';
@@ -51,16 +52,26 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, isStreaming, 
   };
 
   const meta = !isUser && settings.showMetadata ? message.metadata : undefined;
+  // Cloud models are paid per token: the reply shows what it used.
+  const cloudTokens =
+    meta && message.model && runsInCloud(message.model) && (meta.promptEvalCount || meta.evalCount)
+      ? format(meta.cachedPromptCount ? t.chat.tokensInOutCached : t.chat.tokensInOut, {
+          input: (meta.promptEvalCount || 0).toLocaleString(),
+          output: (meta.evalCount || 0).toLocaleString(),
+          cached: (meta.cachedPromptCount || 0).toLocaleString(),
+        })
+      : '';
   const metaText = [
     meta?.tokensPerSecond ? `${meta.tokensPerSecond} ${t.chat.tokensPerSecond}` : '',
     meta?.durationSeconds ? `${meta.durationSeconds} ${t.chat.secondsShort}` : '',
+    cloudTokens,
   ]
     .filter(Boolean)
     .join(' · ');
 
   return (
     <div className={cn('group py-3', isUser && 'flex flex-col items-end')}>
-      {showModel && <p className="mb-1 text-[11px] font-mono text-zinc-500">{message.model}</p>}
+      {showModel && <p className="mb-1 text-[11px] font-mono text-zinc-500">{modelLabel(message.model || '')}</p>}
 
       {message.attachments && message.attachments.length > 0 && (
         <div className="flex flex-wrap gap-1.5 mb-2">

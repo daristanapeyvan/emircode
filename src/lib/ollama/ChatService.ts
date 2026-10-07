@@ -1,6 +1,11 @@
-import { OllamaClient } from './OllamaClient';
-import { OllamaChatMessage, GenerationOptions } from '@/types/ollama';
+import { OllamaChatMessage, OllamaChatChunk, GenerationOptions } from '@/types/ollama';
 import { Message, GenerationMetadata } from '@/types/chat';
+import type { GatewayChatParams } from '../providers/ModelGateway';
+
+/** Anything that streams an Ollama-shaped chat: the OllamaClient or the ModelGateway (local and cloud models). */
+export interface ChatStreamer {
+  chatStream(params: GatewayChatParams, onChunk: (chunk: OllamaChatChunk) => void, signal?: AbortSignal): Promise<void>;
+}
 
 export interface StreamCallbacks {
   onToken: (contentDelta: string, thinkingDelta: string) => void;
@@ -9,10 +14,10 @@ export interface StreamCallbacks {
 }
 
 export class ChatService {
-  private client: OllamaClient;
+  private client: ChatStreamer;
   private currentAbortController: AbortController | null = null;
 
-  constructor(client: OllamaClient) {
+  constructor(client: ChatStreamer) {
     this.client = client;
   }
 
@@ -132,6 +137,7 @@ export class ChatService {
                 ? Math.round((totalDurationNs / 1_000_000_000) * 10) / 10
                 : undefined;
 
+              const cachedPromptCount = (chunk as { cached_prompt_count?: number }).cached_prompt_count;
               const metadata: GenerationMetadata = {
                 evalCount,
                 evalDurationNs,
@@ -140,6 +146,7 @@ export class ChatService {
                 promptEvalCount,
                 tokensPerSecond,
                 durationSeconds,
+                ...(cachedPromptCount ? { cachedPromptCount } : {}),
               };
 
               callbacks.onComplete(metadata);

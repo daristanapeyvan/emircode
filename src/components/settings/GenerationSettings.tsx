@@ -39,6 +39,7 @@ export const GenerationSettings: React.FC = () => {
 
   return (
     <div>
+      <p className="pt-3 pb-1 text-[11px] text-zinc-500 leading-relaxed">{t.cloud.generationNote}</p>
       <SettingsRow label={t.settings.presets} description={t.settings.presetsDesc}>
         <Select
           ariaLabel={t.settings.presets}

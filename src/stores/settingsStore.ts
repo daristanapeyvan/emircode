@@ -9,6 +9,7 @@ import {
   AgentOptimizationConfig,
   HardwareOptimizationProfile,
   DesignThemeConfig,
+  CloudConfig,
 } from '@/types/settings';
 import { HardwareInfo } from '@/types/hardware';
 import { storageService } from '@/lib/storage/StorageService';
@@ -25,6 +26,7 @@ interface SettingsState {
   setWebAccess: (config: Partial<WebAccessConfig>) => void;
   setAgentOptimization: (config: Partial<AgentOptimizationConfig>) => void;
   setDesignTheme: (config: Partial<DesignThemeConfig>) => void;
+  setCloud: (config: Partial<CloudConfig>) => void;
   setLanguage: (language: Language) => void;
   setTheme: (theme: Theme) => void;
   setFontSize: (size: FontSize) => void;
@@ -77,6 +79,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       designTheme: {
         ...DEFAULT_SETTINGS.designTheme,
         ...(data.settings?.designTheme || {}),
+      },
+      cloud: {
+        ...DEFAULT_SETTINGS.cloud,
+        ...(data.settings?.cloud || {}),
       },
     };
 
@@ -218,6 +224,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   setDesignTheme: (partialConfig) => {
     const current = get().settings.designTheme || DEFAULT_SETTINGS.designTheme;
     get().updateSettings({ designTheme: { ...current, ...partialConfig } });
+  },
+
+  setCloud: (partialConfig) => {
+    const current = get().settings.cloud || DEFAULT_SETTINGS.cloud;
+    get().updateSettings({ cloud: { ...current, ...partialConfig } });
   },
 
   setLanguage: (language) => {

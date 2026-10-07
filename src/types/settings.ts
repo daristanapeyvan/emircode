@@ -33,6 +33,15 @@ export interface CommandIsolationConfig {
   network: boolean;
 }
 
+/** Cloud models (Ollama Cloud, Claude, GPT). The API keys are not here: the main process keeps them. */
+export interface CloudConfig {
+  /**
+   * Context window of cloud models in tokens, for the agent's budget. 0 = automatic (64K, never
+   * more than the model takes). Larger values shorten the history less but cost more per step.
+   */
+  contextLength: number;
+}
+
 export interface WebAccessConfig {
   enabled: boolean;
   chatEnabled: boolean;
@@ -77,6 +86,9 @@ export interface AppSettings {
   // Isolated environment of the agent's commands
   commandIsolation: CommandIsolationConfig;
 
+  // Cloud models (Ollama Cloud, Claude, GPT)
+  cloud: CloudConfig;
+
   // Ollama
   ollamaEndpoint: string;
   ollamaTimeoutMs: number;
@@ -111,6 +123,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     chatEnabled: true,
     codingEnabled: true,
   },
+  cloud: { contextLength: 0 },
   ollamaEndpoint: 'http://localhost:11434',
   ollamaTimeoutMs: 60000,
   keepAlive: '5m',

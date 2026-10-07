@@ -1,7 +1,7 @@
 {
   "name": "emir-code",
   "version": "1.9.0",
-  "description": "Desktop app for chatting with local Ollama models and running a coding agent in a project folder",
+  "description": "Desktop app for chatting with local Ollama models or cloud models (Ollama Cloud, Claude, GPT) and running a coding agent in a project folder",
   "main": "dist-electron/main.js",
   "author": {
     "name": "Agah Emir",
@@ -26,14 +26,16 @@
     "build:dir": "tsc && vite build && node ./scripts/build-sandbox.cjs && electron-builder --dir && node ./scripts/postbuild.js",
     "build:vite": "tsc && vite build",
     "preview": "vite preview",
-    "test": "node ./scripts/verify_functionality.js && node ./scripts/run-ts-test.mjs test_agent_reliability.ts && node ./scripts/run-ts-test.mjs test_agent_engine.ts && node ./scripts/run-ts-test.mjs test_production_architecture.ts && node ./scripts/run-ts-test.mjs test_web_access.ts && node ./scripts/run-ts-test.mjs test_design_theme.ts && node ./scripts/run-ts-test.mjs test_site_wizard.ts && node ./scripts/run-ts-test.mjs test_tool_wizard.ts && node ./scripts/run-ts-test.mjs test_model_library.ts && node ./scripts/run-ts-test.mjs test_projects.ts && node ./scripts/run-ts-test.mjs test_markdown.ts && node ./scripts/run-ts-test.mjs test_security.ts",
+    "test": "node ./scripts/verify_functionality.js && node ./scripts/run-ts-test.mjs test_agent_reliability.ts && node ./scripts/run-ts-test.mjs test_agent_engine.ts && node ./scripts/run-ts-test.mjs test_production_architecture.ts && node ./scripts/run-ts-test.mjs test_web_access.ts && node ./scripts/run-ts-test.mjs test_design_theme.ts && node ./scripts/run-ts-test.mjs test_site_wizard.ts && node ./scripts/run-ts-test.mjs test_tool_wizard.ts && node ./scripts/run-ts-test.mjs test_model_library.ts && node ./scripts/run-ts-test.mjs test_cloud_providers.ts && node ./scripts/run-ts-test.mjs test_projects.ts && node ./scripts/run-ts-test.mjs test_markdown.ts && node ./scripts/run-ts-test.mjs test_security.ts",
     "test:sandbox": "node ./scripts/build-sandbox.cjs && node ./scripts/run-ts-test.mjs test_sandbox.ts",
     "test:agent": "node ./scripts/run-ts-test.mjs test_agent_reliability.ts && node ./scripts/run-ts-test.mjs test_agent_engine.ts",
     "check:library": "node ./scripts/run-ts-test.mjs scripts/check-model-library.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.131.0",
     "clsx": "^2.1.1",
     "lucide-react": "^1.16.0",
+    "openai": "^7.30.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "tailwind-merge": "^3.0.2",
@@ -111,8 +113,8 @@
       "executableName": "emir-code",
       "icon": "build/icon.png",
       "category": "Development",
-      "synopsis": "Local AI chat and coding agent for Ollama",
-      "description": "Emir Code runs AI models on your computer through Ollama. Chat with a model, or let a coding agent read, write and test code in a project folder while you review every change.",
+      "synopsis": "AI chat and coding agent for Ollama, Ollama Cloud, Claude and GPT",
+      "description": "Emir Code runs AI models on your computer through Ollama, or Ollama Cloud, Claude and GPT models with your own API key. Chat with a model, or let a coding agent read, write and test code in a project folder while you review every change.",
       "desktop": {
         "Terminal": "false",
         "Type": "Application",

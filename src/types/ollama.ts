@@ -17,6 +17,9 @@ export interface OllamaModel {
   digest: string;
   details?: ModelDetails;
   capabilities?: string[]; // e.g. ["completion", "tools", "thinking", "vision"]
+  /** Ollama Cloud models run through the local Ollama ("gpt-oss:120b-cloud"): the model on ollama.com. */
+  remote_model?: string;
+  remote_host?: string;
 }
 
 export interface OllamaRunningModel {
@@ -65,6 +68,9 @@ export interface OllamaShowResponse {
   model_info?: Record<string, any>;
   capabilities?: string[];
   modified_at?: string;
+  /** Set for Ollama Cloud models run through the local Ollama. */
+  remote_model?: string;
+  remote_host?: string;
 }
 
 export interface OllamaPullProgress {

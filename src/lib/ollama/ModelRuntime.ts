@@ -13,9 +13,18 @@ import { ollamaClient } from './OllamaClient';
 import { GenerationOptions, OllamaShowResponse, OllamaThinkValue } from '@/types/ollama';
 import { HardwareInfo } from '@/types/hardware';
 import { AgentOptimizationConfig, HardwareOptimizationProfile } from '@/types/settings';
+import type { CloudModelInfo } from '../../../electron/preload';
+import { ProviderId, formatModelRef, isOllamaCloudTag, parseModelRef } from '../providers/modelRef';
 
 export interface ModelRuntimeInfo {
   name: string;
+  /** Who runs the model: the local Ollama or a cloud provider. */
+  provider: ProviderId;
+  /**
+   * Runs outside this computer: a cloud provider, or an Ollama Cloud model through the local Ollama.
+   * The context window then follows Settings › Cloud models, not this computer's memory.
+   */
+  remote: boolean;
   /** Architecture family reported by Ollama, e.g. "qwen3", "qwen2", "gemma2", "llama". */
   family: string;
   /** Parameter count in billions, when known. */
@@ -25,6 +34,9 @@ export interface ModelRuntimeInfo {
   capabilities: string[];
   supportsThinking: boolean;
   supportsTools: boolean;
+  supportsVision: boolean;
+  /** Longest answer the model can write, when the provider says. */
+  maxOutput: number | null;
   /** <= ~4.5B parameters: needs the leanest prompt and tool set. */
   isSmall: boolean;
 }
@@ -40,6 +52,21 @@ const runtimeCache = new Map<string, Promise<ModelRuntimeInfo>>();
 
 const MIN_CONTEXT = 4096;
 const MIN_PREDICT = 1024;
+/** Context window of cloud models on Automatic: plenty for the agent, and every step stays affordable. */
+export const CLOUD_DEFAULT_CONTEXT = 65536;
+/** Output budget of one agent step on a cloud model (raised automatically when an answer is cut off). */
+export const CLOUD_DEFAULT_PREDICT = 16384;
+
+/** Cloud models listed by the providers, by "provider::model" reference (filled by the model store). */
+const cloudModels = new Map<string, CloudModelInfo>();
+
+export function registerCloudModels(models: CloudModelInfo[]): void {
+  for (const m of models) cloudModels.set(formatModelRef(m.provider, m.id), m);
+}
+
+export function knownCloudModel(ref: string): CloudModelInfo | undefined {
+  return cloudModels.get(ref);
+}
 
 /** "7.6B" -> 7.6, "567M" -> 0.567 */
 export function parseParameterSize(value?: string | null): number | null {
@@ -88,6 +115,7 @@ function extractNativeContext(show: OllamaShowResponse | null): number | null {
 
 export function buildRuntimeInfo(model: string, show: OllamaShowResponse | null): ModelRuntimeInfo {
   const capabilities = Array.isArray(show?.capabilities) ? show!.capabilities!.map(String) : [];
+  const remote = isOllamaCloudTag(model) || !!show?.remote_host || !!show?.remote_model;
   const parameterSizeB =
     parseParameterSize(show?.details?.parameter_size) ?? parameterSizeFromName(model);
   const family = (show?.details?.family || inferFamilyFromName(model)).toLowerCase();
@@ -97,14 +125,64 @@ export function buildRuntimeInfo(model: string, show: OllamaShowResponse | null)
     (capabilities.length === 0 && /qwen3|deepseek-r1|gpt-oss|magistral/.test(lower));
   return {
     name: model,
+    provider: 'ollama',
+    remote,
     family,
     parameterSizeB,
     nativeContext: extractNativeContext(show),
     capabilities,
     supportsThinking,
     supportsTools: capabilities.includes('tools'),
-    isSmall: parameterSizeB !== null ? parameterSizeB <= 4.5 : /tinyllama|smollm|phi3:mini|:0\.5b|:1b|:1\.5b|:2b|:3b/.test(lower),
+    supportsVision: capabilities.includes('vision'),
+    maxOutput: null,
+    isSmall: remote ? false : parameterSizeB !== null ? parameterSizeB <= 4.5 : /tinyllama|smollm|phi3:mini|:0\.5b|:1b|:1\.5b|:2b|:3b/.test(lower),
   };
+}
+
+/**
+ * Runtime facts of a model of a cloud provider ("anthropic::claude-opus-5-5"), from the provider's
+ * model list or, for Ollama Cloud, from its /api/show. Cloud models are never treated as small.
+ */
+export function buildCloudRuntimeInfo(ref: string, info: CloudModelInfo | null | undefined, show?: OllamaShowResponse | null): ModelRuntimeInfo {
+  const { provider, model } = parseModelRef(ref);
+  const capabilities = Array.isArray(show?.capabilities) ? show!.capabilities!.map(String) : [];
+  const fromShow = show ? buildRuntimeInfo(model, show) : null;
+  const thinking = info?.thinking ?? null;
+  const supportsThinking = capabilities.includes('thinking') || (thinking !== null ? !!thinking : provider === 'anthropic' || /gpt-oss|deepseek|qwen3|kimi-k2-thinking/i.test(model));
+  const vision = capabilities.includes('vision') || (info?.vision ?? provider === 'anthropic');
+  return {
+    name: ref,
+    provider,
+    remote: true,
+    family: (info?.family || fromShow?.family || provider).toLowerCase(),
+    parameterSizeB: parseParameterSize(info?.parameterSize) ?? fromShow?.parameterSizeB ?? null,
+    nativeContext: info?.contextWindow || fromShow?.nativeContext || null,
+    capabilities: capabilities.length ? capabilities : ['completion', ...(vision ? ['vision'] : []), ...(supportsThinking ? ['thinking'] : [])],
+    supportsThinking,
+    supportsTools: true,
+    supportsVision: vision,
+    maxOutput: info?.maxOutput || null,
+    isSmall: false,
+  };
+}
+
+/** What a cloud model is, asked once from the main process (Ollama Cloud: /api/show, Claude: the Models API). */
+async function describeCloudModel(ref: string): Promise<ModelRuntimeInfo> {
+  const known = cloudModels.get(ref);
+  const { provider, model } = parseModelRef(ref);
+  if (provider === 'ollama') return buildRuntimeInfo(model, null);
+  if (known && (provider !== 'ollama-cloud' || known.contextWindow)) return buildCloudRuntimeInfo(ref, known);
+  try {
+    const res = await window.electronAPI?.cloudDescribe?.(provider, model);
+    if (res?.ok) {
+      const info = { ...res.info, ...(known ? { label: known.label } : {}) };
+      cloudModels.set(ref, info);
+      return buildCloudRuntimeInfo(ref, info, res.show);
+    }
+  } catch {
+    // the defaults below
+  }
+  return buildCloudRuntimeInfo(ref, known);
 }
 
 /** Cached /api/show lookup. Failures are not cached so a later call can retry. */
@@ -114,6 +192,12 @@ export function getModelRuntimeInfo(model: string): Promise<ModelRuntimeInfo> {
   if (cached) return cached;
 
   const pending = (async () => {
+    if (parseModelRef(key).provider !== 'ollama') {
+      const info = await describeCloudModel(key);
+      // Like a failed /api/show: guessed facts are not kept, a later call asks again.
+      if (!cloudModels.has(key)) runtimeCache.delete(key);
+      return info;
+    }
     let show: OllamaShowResponse | null = null;
     try {
       show = await ollamaClient.showModel(key);
@@ -176,8 +260,20 @@ export function buildAgentSamplingOptions(info: ModelRuntimeInfo, attempt = 0): 
   return opts;
 }
 
+/**
+ * Context window of a cloud model: Settings › Cloud models (Automatic: 64K tokens), never more than
+ * the model takes. Larger windows mean fewer shortened histories but more tokens in every step.
+ */
+export function resolveCloudContextLength(configured: number | undefined, nativeContext: number | null | undefined): number {
+  let target = configured && configured > 0 ? configured : CLOUD_DEFAULT_CONTEXT;
+  if (nativeContext && nativeContext > 0) target = Math.min(target, nativeContext);
+  return Math.max(Math.min(8192, nativeContext || 8192), Math.round(target));
+}
+
 export function resolveThinkParam(info: ModelRuntimeInfo, enabled: boolean): OllamaThinkValue | undefined {
   if (!info.supportsThinking) return undefined;
+  // Claude and GPT: the main process turns this into adaptive thinking or a reasoning effort.
+  if (info.provider === 'anthropic' || info.provider === 'openai') return enabled;
   // gpt-oss cannot switch reasoning off; the lowest effort is the closest equivalent.
   if (/gpt-oss/i.test(info.name)) return enabled ? 'medium' : 'low';
   return enabled;
@@ -187,8 +283,20 @@ export function resolveRequestProfile(params: {
   info: ModelRuntimeInfo;
   agentOpt?: Partial<AgentOptimizationConfig> | null;
   hardware?: HardwareInfo | null;
+  /** Settings › Cloud models › Context window (0 = automatic). */
+  cloudContextLength?: number;
 }): ResolvedRequestProfile {
   const { info, agentOpt, hardware } = params;
+  if (info.remote) {
+    const numCtx = resolveCloudContextLength(params.cloudContextLength, info.nativeContext);
+    const ceiling = Math.min(info.maxOutput && info.maxOutput > 0 ? info.maxOutput : CLOUD_DEFAULT_PREDICT, CLOUD_DEFAULT_PREDICT);
+    return {
+      numCtx,
+      numPredict: Math.max(MIN_PREDICT, Math.min(ceiling, Math.floor(numCtx / 2))),
+      think: resolveThinkParam(info, !!agentOpt?.agentThinking),
+      sampling: buildAgentSamplingOptions(info),
+    };
+  }
   const numCtx = resolveContextLength({
     configured: agentOpt?.contextLength,
     profile: agentOpt?.hardwareProfile,

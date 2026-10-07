@@ -3,6 +3,9 @@ import { OllamaModel, OllamaRunningModel, OllamaShowResponse, OllamaPullProgress
 import { ollamaClient } from '@/lib/ollama/OllamaClient';
 import { ModelService } from '@/lib/ollama/ModelService';
 import { formatBytes } from '@/lib/utils/formatters';
+import { registerCloudModels, knownCloudModel } from '@/lib/ollama/ModelRuntime';
+import { CLOUD_PROVIDERS, CloudProviderId, formatModelRef, isCloudRef, parseModelRef } from '@/lib/providers/modelRef';
+import type { CloudErrorCode, CloudModelInfo, CloudStatus } from '../../electron/preload';
 
 const modelService = new ModelService(ollamaClient);
 
@@ -25,6 +28,14 @@ interface ModelState {
   downloads: Record<string, ActiveDownload>;
   isRefreshing: boolean;
 
+  /** Models of the cloud providers that have a key, newest first per provider. */
+  cloudModels: CloudModelInfo[];
+  /** Which providers have a key (never the key itself). */
+  cloudStatus: CloudStatus | null;
+  /** The last error of a provider's model list (a code). */
+  cloudErrors: Partial<Record<CloudProviderId, CloudErrorCode>>;
+  cloudLoading: boolean;
+
   checkConnection: (endpoint?: string) => Promise<boolean>;
   fetchModels: () => Promise<void>;
   fetchRunning: () => Promise<void>;
@@ -34,6 +45,22 @@ interface ModelState {
   cancelPull: (name: string) => void;
   deleteModel: (name: string) => Promise<void>;
   unloadModel: (name: string) => Promise<void>;
+
+  /** Reads which providers have a key and lists their models. */
+  refreshCloud: () => Promise<void>;
+  /** After a key was saved or removed: the new status and, if given, the provider's models. */
+  applyCloudStatus: (status: CloudStatus, provider?: CloudProviderId, models?: CloudModelInfo[]) => void;
+}
+
+/** What the composer needs to know about a cloud model (vision), in the shape of Ollama's /api/show. */
+function cloudDetails(ref: string): OllamaShowResponse {
+  const info = knownCloudModel(ref);
+  const { provider } = parseModelRef(ref);
+  const vision = info?.vision ?? provider === 'anthropic';
+  return {
+    capabilities: ['completion', ...(vision ? ['vision'] : []), ...(info?.thinking ? ['thinking'] : [])],
+    details: { family: info?.family || provider, parameter_size: info?.parameterSize },
+  };
 }
 
 export const useModelStore = create<ModelState>((set, get) => ({
@@ -45,6 +72,10 @@ export const useModelStore = create<ModelState>((set, get) => ({
   connectionError: null,
   downloads: {},
   isRefreshing: false,
+  cloudModels: [],
+  cloudStatus: null,
+  cloudErrors: {},
+  cloudLoading: false,
 
   checkConnection: async (endpoint) => {
     set({ connectionStatus: 'connecting', connectionError: null });
@@ -82,12 +113,14 @@ export const useModelStore = create<ModelState>((set, get) => ({
       const models = await modelService.getInstalledModels();
       const currentSelected = get().selectedModel;
 
+      // A cloud model stays selected: it does not depend on the local Ollama.
       let nextSelected = currentSelected;
-      if (!currentSelected || !models.some((m) => m.name === currentSelected)) {
+      if (!currentSelected || (!isCloudRef(currentSelected) && !models.some((m) => m.name === currentSelected))) {
         if (models.length > 0) {
           nextSelected = models[0].name;
         } else {
-          nextSelected = '';
+          const cloud = get().cloudModels[0];
+          nextSelected = cloud ? formatModelRef(cloud.provider, cloud.id) : '';
         }
       }
 
@@ -122,6 +155,10 @@ export const useModelStore = create<ModelState>((set, get) => ({
 
   selectModel: async (name: string) => {
     set({ selectedModel: name });
+    if (isCloudRef(name)) {
+      set({ selectedModelDetails: cloudDetails(name) });
+      return;
+    }
     try {
       const details = await modelService.getModelDetails(name);
       set({ selectedModelDetails: details });
@@ -131,6 +168,7 @@ export const useModelStore = create<ModelState>((set, get) => ({
   },
 
   inspectModel: async (name: string) => {
+    if (isCloudRef(name)) return cloudDetails(name);
     try {
       return await modelService.getModelDetails(name);
     } catch (err) {
@@ -211,5 +249,55 @@ export const useModelStore = create<ModelState>((set, get) => ({
   unloadModel: async (name: string) => {
     await modelService.unloadModel(name);
     await get().fetchRunning();
+  },
+
+  refreshCloud: async () => {
+    const api = window.electronAPI;
+    if (!api?.cloudStatus || !api.cloudListModels) return;
+    set({ cloudLoading: true });
+    try {
+      const status = await api.cloudStatus();
+      const lists = await Promise.all(
+        CLOUD_PROVIDERS.map(async (provider) => {
+          if (!status.providers[provider]?.configured) return { provider, models: [] as CloudModelInfo[] };
+          const res = await api.cloudListModels!(provider);
+          return res.ok ? { provider, models: res.models } : { provider, models: [] as CloudModelInfo[], error: res.error.code };
+        })
+      );
+      const cloudErrors: Partial<Record<CloudProviderId, CloudErrorCode>> = {};
+      for (const list of lists) if ('error' in list && list.error) cloudErrors[list.provider] = list.error;
+      const cloudModels = lists.flatMap((l) => l.models);
+      registerCloudModels(cloudModels);
+      set({ cloudStatus: status, cloudModels, cloudErrors });
+      const selected = get().selectedModel;
+      if (!selected && cloudModels.length && get().installedModels.length === 0) {
+        get().selectModel(formatModelRef(cloudModels[0].provider, cloudModels[0].id));
+      } else if (isCloudRef(selected)) {
+        set({ selectedModelDetails: cloudDetails(selected) });
+      }
+    } catch (err) {
+      console.error('Failed to read the cloud providers:', err);
+    } finally {
+      set({ cloudLoading: false });
+    }
+  },
+
+  applyCloudStatus: (status, provider, models) => {
+    set((state) => {
+      let cloudModels = state.cloudModels.filter((m) => status.providers[m.provider]?.configured);
+      const cloudErrors = { ...state.cloudErrors };
+      if (provider && models) {
+        cloudModels = [...cloudModels.filter((m) => m.provider !== provider), ...models];
+        delete cloudErrors[provider];
+        registerCloudModels(models);
+      }
+      if (provider && !status.providers[provider]?.configured) delete cloudErrors[provider];
+      return { cloudStatus: status, cloudModels, cloudErrors };
+    });
+    const selected = get().selectedModel;
+    if (isCloudRef(selected) && !status.providers[parseModelRef(selected).provider as CloudProviderId]?.configured) {
+      const local = get().installedModels[0];
+      get().selectModel(local ? local.name : '');
+    }
   },
 }));

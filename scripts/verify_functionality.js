@@ -392,6 +392,45 @@ test('24. Agent Hardware Optimization: Configurable tokens and synthesis strateg
   assert(aboutTs.includes('hardware.cpu') && aboutTs.includes('refreshHardware'), 'AboutSettings.tsx missing detected hardware');
 });
 
+// 25. Cloud models: the API keys stay in the main process
+test('25. Cloud Models: keys are kept in the main process, encrypted, and never sent to the renderer', () => {
+  const read = (rel) => fs.readFileSync(path.join(__dirname, '..', rel), 'utf-8');
+  const keyStore = read('electron/cloud/keyStore.ts');
+  assert(keyStore.includes("'cloud_keys.json'") || read('electron/main.ts').includes("'cloud_keys.json'"), 'Keys must have their own file (cloud_keys.json)');
+  assert(keyStore.includes('encryptString') && keyStore.includes('basic_text'), 'keyStore.ts must encrypt with safeStorage and refuse the basic_text backend');
+  assert(keyStore.includes('mode: 0o600'), 'cloud_keys.json must be readable by the user only');
+
+  const preload = read('electron/preload.ts');
+  assert(preload.includes("cloudSetKey: (provider, key) => ipcRenderer.invoke('cloud:setKey'"), 'preload.ts must offer cloudSetKey');
+  assert(!/cloudGetKey|getApiKey|readKey/.test(preload), 'preload.ts must not offer a way to read a key back');
+
+  const service = read('electron/cloud/index.ts');
+  assert(!/ipcMain\.handle\('cloud:getKey/.test(service), 'No IPC channel may return a key');
+
+  // Fixed provider addresses: an environment variable must not redirect a key.
+  assert(read('electron/cloud/anthropic.ts').includes("baseURL: ANTHROPIC_BASE_URL") && read('electron/cloud/anthropic.ts').includes('authToken: null'), 'The Anthropic client must use the fixed address and no token from the environment');
+  assert(read('electron/cloud/openai.ts').includes('baseURL: OPENAI_BASE_URL'), 'The OpenAI client must use the fixed address');
+  assert(read('electron/cloud/ollamaCloud.ts').includes("redirect: 'manual'"), 'Ollama Cloud requests must not follow redirects');
+
+  // The renderer never talks to a provider itself, and keys are no setting.
+  const settings = read('src/types/settings.ts');
+  assert(!/apiKey|api_key/i.test(settings), 'settings.ts (saved in emir_code_data.json) must not hold API keys');
+  const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(dir, e.name)) : [path.join(dir, e.name)]));
+  for (const file of walk(path.join(__dirname, '../src')).filter((f) => /\.(ts|tsx)$/.test(f))) {
+    const src = fs.readFileSync(file, 'utf-8');
+    assert(!/api\.anthropic\.com|api\.openai\.com/.test(src), `${path.relative(path.join(__dirname, '..'), file)} must not call a cloud provider directly`);
+  }
+
+  // Commands of the agent do not get the provider variables.
+  const sandbox = read('electron/sandbox.ts');
+  assert(!/ANTHROPIC_API_KEY|OPENAI_API_KEY|OLLAMA_API_KEY/.test(sandbox), 'commandEnvironment must not pass API keys to commands');
+
+  // Translations of the cloud texts in both languages.
+  for (const key of ['privacyNote', 'errAuth', 'errOllamaSignin', 'encryptionMissing']) {
+    assert(read('src/lib/localization/translations/en.ts').includes(`${key}:`) && read('src/lib/localization/translations/tr.ts').includes(`${key}:`), `Cloud text "${key}" missing in en.ts or tr.ts`);
+  }
+});
+
 console.log(`\n==============================================`);
 console.log(`📊 RESULTS: ${passedTests}/${totalTests} TESTS PASSED`);
 console.log(`==============================================\n`);

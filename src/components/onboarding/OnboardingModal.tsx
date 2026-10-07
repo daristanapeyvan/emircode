@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useModelStore } from '@/stores/modelStore';
 import { getTranslations } from '@/lib/localization/i18n';
-import { Download, Loader2, RefreshCw } from 'lucide-react';
+import { Cloud, Download, Loader2, RefreshCw } from 'lucide-react';
+import { useUIStore } from '@/stores/uiStore';
 import { Modal } from '../common/Modal';
 import { Button } from '../common/Button';
 import { cn } from '@/lib/utils/cn';
@@ -125,6 +126,12 @@ export const OnboardingModal: React.FC = () => {
     setIsOpen(false);
   };
 
+  /** Without Ollama: finish here and continue in Settings › Cloud models. */
+  const handleUseCloud = () => {
+    handleClose();
+    useUIStore.getState().openSettings('cloud');
+  };
+
   if (!isOpen) return null;
 
   const isOllamaReady = !!(prereqs?.ollama.installed && prereqs?.ollama.running);
@@ -201,6 +208,13 @@ export const OnboardingModal: React.FC = () => {
           />
 
           {installerNotice && <p className="pt-3 text-zinc-300">{installerNotice}</p>}
+
+          <div className="flex items-center justify-between gap-4 py-3 border-b border-zinc-800/60">
+            <p className="text-[11px] text-zinc-400 leading-relaxed">{t.cloud.onboardingCloud}</p>
+            <Button variant="secondary" size="sm" icon={<Cloud size={12} />} onClick={handleUseCloud}>
+              {t.cloud.onboardingCloudAction}
+            </Button>
+          </div>
 
           <div className="flex items-center justify-between gap-4 pt-3">
             <p className="text-[11px] text-zinc-500 leading-relaxed">{o.externalDownloadNoticeDesc}</p>

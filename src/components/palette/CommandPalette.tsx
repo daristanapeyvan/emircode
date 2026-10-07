@@ -10,6 +10,7 @@ import {
   Search,
   FolderPlus,
   ScrollText,
+  Cloud,
 } from 'lucide-react';
 import { useUIStore } from '@/stores/uiStore';
 import { useChatStore } from '@/stores/chatStore';
@@ -18,6 +19,7 @@ import { useModelStore } from '@/stores/modelStore';
 import { useAgentStore } from '@/stores/agentStore';
 import { focusAgentComposer } from '@/components/agent/NewProjectDialog';
 import { getTranslations } from '@/lib/localization/i18n';
+import { formatModelRef, modelLabel } from '@/lib/providers/modelRef';
 import { cn } from '@/lib/utils/cn';
 
 type Group = 'actions' | 'navigation' | 'preferences' | 'models';
@@ -36,7 +38,7 @@ export const CommandPalette: React.FC = () => {
   const workspaceRoot = useAgentStore((s) => s.workspaceRoot);
   const { createNewChat, activeChatId } = useChatStore();
   const { settings, setTheme, setLanguage } = useSettingsStore();
-  const { installedModels, selectModel } = useModelStore();
+  const { installedModels, selectModel, cloudModels } = useModelStore();
   const t = getTranslations(settings.language);
 
   const [search, setSearch] = useState('');
@@ -120,6 +122,16 @@ export const CommandPalette: React.FC = () => {
       },
     },
     {
+      id: 'cloud_models',
+      title: t.cloud.title,
+      category: 'navigation',
+      icon: <Cloud size={14} strokeWidth={1.5} />,
+      action: () => {
+        openSettings('cloud');
+        closeCommandPalette();
+      },
+    },
+    {
       id: 'open_settings',
       title: t.commandPalette.openSettings,
       category: 'navigation',
@@ -160,6 +172,21 @@ export const CommandPalette: React.FC = () => {
       icon: null,
       action: () => {
         selectModel(m.name);
+        closeCommandPalette();
+      },
+    });
+  });
+
+  // and to the models of the cloud providers that have a key
+  cloudModels.forEach((m) => {
+    const ref = formatModelRef(m.provider, m.id);
+    commands.push({
+      id: `model_${ref}`,
+      title: modelLabel(ref),
+      category: 'models',
+      icon: <Cloud size={14} strokeWidth={1.5} />,
+      action: () => {
+        selectModel(ref);
         closeCommandPalette();
       },
     });

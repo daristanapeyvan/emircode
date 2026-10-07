@@ -2,8 +2,10 @@ import { create } from 'zustand';
 import { Chat, Message, Attachment, GenerationMetadata, WebActivityLog } from '@/types/chat';
 import { GenerationOptions } from '@/types/ollama';
 import { storageService } from '@/lib/storage/StorageService';
-import { ollamaClient } from '@/lib/ollama/OllamaClient';
 import { ChatService } from '@/lib/ollama/ChatService';
+import { modelGateway } from '@/lib/providers/ModelGateway';
+import { cloudErrorText } from '@/lib/providers/errorText';
+import { isCloudRef, runsInCloud } from '@/lib/providers/modelRef';
 import { useModelStore } from './modelStore';
 import { useSettingsStore } from './settingsStore';
 import { generationService } from '@/lib/ollama/GenerationService';
@@ -20,7 +22,7 @@ import {
   cleanChatContent,
 } from '@/lib/web/WebIntentDetector';
 
-const chatService = new ChatService(ollamaClient);
+const chatService = new ChatService(modelGateway);
 /** The chat texts in the interface language. */
 const tChatNow = () => getTranslations(useSettingsStore.getState().settings.language).chat;
 
@@ -218,7 +220,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     // Chat and agent share one context window: an explicit num_ctx avoids Ollama's small default
     // (older turns were silently dropped) and switching modes no longer reloads the model.
-    if (!resolvedOptions.num_ctx) {
+    // Cloud models have their own window; this computer's memory does not limit them.
+    if (!resolvedOptions.num_ctx && !runsInCloud(currentModel)) {
       try {
         const info = await getModelRuntimeInfo(currentModel);
         const settingsState = useSettingsStore.getState();
@@ -387,14 +390,14 @@ Never tell the user to search the web or that you have no access; search yoursel
                 streamingMessageId: null,
               };
             });
-            useModelStore.getState().fetchRunning();
+            if (!isCloudRef(currentModel)) useModelStore.getState().fetchRunning();
           },
           onError: (streamErr: Error) => {
             set((state) => {
               const currentMsgs = [...state.messages];
               const currentTarget = currentMsgs.find((m) => m.id === assistantMsgId);
               if (currentTarget) {
-                currentTarget.error = streamErr.message;
+                currentTarget.error = cloudErrorText(streamErr, currentModel, getTranslations(useSettingsStore.getState().settings.language).cloud) || streamErr.message;
                 storageService.saveMessage(currentTarget);
               }
               return {
@@ -549,16 +552,17 @@ Never tell the user to search the web or that you have no access; search yoursel
             isStreaming: false,
             streamingMessageId: null,
           });
-          useModelStore.getState().fetchRunning();
+          if (!isCloudRef(currentModel)) useModelStore.getState().fetchRunning();
         },
         onError: (error: Error) => {
           set((state) => {
             const msgs = [...state.messages];
             const target = msgs.find((m) => m.id === assistantMsgId);
             if (target) {
-              target.error = error.message;
+              const text = cloudErrorText(error, currentModel, getTranslations(useSettingsStore.getState().settings.language).cloud) || error.message;
+              target.error = text;
               if (!target.content) {
-                target.content = `Error: ${error.message}`;
+                target.content = `Error: ${text}`;
               }
               storageService.saveMessage(target);
             }

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, Notification, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, Notification, shell, safeStorage } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
@@ -9,6 +9,7 @@ import { checkCommand, CREDENTIAL_OR_RUNNER_CONFIG } from './commandPolicy';
 import { WebError, searchWeb, fetchPage } from './web';
 import { readOnlyGit } from './git';
 import { Sandbox, IsolationOptions, IsolationReason, IsolationWarning, isSandboxSetupFailure, commandEnvironment } from './sandbox';
+import { CloudService, KeyStore, registerCloudIpc, safeStorageBox } from './cloud';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -1796,6 +1797,15 @@ ipcMain.handle('models:manifest', async (_event, { name, tag }: { name: string; 
     return { status: 'error', error: err?.message || String(err) };
   }
 });
+
+// ---------------------------------------------------------------------------
+// Cloud providers (electron/cloud): Ollama Cloud, Claude and GPT with the user's API keys. Keys stay
+// in this process, encrypted with the system's key store in cloud_keys.json (never in
+// emir_code_data.json); each provider has one fixed address.
+// ---------------------------------------------------------------------------
+const cloudService = new CloudService(new KeyStore(path.join(userDataPath, 'cloud_keys.json'), safeStorageBox(safeStorage)));
+registerCloudIpc(ipcMain, cloudService);
+app.on('before-quit', () => cloudService.abortAll());
 
 app.whenReady().then(() => {
   initMainLanguage(app.getLocale());

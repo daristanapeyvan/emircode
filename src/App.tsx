@@ -51,6 +51,8 @@ export const App: React.FC = () => {
         };
       }
       await initSettings();
+      // The cloud providers do not need Ollama: their models are listed alongside.
+      void useModelStore.getState().refreshCloud();
       await checkConnection();
       await initChat();
       await useAgentStore.getState().init();

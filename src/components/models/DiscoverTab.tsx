@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   Brain,
   Check,
+  Cloud,
   Code2,
   Download,
   Eye,
@@ -24,6 +25,7 @@ import { useSettingsStore } from '@/stores/settingsStore';
 import { useModelLibraryStore } from '@/stores/modelLibraryStore';
 import { getTranslations, resolveLanguage } from '@/lib/localization/i18n';
 import {
+  CLOUD_GROUP,
   CategoryId,
   LIBRARY_CATEGORIES,
   LibraryModel,
@@ -67,6 +69,7 @@ const CATEGORY_ICONS: Record<string, React.ComponentType<{ size?: number; stroke
   feather: Feather,
   message: MessageSquare,
   layers: Layers,
+  cloud: Cloud,
   grid: LayoutGrid,
 };
 
@@ -80,7 +83,7 @@ const localDate = (text: string, lang: Lang) => {
   return Number.isNaN(date.getTime()) ? text : date.toLocaleDateString(lang === 'tr' ? 'tr-TR' : 'en-US', { day: 'numeric', month: 'long', year: 'numeric' });
 };
 
-const sizeLabel = (size: string, t: LibText) => (size === OTHER_GROUP ? t.otherSize : size.toUpperCase());
+const sizeLabel = (size: string, t: LibText) => (size === OTHER_GROUP ? t.otherSize : size === CLOUD_GROUP ? t.cloudGroup : size.toUpperCase());
 
 function ago(time: number | null, t: LibText): string {
   if (!time) return '';
@@ -126,7 +129,8 @@ const LibraryCatalog: React.FC = () => {
   const visible = useMemo(() => modelsFor(models, category, query), [models, category, query]);
   const counts = useMemo(() => {
     const result: Partial<Record<CategoryId, number>> = {};
-    for (const m of models.filter(isLocal)) for (const id of categoriesOf(m)) result[id] = (result[id] || 0) + 1;
+    for (const m of models.filter(isLocal)) for (const id of categoriesOf(m)) if (id !== 'cloud') result[id] = (result[id] || 0) + 1;
+    result.cloud = models.filter((m) => m.cloud).length;
     return result;
   }, [models]);
   const loading = status === 'loading' || status === 'idle';
@@ -197,8 +201,14 @@ const LibraryCatalog: React.FC = () => {
         </nav>
 
         <div className="flex-1 min-w-0 overflow-y-auto py-3 sm:pl-4 space-y-4">
+          {category === 'cloud' && !query.trim() && (
+            <p className="flex items-start gap-1.5 text-[11px] text-zinc-400 leading-relaxed">
+              <Cloud size={13} strokeWidth={1.5} className="shrink-0 mt-px text-sky-400/90" />
+              {t.cloudHint}
+            </p>
+          )}
           {visible.length === 0 ? (
-            <p className="text-xs text-zinc-500 py-10 text-center">{loading ? t.loading : t.noResults}</p>
+            <p className="text-xs text-zinc-500 py-10 text-center">{loading ? t.loading : category === 'cloud' && !query.trim() ? t.cloudEmpty : t.noResults}</p>
           ) : (
             <div className="grid gap-2 grid-cols-[repeat(auto-fill,minmax(210px,1fr))]">
               {visible.map((m) => (
@@ -228,6 +238,12 @@ const ModelCard: React.FC<{ model: LibraryModel; lang: Lang; t: LibText; install
     >
       <span className="flex items-center gap-2">
         <span className="text-[13px] font-medium text-zinc-100 truncate">{model.name}</span>
+        {model.cloud && (
+          <span className="shrink-0 inline-flex items-center gap-1 text-[11px] text-sky-400/90" title={t.cloudHint}>
+            <Cloud size={11} strokeWidth={1.75} />
+            {model.sizes.length === 0 ? t.cloudOnly : t.cloudBadge}
+          </span>
+        )}
         {installed && (
           <span className="ml-auto shrink-0 inline-flex items-center gap-1 text-[11px] text-zinc-500">
             <Check size={11} strokeWidth={2} />
@@ -506,12 +522,19 @@ const VariantRow: React.FC<{
           {tier ? ` · ${TIER_TEXT(t)[tier]}` : ''}
         </span>
       </span>
-      <span className="shrink-0 text-right text-[11px] space-y-0.5">
-        <span className="block text-zinc-300 tabular-nums">{v.bytes ? gb(v.bytes, lang) : v.sizeLabel}</span>
-        <span className="block">
-          <FitText fit={hardwareFit(v.bytes, hw)} t={t} />
+      {v.group === CLOUD_GROUP ? (
+        <span className="shrink-0 inline-flex items-center gap-1 text-[11px] text-sky-400/90">
+          <Cloud size={12} strokeWidth={1.5} />
+          {t.cloudRuns}
         </span>
-      </span>
+      ) : (
+        <span className="shrink-0 text-right text-[11px] space-y-0.5">
+          <span className="block text-zinc-300 tabular-nums">{v.bytes ? gb(v.bytes, lang) : v.sizeLabel}</span>
+          <span className="block">
+            <FitText fit={hardwareFit(v.bytes, hw)} t={t} />
+          </span>
+        </span>
+      )}
     </button>
   );
 };
@@ -536,7 +559,9 @@ const VariantDetails: React.FC<{ option: VariantOption; lang: Lang; t: LibText; 
     <section className="rounded-md border border-zinc-800/80 divide-y divide-zinc-800/60">
       {v.context && <InfoRow label={t.context} value={v.context} />}
       {v.input && <InfoRow label={t.input} value={inputLabel(v.input, t)} />}
-      {bytes ? (
+      {v.group === CLOUD_GROUP ? (
+        <InfoRow label={t.cloudWhere} value={<span className="text-sky-400/90">{t.cloudWhereValue}</span>} />
+      ) : bytes ? (
         <InfoRow
           label={t.thisComputer}
           value={
@@ -601,9 +626,10 @@ const DownloadBar: React.FC<{ option: VariantOption; lang: Lang; t: LibText; hw:
   }, [local, comparison, compareInstalled, v.tag]);
   useEffect(() => setError(null), [v.tag]);
 
+  const cloud = v.group === CLOUD_GROUP;
   const start = async () => {
     setError(null);
-    if (bytes && hardwareFit(bytes, hw) === 'too-large') {
+    if (!cloud && bytes && hardwareFit(bytes, hw) === 'too-large') {
       const need = new Intl.NumberFormat(lang === 'tr' ? 'tr-TR' : 'en-US', { maximumFractionDigits: 1 }).format(memoryNeedGb(bytes));
       if (!(await confirmDialog({ title: t.tooLargeTitle, message: fill(t.tooLargeConfirm, { tag: v.tag, need }), confirmLabel: t.download }))) return;
     }
@@ -638,6 +664,8 @@ const DownloadBar: React.FC<{ option: VariantOption; lang: Lang; t: LibText; hw:
           </p>
         ) : local && comparison === 'differs' ? (
           <p className="text-amber-400/90">{t.installedDiffers}</p>
+        ) : cloud ? (
+          <p className="text-zinc-500 leading-snug">{t.cloudHint}</p>
         ) : null}
       </div>
       {download ? (
@@ -653,11 +681,11 @@ const DownloadBar: React.FC<{ option: VariantOption; lang: Lang; t: LibText; hw:
         <Button
           variant="primary"
           size="sm"
-          disabled={check?.status === 'missing' || check?.status === 'checking'}
-          icon={<Download size={13} strokeWidth={1.5} />}
+          disabled={!cloud && (check?.status === 'missing' || check?.status === 'checking')}
+          icon={cloud ? <Cloud size={13} strokeWidth={1.5} /> : <Download size={13} strokeWidth={1.5} />}
           onClick={() => void start()}
         >
-          {bytes ? fill(t.downloadSize, { size: gb(bytes, lang) }) : t.download}
+          {cloud ? t.cloudAdd : bytes ? fill(t.downloadSize, { size: gb(bytes, lang) }) : t.download}
         </Button>
       )}
     </div>

@@ -73,6 +73,14 @@ export interface SizeGroup {
 }
 
 export const OTHER_GROUP = 'other';
+/** Tags that run on ollama.com through a signed-in Ollama ("120b-cloud", "cloud"): their own group, never sized for this computer. */
+export const CLOUD_GROUP = 'cloud';
+
+/** "120b-cloud", "cloud": a tag that runs in Ollama's cloud instead of on this computer. */
+export function isCloudTagName(name: string): boolean {
+  const lower = String(name || '').toLowerCase();
+  return lower === 'cloud' || lower.endsWith('-cloud');
+}
 
 const SIZE_RE = /^(?:\d+(?:\.\d+)?[mbt]|e\d+(?:\.\d+)?b|\d+x\d+(?:\.\d+)?b)$/i;
 const QUANT_RE = /(?:^|-)((?:i?q\d(?:_\d)?(?:_[a-z]+)*)|fp16|fp32|bf16|mxfp4|int4|int8|qat)$/i;
@@ -162,8 +170,9 @@ export function parseLibraryHtml(html: string): LibraryModel[] {
   return models;
 }
 
-/** Group of a tag name: "8b-q8_0" → "8b"; "latest", "v1.5" → OTHER_GROUP. */
+/** Group of a tag name: "8b-q8_0" → "8b"; "latest", "v1.5" → OTHER_GROUP; "120b-cloud" → CLOUD_GROUP. */
 function groupOf(name: string): { group: string; suffix: string } {
+  if (isCloudTagName(name)) return { group: CLOUD_GROUP, suffix: name };
   const [first, ...rest] = name.split('-');
   return SIZE_RE.test(first) ? { group: first.toLowerCase(), suffix: rest.join('-') } : { group: OTHER_GROUP, suffix: name };
 }
@@ -236,7 +245,7 @@ export function groupVariants(model: string, variants: ModelVariant[]): SizeGrou
       const key = v.digest || v.tag;
       byDigest.set(key, [...(byDigest.get(key) || []), v]);
     }
-    const defaultTag = size === OTHER_GROUP ? null : `${model}:${size}`;
+    const defaultTag = size === OTHER_GROUP || size === CLOUD_GROUP ? null : `${model}:${size}`;
     const options: VariantOption[] = Array.from(byDigest.values()).map((same) => {
       const isDefault = !!defaultTag && same.some((v) => v.tag === defaultTag);
       // Download the canonical tag: the default, else the shortest name.
@@ -255,7 +264,7 @@ export function groupVariants(model: string, variants: ModelVariant[]): SizeGrou
     const def = options.find((o) => o.isDefault);
     result.push({
       size,
-      billions: size === OTHER_GROUP ? null : sizeToBillions(size),
+      billions: size === OTHER_GROUP || size === CLOUD_GROUP ? null : sizeToBillions(size),
       options,
       latest: !!latest && !!def && sameDigest(latest.digest, def.variant.digest),
       family: def ? def.family : '',
@@ -271,7 +280,9 @@ export function groupVariants(model: string, variants: ModelVariant[]): SizeGrou
       family: '',
     });
   }
-  return result.sort((a, b) => (a.billions ?? Infinity) - (b.billions ?? Infinity));
+  // Cloud tags come last: they are an alternative to running the model here.
+  const rank = (g: SizeGroup) => (g.size === CLOUD_GROUP ? 1 : 0);
+  return result.sort((a, b) => rank(a) - rank(b) || (a.billions ?? Infinity) - (b.billions ?? Infinity));
 }
 
 // ---------------------------------------------------------------------------
@@ -321,7 +332,7 @@ export function pickSize(groups: SizeGroup[], hw: { ramGb: number; vramGb?: numb
 // Categories
 // ---------------------------------------------------------------------------
 
-export type CategoryId = 'recommended' | 'coding' | 'agent' | 'reasoning' | 'vision' | 'small' | 'chat' | 'embedding' | 'all';
+export type CategoryId = 'recommended' | 'coding' | 'agent' | 'reasoning' | 'vision' | 'small' | 'chat' | 'embedding' | 'cloud' | 'all';
 
 export interface LibraryCategory {
   id: CategoryId;
@@ -338,6 +349,7 @@ export const LIBRARY_CATEGORIES: LibraryCategory[] = [
   { id: 'small', icon: 'feather', title: { tr: 'Hafif (4B ve altı)', en: 'Lightweight (4B or less)' } },
   { id: 'chat', icon: 'message', title: { tr: 'Sohbet ve genel', en: 'Chat & general' } },
   { id: 'embedding', icon: 'layers', title: { tr: 'Gömme (arama)', en: 'Embedding (search)' } },
+  { id: 'cloud', icon: 'cloud', title: { tr: 'Bulut (ollama.com)', en: 'Cloud (ollama.com)' } },
   { id: 'all', icon: 'grid', title: { tr: 'Tümü', en: 'All' } },
 ];
 
@@ -375,21 +387,27 @@ export function categoriesOf(m: LibraryModel): CategoryId[] {
   if (!embedding && m.sizes.some((s) => (sizeToBillions(s) ?? Infinity) <= 4)) ids.push('small');
   if (!embedding && !coding) ids.push('chat');
   if (embedding) ids.push('embedding');
+  if (m.cloud) ids.push('cloud');
   ids.push('all');
   return ids;
 }
 
 const fold = (s: string) => s.toLocaleLowerCase('tr').normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/ı/g, 'i');
 
-/** The models of a category (recommended ones in their own order, the rest by popularity), or the search results. */
+/**
+ * The models of a category (recommended ones in their own order, the rest by popularity), or the
+ * search results. Models that only run in ollama.com's cloud are listed only under Cloud and in a search.
+ */
 export function modelsFor(models: LibraryModel[], category: CategoryId, query = ''): LibraryModel[] {
   const local = models.filter(isLocal);
   const q = fold(query.trim());
   if (q) {
-    return local
+    return models
+      .filter((m) => isLocal(m) || m.cloud)
       .filter((m) => fold(`${m.name} ${m.description}`).includes(q))
       .sort((a, b) => Number(fold(b.name).startsWith(q)) - Number(fold(a.name).startsWith(q)) || b.pulls - a.pulls);
   }
+  if (category === 'cloud') return models.filter((m) => m.cloud).sort((a, b) => b.pulls - a.pulls);
   const list = local.filter((m) => categoriesOf(m).includes(category));
   if (category === 'recommended') {
     const order = RECOMMENDED_MODELS.map((r) => r.name);

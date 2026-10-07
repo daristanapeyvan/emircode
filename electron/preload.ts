@@ -1,4 +1,18 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import type { CloudChatRequest, CloudEvent, CloudModelInfo, CloudResult, CloudStatus } from './cloud/types';
+import type { CloudProviderId } from '../src/lib/providers/modelRef';
+
+export type {
+  CloudChatRequest,
+  CloudChunk,
+  CloudError,
+  CloudErrorCode,
+  CloudEvent,
+  CloudModelInfo,
+  CloudProviderStatus,
+  CloudResult,
+  CloudStatus,
+} from './cloud/types';
 
 export interface WorkspaceFileInfo {
   name: string;
@@ -181,6 +195,18 @@ export interface ElectronAPI {
   modelLibrary?: () => Promise<string>;
   modelTags?: (name: string) => Promise<string>;
   modelManifest?: (name: string, tag: string) => Promise<ModelManifestResult>;
+
+  // Cloud providers (Ollama Cloud, Claude, GPT). Keys go in and never come back out.
+  cloudStatus?: () => Promise<CloudStatus>;
+  /** Checks the key with the provider and saves it when it works. */
+  cloudSetKey?: (provider: CloudProviderId, key: string) => Promise<CloudResult<{ status: CloudStatus; persisted: boolean; models: CloudModelInfo[] }>>;
+  cloudRemoveKey?: (provider: CloudProviderId) => Promise<CloudStatus>;
+  cloudListModels?: (provider: CloudProviderId) => Promise<CloudResult<{ models: CloudModelInfo[] }>>;
+  cloudDescribe?: (provider: CloudProviderId, model: string) => Promise<CloudResult<{ info: CloudModelInfo; show?: any }>>;
+  /** Starts a streamed answer; it arrives through onCloudEvent with the same request id. */
+  cloudChat?: (requestId: string, request: CloudChatRequest) => Promise<CloudResult>;
+  cloudAbort?: (requestId: string) => Promise<boolean>;
+  onCloudEvent?: (callback: (event: CloudEvent) => void) => () => void;
 }
 
 export type ProjectErrorCode = 'invalid-name' | 'invalid-location' | 'exists' | 'error';
@@ -263,6 +289,20 @@ const electronAPI: ElectronAPI = {
   modelLibrary: () => ipcRenderer.invoke('models:library'),
   modelTags: (name) => ipcRenderer.invoke('models:tags', name),
   modelManifest: (name, tag) => ipcRenderer.invoke('models:manifest', { name, tag }),
+
+  // Cloud Providers Bridge
+  cloudStatus: () => ipcRenderer.invoke('cloud:status'),
+  cloudSetKey: (provider, key) => ipcRenderer.invoke('cloud:setKey', { provider, key }),
+  cloudRemoveKey: (provider) => ipcRenderer.invoke('cloud:removeKey', provider),
+  cloudListModels: (provider) => ipcRenderer.invoke('cloud:listModels', provider),
+  cloudDescribe: (provider, model) => ipcRenderer.invoke('cloud:describe', { provider, model }),
+  cloudChat: (requestId, request) => ipcRenderer.invoke('cloud:chat', { requestId, request }),
+  cloudAbort: (requestId) => ipcRenderer.invoke('cloud:abort', requestId),
+  onCloudEvent: (callback) => {
+    const handler = (_: unknown, event: CloudEvent) => callback(event);
+    ipcRenderer.on('cloud:event', handler);
+    return () => ipcRenderer.removeListener('cloud:event', handler);
+  },
 };
 
 contextBridge.exposeInMainWorld('electronAPI', electronAPI);

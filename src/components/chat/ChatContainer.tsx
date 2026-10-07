@@ -8,11 +8,12 @@ import { useChatStore } from '@/stores/chatStore';
 import { useModelStore } from '@/stores/modelStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { getTranslations } from '@/lib/localization/i18n';
+import { isCloudRef } from '@/lib/providers/modelRef';
 import { cn } from '@/lib/utils/cn';
 
 export const ChatContainer: React.FC = () => {
   const { messages, isStreaming, streamingMessageId } = useChatStore();
-  const { connectionStatus, checkConnection } = useModelStore();
+  const { connectionStatus, checkConnection, selectedModel } = useModelStore();
   const { settings } = useSettingsStore();
   const t = getTranslations(settings.language);
 
@@ -52,8 +53,8 @@ export const ChatContainer: React.FC = () => {
       {/* System prompt popover */}
       <SystemPromptPopover />
 
-      {/* Connection Failure Banner (Subtle, only when truly disconnected) */}
-      {connectionStatus === 'disconnected' && (
+      {/* Connection Failure Banner (Subtle, only when truly disconnected and a local model is in use) */}
+      {connectionStatus === 'disconnected' && !isCloudRef(selectedModel) && (
         <div className="bg-red-950/40 border-b border-red-900/50 px-4 py-2 flex items-center justify-between text-xs text-red-300 select-none z-10 shrink-0">
           <div className="flex items-center gap-2">
             <AlertCircle size={14} className="text-red-400 shrink-0" strokeWidth={1.5} />

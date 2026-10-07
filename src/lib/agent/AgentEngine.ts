@@ -1,4 +1,7 @@
 import { ollamaClient } from '../ollama/OllamaClient';
+import { modelGateway, isCloudRequestError } from '../providers/ModelGateway';
+import { cloudErrorText } from '../providers/errorText';
+import { PROVIDER_COMPANIES, cloudOwner, modelLabel } from '../providers/modelRef';
 import {
   AgentStep,
   AgentStatus,
@@ -195,7 +198,7 @@ export class AgentEngine {
     this.abortController?.signal.addEventListener('abort', onGlobalAbort, { once: true });
 
     try {
-      await ollamaClient.chatStream(
+      await modelGateway.chatStream(
         {
           model: params.model,
           system: params.system,
@@ -270,11 +273,12 @@ export class AgentEngine {
     const timer = setTimeout(() => controller.abort(), 90000);
     let text = '';
     try {
-      await ollamaClient.chatStream(
+      await modelGateway.chatStream(
         {
           model,
           messages: [{ role: 'user', content: buildCategoryPrompt(goal) }],
-          options: { temperature: 0, num_ctx: numCtx, num_predict: runtime.supportsThinking ? 512 : 48 },
+          // Cloud models may reason before answering even when asked not to; give them room.
+          options: { temperature: 0, num_ctx: numCtx, num_predict: runtime.remote ? 1024 : runtime.supportsThinking ? 512 : 48 },
           keep_alive: '30m',
           format: CATEGORY_SCHEMA,
           think: resolveThinkParam(runtime, false),
@@ -392,7 +396,12 @@ export class AgentEngine {
     const agentOpt = settingsState.settings.agentOptimization;
     const webAccessConfig = settingsState.settings.webAccess;
     const runtime = await getModelRuntimeInfo(model);
-    const requestProfile = resolveRequestProfile({ info: runtime, agentOpt, hardware: settingsState.hardware });
+    const requestProfile = resolveRequestProfile({
+      info: runtime,
+      agentOpt,
+      hardware: settingsState.hardware,
+      cloudContextLength: settingsState.settings.cloud?.contextLength,
+    });
     const requestedMaxTokens = agentOpt?.maxTokens || 4096;
     let think = requestProfile.think;
     let formatSupported = true;
@@ -465,9 +474,11 @@ export class AgentEngine {
     });
     const actionSchema = buildActionSchema(toolset, runtime.isSmall);
 
+    const owner = cloudOwner(model);
+    if (owner) callbacks.onLog(et('cloudModelNotice', { model: modelLabel(model), company: PROVIDER_COMPANIES[owner] }));
     callbacks.onLog(
       et('modelProfile', {
-        model: `${model}${runtime.parameterSizeB ? ` (${runtime.parameterSizeB}B)` : ''}`,
+        model: `${modelLabel(model)}${runtime.parameterSizeB ? ` (${runtime.parameterSizeB}B)` : ''}`,
         context: requestProfile.numCtx,
         output: requestProfile.numPredict,
         setting: requestedMaxTokens,
@@ -1569,12 +1580,13 @@ export class AgentEngine {
           } catch (streamErr: any) {
             const msg = String(streamErr?.message || '');
             const aborted = streamErr?.name === 'AbortError' || this.abortController?.signal.aborted;
-            if (!aborted && formatSupported && /format|schema|grammar/i.test(msg)) {
+            const cloudCode = isCloudRequestError(streamErr) ? streamErr.code : null;
+            if (!aborted && formatSupported && (cloudCode === 'format_unsupported' || (!cloudCode && /format|schema|grammar/i.test(msg)))) {
               formatSupported = false;
               callbacks.onLog(et('schemaUnsupported', { error: msg }));
               continue;
             }
-            if (!aborted && think !== undefined && /think/i.test(msg)) {
+            if (!aborted && think !== undefined && (cloudCode === 'think_unsupported' || (!cloudCode && /think/i.test(msg)))) {
               think = undefined;
               callbacks.onLog(et('thinkUnsupportedLog', { error: msg }));
               continue;
@@ -1894,8 +1906,11 @@ export class AgentEngine {
         }
 
         const rawMessage = String(err?.message || err || 'Bilinmeyen hata');
+        const cloudText = cloudErrorText(err, model, getTranslations(useSettingsStore.getState().settings.language).cloud);
         let friendly = rawMessage;
-        if (/Failed to fetch|NetworkError|ECONNREFUSED|fetch failed/i.test(rawMessage)) {
+        if (cloudText) {
+          friendly = cloudText;
+        } else if (/Failed to fetch|NetworkError|ECONNREFUSED|fetch failed/i.test(rawMessage)) {
           friendly = et('ollamaUnreachable', { endpoint: ollamaClient.getEndpoint() });
         } else if (/not found|pull/i.test(rawMessage) && /model/i.test(rawMessage)) {
           friendly = et('modelMissing', { model, error: rawMessage });
