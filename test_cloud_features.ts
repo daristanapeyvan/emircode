@@ -133,6 +133,16 @@ async function main() {
   check(/usage limit/.test(limitTextEn) && /resets in 3 hours/.test(limitTextEn) && /kullanım sınırı/.test(limitTextTr), 'Ollama Cloud usage limits are explained in both languages', [limitTextEn, limitTextTr]);
   const otherLimit = cloudErrorText(new CloudRequestError('anthropic', 'usage_limit', 'x'), 'anthropic::claude-opus-5-5', en.cloud) || '';
   check(/Claude: the usage limit of your plan/.test(otherLimit), 'Other providers get the general usage-limit text', otherLimit);
+  // Ollama Cloud's answer to a premium model on the free plan (HTTP 403): a plan, not a balance.
+  const premium = classifyCloudError(new HttpStatusError(403, 'this model requires a subscription, upgrade for access: https://ollama.com/upgrade (ref: 1a2b3c)'));
+  check(premium.code === 'plan_required', 'A model that needs a paid Ollama plan is "plan_required", not quota or auth', premium);
+  const premiumTr = cloudErrorText(new CloudRequestError('ollama-cloud', 'plan_required', premium.message), 'ollama-cloud::deepseek-v3.1:671b', tr.cloud) || '';
+  const premiumEn = cloudErrorText(new CloudRequestError('ollama-cloud', 'plan_required', premium.message), 'ollama-cloud::deepseek-v3.1:671b', en.cloud) || '';
+  check(/deepseek-v3\.1:671b/.test(premiumTr) && /ücretli bir Ollama planı/.test(premiumTr) && !/hesapta bakiye/.test(premiumTr) && /ollama\.com\/upgrade/.test(premiumEn), 'and is explained as a plan matter with the model and where to upgrade', [premiumTr, premiumEn]);
+  check(!/bakiye ya da kota/.test(cloudErrorText(new CloudRequestError('ollama-cloud', 'quota', 'x'), 'ollama-cloud::gpt-oss:20b', tr.cloud) || ''), 'Ollama Cloud never talks about a balance');
+  check(/ücretli bir Ollama planı/.test(cloudErrorText(new Error('this model requires a subscription, upgrade for access'), 'kimi-k2:1t-cloud', tr.cloud) || ''), 'The same through a "-cloud" tag of the local Ollama');
+  check(classifyCloudError({ status: 403, error: { error: { message: 'you have reached your weekly usage limit, upgrade for more' } } }).code === 'usage_limit', 'A usage limit that mentions upgrading stays a usage limit');
+  check(classifyCloudError({ status: 403, error: { error: { message: 'Invalid API key' } } }).code === 'auth' && classifyCloudError({ status: 429, error: { error: { message: 'You exceeded your current quota, please check your plan and billing details' } } }).code === 'quota', 'Other providers\' auth and quota errors are unchanged');
   const viaOllama = cloudErrorText(new Error("you've reached your weekly usage limit, try again in 4 days"), 'gpt-oss:120b-cloud', en.cloud) || '';
   check(/Ollama Cloud usage limit/.test(viaOllama) && /4 days/.test(viaOllama), 'A "-cloud" model through the local Ollama gets the same explanation', viaOllama);
 

@@ -156,6 +156,8 @@ export const en = {
     errOllamaSignin: 'This Ollama Cloud model needs a signed-in Ollama: run "ollama signin" in a terminal, then try again.',
     resetsAt: ' It resets {when}.',
     errUsageLimit: '{provider}: the usage limit of your plan is reached.{resets} Raise the limit on the provider\'s website or choose another model.',
+    errOllamaPlan: 'The Ollama Cloud model {model} needs a paid Ollama plan; your plan does not include it (there is no balance to top up). Choose another Ollama Cloud model, or upgrade at ollama.com/upgrade.',
+    errPlanRequired: '{provider}: the model {model} needs a paid plan that this account does not have. Choose another model, or upgrade the plan on the provider\'s website.',
     errOllamaUsageLimit: 'Your Ollama Cloud usage limit (hourly or weekly) is reached.{resets} Wait until it resets, upgrade your plan at ollama.com, or use a local model.',
     providerGemini: 'Gemini (Google)',
     providerMistral: 'Mistral',

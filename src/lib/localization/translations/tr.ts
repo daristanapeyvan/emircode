@@ -158,6 +158,8 @@ export const tr: typeof en = {
     errOllamaSignin: 'Bu Ollama Cloud modeli için Ollama\'da oturum açılmış olmalı: bir terminalde "ollama signin" çalıştırıp yeniden deneyin.',
     resetsAt: ' {when} sıfırlanır.',
     errUsageLimit: '{provider}: planınızın kullanım sınırı doldu.{resets} Sınırı sağlayıcının sitesinden yükseltin ya da başka bir model seçin.',
+    errOllamaPlan: '{model} Ollama Cloud modeli ücretli bir Ollama planı gerektiriyor; planınız bu modeli kapsamıyor (yüklenecek bir bakiye yok). Başka bir Ollama Cloud modeli seçin ya da planınızı ollama.com/upgrade adresinden yükseltin.',
+    errPlanRequired: '{provider}: {model} modeli bu hesapta olmayan ücretli bir plan gerektiriyor. Başka bir model seçin ya da planınızı sağlayıcının sitesinden yükseltin.',
     errOllamaUsageLimit: 'Ollama Cloud kullanım sınırınız (saatlik ya da haftalık) doldu.{resets} Sıfırlanmasını bekleyin, ollama.com\'dan planınızı yükseltin ya da yerel bir model kullanın.',
     providerGemini: 'Gemini (Google)',
     providerMistral: 'Mistral',

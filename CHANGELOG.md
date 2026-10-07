@@ -4,6 +4,9 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+### Fixed
+- An Ollama Cloud model that needs a paid Ollama plan (HTTP 403 "this model requires a subscription") was reported as "the account has no credit or quota left". It now has its own error (`plan_required`) and message: the model needs a paid plan, choose another Ollama Cloud model or upgrade at ollama.com/upgrade. Ollama Cloud errors never speak of a balance, and the same message appears for `-cloud` tags of a local Ollama.
+
 ## [2.1.0] - 2026-10-07
 
 Emir Code 2.1 completes the cloud roadmap of 2.0 ([docs/PLAN_ACIK_NOKTALAR.md](./docs/PLAN_ACIK_NOKTALAR.md)): more providers, costs and a task budget, effort and reasoning settings, live checks, and an agent that makes better use of large models. Local use is unchanged.

@@ -22,8 +22,15 @@ export function cloudErrorText(err: unknown, modelRef: string, t: CloudTexts, pr
         ? 'errNoKey'
         : err.code === 'auth'
           ? 'errAuth'
+          : err.code === 'plan_required'
+            ? err.provider === 'ollama-cloud'
+              ? 'errOllamaPlan'
+              : 'errPlanRequired'
           : err.code === 'quota'
-            ? 'errQuota'
+            ? // Ollama Cloud has plans with limits, not a balance.
+              err.provider === 'ollama-cloud'
+              ? 'errOllamaPlan'
+              : 'errQuota'
             : err.code === 'usage_limit'
               ? err.provider === 'ollama-cloud'
                 ? 'errOllamaUsageLimit'
@@ -50,6 +57,9 @@ export function cloudErrorText(err: unknown, modelRef: string, t: CloudTexts, pr
   if (isOllamaCloudTag(model) && /usage limit|(?:hourly|weekly|daily|session) limit|reached your (?:\w+ )?limit|\b429\b/i.test(message)) {
     const when = message.match(/(?:resets?|try again)\s+(?:in|at|after|on)\s+([^.;\n]{1,60})/i)?.[1]?.trim();
     return format(t.errOllamaUsageLimit, { resets: when ? format(t.resetsAt, { when }) : '' });
+  }
+  if (isOllamaCloudTag(model) && /requires? (?:a )?subscription|upgrade for access|premium model/i.test(message)) {
+    return format(t.errOllamaPlan, { model });
   }
   if (isOllamaCloudTag(model) && /unauthori[sz]ed|\b401\b|sign ?in|signin/i.test(message)) return t.errOllamaSignin;
   return null;

@@ -81,6 +81,13 @@ const NETWORK_RE = /fetch failed|network|ECONN(?:REFUSED|RESET|ABORTED)|ENOTFOUN
 const QUOTA_RE = /insufficient_quota|quota|billing|credit balance|payment|exceeded your current|usage limit|subscription/i;
 /** Plan limits that reset by themselves (Ollama Cloud's hourly and weekly limits). */
 const USAGE_LIMIT_RE = /usage limit|(?:hourly|daily|weekly|session|5-hour) (?:usage )?limit|limit (?:resets|will reset)|reached your (?:\w+ )?limit/i;
+/**
+ * The model or feature needs a paid plan the account does not have. Ollama Cloud answers a premium
+ * model on the free plan with 403 "this model requires a subscription, upgrade for access: …"; this
+ * is not a missing balance, and other models of the same key keep working.
+ */
+const PLAN_RE =
+  /requires? (?:a |an )?(?:paid |active )?(?:subscription|paid plan|pro plan)|upgrade for access|only available (?:to|for) (?:subscribers|paid)|not available on (?:the |your )?free (?:plan|tier)|premium model/i;
 const RESET_RE = /(?:resets?|try again|available again)\s+(?:in|at|after|on)\s+([^.;\n]{1,60})/i;
 const CONTEXT_RE = /context(?:_length|[_ ]window)?[_ ]exceeded|maximum context|context length|prompt is too long|too many tokens|input is too long|reduce the length/i;
 const FORMAT_RE = /output_config|output_format|response_format|json_schema|structured output|\bschema\b/i;
@@ -140,15 +147,16 @@ export function classifyCloudError(err: unknown, secrets: Array<string | null | 
     if (NETWORK_RE.test(text)) return result('network');
     return result('unknown');
   }
-  if (status === 401 || status === 403) return result(USAGE_LIMIT_RE.test(text) ? 'usage_limit' : QUOTA_RE.test(text) ? 'quota' : 'auth');
-  if (status === 402) return result(USAGE_LIMIT_RE.test(text) ? 'usage_limit' : 'quota');
+  if (status === 401 || status === 403) return result(USAGE_LIMIT_RE.test(text) ? 'usage_limit' : PLAN_RE.test(text) ? 'plan_required' : QUOTA_RE.test(text) ? 'quota' : 'auth');
+  if (status === 402) return result(USAGE_LIMIT_RE.test(text) ? 'usage_limit' : PLAN_RE.test(text) ? 'plan_required' : 'quota');
   if (status === 404) return result('not_found');
   if (status === 413) return result('context_length');
-  if (status === 429) return result(USAGE_LIMIT_RE.test(text) ? 'usage_limit' : QUOTA_RE.test(text) ? 'quota' : /RESOURCE_EXHAUSTED/.test(code) && /quota/i.test(message) ? 'quota' : 'rate_limit');
+  if (status === 429) return result(USAGE_LIMIT_RE.test(text) ? 'usage_limit' : PLAN_RE.test(text) ? 'plan_required' : QUOTA_RE.test(text) ? 'quota' : /RESOURCE_EXHAUSTED/.test(code) && /quota/i.test(message) ? 'quota' : 'rate_limit');
   if (status === 408 || status === 529 || status >= 500) return result('overloaded');
   if (status === 400 || status === 422) {
     if (/API[_ ]KEY[_ ]INVALID|api key not valid|invalid api key/i.test(text)) return result('auth');
     if (USAGE_LIMIT_RE.test(text)) return result('usage_limit');
+    if (PLAN_RE.test(text)) return result('plan_required');
     if (QUOTA_RE.test(text)) return result('quota');
     if (CONTEXT_RE.test(text)) return result('context_length');
     if (/model/i.test(text) && /not found|does not exist|unknown model|invalid model/i.test(text)) return result('not_found');

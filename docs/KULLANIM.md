@@ -369,6 +369,9 @@ AppImage için FUSE 2 gerekir: Ubuntu 24.04'te `sudo apt install libfuse2t64`, 2
 **"API anahtarı kabul edilmedi", "kota kalmamış", "kullanım sınırı doldu" ya da "istekler sınırlanıyor" hatası alıyorum.**
 Anahtarı Ayarlar › Bulut modelleri'nden **Değiştir** ile yeniden girin. Kota ve ödeme sorunları sağlayıcının sitesinden çözülür; sınırlama (rate limit) genellikle kısa sürede geçer. Ollama Cloud'un saatlik ve haftalık kullanım sınırları kendiliğinden sıfırlanır. Claude, GPT, Gemini ve Mistral'da geçici hatalar (sınırlama, sunucu yoğunluğu, bağlantı kopması) kendiliğinden yeniden denenir.
 
+**Ollama Cloud "ücretli bir Ollama planı gerektiriyor" diyor.**
+Seçtiğiniz model Ollama'nın ücretli planlarına ayrılmış bir model; ücretsiz planla kullanılamaz. Ollama Cloud'da yüklenecek bir bakiye yoktur: başka bir Ollama Cloud modeli seçin (aynı anahtarla diğer modeller çalışmaya devam eder) ya da planınızı [ollama.com/upgrade](https://ollama.com/upgrade) adresinden yükseltin.
+
 **OpenAI uyumlu sunucu eklenmiyor.**
 Adres sunucunun API tabanı olmalı, genellikle `/v1` ile biter (LM Studio: `http://localhost:1234/v1`). Uzak sunucular `https://` ister; ağınızdaki başka bir bilgisayarda `http://` ile çalışan bir sunucu için "Bu sunucu yerel ağımda" kutusunu işaretleyin. Emir Code kaydetmeden önce sunucunun model listesini okur; sunucu çalışıyor ve gerekiyorsa anahtar doğru olmalı.
 

@@ -85,6 +85,7 @@ export type CloudErrorCode =
   | 'auth'
   | 'quota'
   | 'usage_limit'
+  | 'plan_required'
   | 'rate_limit'
   | 'overloaded'
   | 'not_found'
