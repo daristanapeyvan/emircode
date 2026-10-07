@@ -4,7 +4,8 @@ import { ollamaClient } from '@/lib/ollama/OllamaClient';
 import { ModelService } from '@/lib/ollama/ModelService';
 import { formatBytes } from '@/lib/utils/formatters';
 import { registerCloudModels, knownCloudModel } from '@/lib/ollama/ModelRuntime';
-import { CLOUD_PROVIDERS, CloudProviderId, formatModelRef, isCloudRef, parseModelRef } from '@/lib/providers/modelRef';
+import { CloudProviderId, formatModelRef, isCloudRef, parseModelRef } from '@/lib/providers/modelRef';
+import { providerReady, readyProviders } from '@/lib/providers/cloudStatus';
 import type { CloudErrorCode, CloudModelInfo, CloudStatus } from '../../electron/preload';
 
 const modelService = new ModelService(ollamaClient);
@@ -258,8 +259,7 @@ export const useModelStore = create<ModelState>((set, get) => ({
     try {
       const status = await api.cloudStatus();
       const lists = await Promise.all(
-        CLOUD_PROVIDERS.map(async (provider) => {
-          if (!status.providers[provider]?.configured) return { provider, models: [] as CloudModelInfo[] };
+        readyProviders(status).map(async (provider) => {
           const res = await api.cloudListModels!(provider);
           return res.ok ? { provider, models: res.models } : { provider, models: [] as CloudModelInfo[], error: res.error.code };
         })
@@ -284,18 +284,19 @@ export const useModelStore = create<ModelState>((set, get) => ({
 
   applyCloudStatus: (status, provider, models) => {
     set((state) => {
-      let cloudModels = state.cloudModels.filter((m) => status.providers[m.provider]?.configured);
+      readyProviders(status);
+      let cloudModels = state.cloudModels.filter((m) => providerReady(status, m.provider));
       const cloudErrors = { ...state.cloudErrors };
       if (provider && models) {
         cloudModels = [...cloudModels.filter((m) => m.provider !== provider), ...models];
         delete cloudErrors[provider];
         registerCloudModels(models);
       }
-      if (provider && !status.providers[provider]?.configured) delete cloudErrors[provider];
+      if (provider && !providerReady(status, provider)) delete cloudErrors[provider];
       return { cloudStatus: status, cloudModels, cloudErrors };
     });
     const selected = get().selectedModel;
-    if (isCloudRef(selected) && !status.providers[parseModelRef(selected).provider as CloudProviderId]?.configured) {
+    if (isCloudRef(selected) && !providerReady(status, parseModelRef(selected).provider as CloudProviderId)) {
       const local = get().installedModels[0];
       get().selectModel(local ? local.name : '');
     }

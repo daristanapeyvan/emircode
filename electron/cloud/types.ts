@@ -3,9 +3,9 @@
  * A cloud chat request has the shape of an Ollama /api/chat request, and the stream comes back as
  * Ollama chunks, so the chat and the agent handle every provider the same way.
  */
-import type { CloudProviderId } from '../../src/lib/providers/modelRef';
+import type { BuiltinCloudProviderId, CloudProviderId, CompatEndpointInfo } from '../../src/lib/providers/modelRef';
 
-export type { CloudProviderId };
+export type { BuiltinCloudProviderId, CloudProviderId, CompatEndpointInfo };
 
 export interface CloudChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
@@ -31,6 +31,14 @@ export interface CloudGenerationOptions {
 
 export type CloudThinkValue = boolean | 'low' | 'medium' | 'high';
 
+/**
+ * How hard a model works on an answer (Settings › Cloud models › Effort): Claude's
+ * `output_config.effort`, OpenAI's reasoning effort, Gemini's thinking level. Each provider gets the
+ * nearest level the model supports; a model without such a setting ignores it.
+ */
+export type CloudEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+export const CLOUD_EFFORTS: CloudEffort[] = ['low', 'medium', 'high', 'xhigh', 'max'];
+
 export interface CloudChatRequest {
   provider: CloudProviderId;
   /** The provider's model id ("claude-opus-5-5"), without the "provider::" prefix. */
@@ -41,6 +49,16 @@ export interface CloudChatRequest {
   /** Ollama `format`: "json" or a JSON Schema the answer must follow. */
   format?: 'json' | Record<string, unknown>;
   think?: CloudThinkValue;
+  /** Settings › Cloud models › Effort; absent = the provider's default. */
+  effort?: CloudEffort;
+  /** OpenAI reasoning models: ask for a readable summary of the reasoning (shown as thinking). */
+  summaries?: boolean;
+  /**
+   * Experimental (Settings › Cloud models): the agent's actions go to Claude and GPT as the
+   * provider's own tools instead of a JSON answer schema. The answer still comes back as the same
+   * JSON action text, so the agent works the same way.
+   */
+  nativeTools?: boolean;
 }
 
 /** One piece of the answer, in the shape of an Ollama /api/chat chunk. */
@@ -66,6 +84,7 @@ export type CloudErrorCode =
   | 'no_key'
   | 'auth'
   | 'quota'
+  | 'usage_limit'
   | 'rate_limit'
   | 'overloaded'
   | 'not_found'
@@ -86,6 +105,8 @@ export interface CloudError {
   status?: number;
   /** Refusals: the provider's category ("cyber", "bio", …), when it gives one. */
   category?: string;
+  /** Usage limits and rate limits: when it resets, as the provider says it ("in 2 hours", a date). */
+  resetsAt?: string;
 }
 
 export type CloudEvent =
@@ -110,6 +131,8 @@ export interface CloudModelInfo {
   /** Ollama Cloud: "120B", the architecture family. */
   parameterSize?: string;
   family?: string;
+  /** Effort levels the model takes (Claude), when the provider says. */
+  efforts?: CloudEffort[];
   /** Seconds since 1970, for sorting. */
   createdAt?: number;
 }
@@ -124,8 +147,21 @@ export interface CloudProviderStatus {
   hint?: string;
 }
 
+/** An OpenAI-compatible server the user added, as the renderer sees it (the key never leaves the main process). */
+export interface CompatEndpointStatus extends CompatEndpointInfo {
+  provider: CloudProviderId;
+  /** The address the key is bound to ("https://openrouter.ai/api/v1"). */
+  baseURL: string;
+  /** Whether a key is saved for it (local servers often need none). */
+  configured: boolean;
+  source: CloudKeySource | null;
+  hint?: string;
+}
+
 export interface CloudStatus {
-  providers: Record<CloudProviderId, CloudProviderStatus>;
+  providers: Record<BuiltinCloudProviderId, CloudProviderStatus>;
+  /** OpenAI-compatible servers, in the order they were added. */
+  endpoints: CompatEndpointStatus[];
   /** Whether saved keys are encrypted with the system's key store ("none": kept for this session only). */
   encryption: 'os' | 'none';
 }

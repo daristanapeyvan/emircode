@@ -255,12 +255,12 @@ async function main() {
     { type: 'message_stop' },
   ];
   const chunks1 = events.flatMap((e) => tr1.handle(e));
-  const done1 = tr1.finish();
+  const done1 = tr1.finish().at(-1)!;
   check(contentOf(chunks1) === '{"thought":"ok","action":"finish","summary":"done"}' && thinkingOf(chunks1) === 'Plan: list the folder.', 'Text and thinking arrive as Ollama content and thinking');
   check(done1.done && done1.done_reason === 'stop' && done1.prompt_eval_count === 3520 && done1.cached_prompt_count === 3000 && done1.eval_count === 42, 'The last chunk counts the whole prompt (cached parts included) and the output', done1);
   const tr2 = new AnthropicStreamTranslator('claude-opus-5-5');
   tr2.handle({ type: 'message_delta', delta: { stop_reason: 'max_tokens' }, usage: { output_tokens: 9000 } });
-  check(tr2.finish().done_reason === 'length', 'max_tokens means "length", so the agent raises its output limit');
+  check(tr2.finish().at(-1)!.done_reason === 'length', 'max_tokens means "length", so the agent raises its output limit');
   const tr3 = new AnthropicStreamTranslator('claude-opus-5-5');
   tr3.handle({ type: 'message_delta', delta: { stop_reason: 'refusal', stop_details: { type: 'refusal', category: 'cyber' } } });
   let refusal: any = null;
@@ -314,11 +314,11 @@ async function main() {
     { choices: [{ index: 0, delta: { content: 'lo' }, finish_reason: 'stop' }] },
     { choices: [], usage: { prompt_tokens: 2000, completion_tokens: 5, prompt_tokens_details: { cached_tokens: 1024 } } },
   ].flatMap((c) => otr.handle(c));
-  const odone = otr.finish();
+  const odone = otr.finish().at(-1)!;
   check(contentOf(ochunks) === 'Hello' && odone.prompt_eval_count === 2000 && odone.cached_prompt_count === 1024 && odone.eval_count === 5 && odone.done_reason === 'stop', 'Chat Completions chunks become Ollama chunks with the usage', odone);
   const lengthTr = new OpenAIStreamTranslator('gpt-5');
   lengthTr.handle({ choices: [{ index: 0, delta: {}, finish_reason: 'length' }] });
-  check(lengthTr.finish().done_reason === 'length', 'finish_reason "length" is passed on');
+  check(lengthTr.finish().at(-1)!.done_reason === 'length', 'finish_reason "length" is passed on');
   const filtered = new OpenAIStreamTranslator('gpt-5');
   filtered.handle({ choices: [{ index: 0, delta: {}, finish_reason: 'content_filter' }] });
   let filterErr: any = null;
@@ -436,7 +436,7 @@ async function main() {
   // ---------------------------------------------------------------------------
   const valid = validateChatRequest({ provider: 'openai', model: 'gpt-5', messages: [{ role: 'user', content: 'hi' }], options: { temperature: 0.5, evil: 'x', num_ctx: '9' }, think: 'high', format: [1] });
   check(valid.ok && (valid as any).request.options.temperature === 0.5 && !('evil' in (valid as any).request.options) && !('num_ctx' in (valid as any).request.options) && (valid as any).request.think === 'high' && (valid as any).request.format === undefined, 'Requests are copied field by field; unknown and wrong values are dropped');
-  check(!validateChatRequest({ provider: 'gemini', model: 'x', messages: [{ role: 'user', content: 'hi' }] }).ok, 'Unknown providers are refused');
+  check(!validateChatRequest({ provider: 'cohere', model: 'x', messages: [{ role: 'user', content: 'hi' }] }).ok, 'Unknown providers are refused');
   check(!validateChatRequest({ provider: 'openai', model: 'bad model', messages: [{ role: 'user', content: 'hi' }] }).ok, 'Invalid model names are refused');
   check(!validateChatRequest({ provider: 'openai', model: 'gpt-5', messages: [{ role: 'root', content: 'hi' }] }).ok, 'Invalid roles are refused');
   check(!validateChatRequest({ provider: 'openai', model: 'gpt-5', messages: [{ role: 'user', content: 'x'.repeat(49 * 1024 * 1024) }] }).ok, 'Oversized requests are refused');

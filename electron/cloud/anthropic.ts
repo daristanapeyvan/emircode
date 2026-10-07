@@ -9,10 +9,16 @@
  *   get a thinking budget. Off means the model's own default.
  * - Models whose safety classifiers may decline a request get the server-side fallback
  *   (`fallbacks: "default"`), which reruns a declined request on the model Anthropic recommends.
+ * - Settings › Cloud models › Effort becomes `output_config.effort`, at the nearest level the model
+ *   offers (the Models API lists them).
+ * - Experimental native tool mode: the agent's actions go as tools (see nativeTools.ts); thinking is
+ *   then off, because a tool-use history without the signed thinking blocks would be refused.
  */
 import Anthropic from '@anthropic-ai/sdk';
-import type { CloudChatRequest, CloudChunk, CloudModelInfo } from './types';
-import { CloudFailure } from './errors';
+import type { CloudChatRequest, CloudChunk, CloudEffort, CloudModelInfo } from './types';
+import { CLOUD_EFFORTS } from './types';
+import { CloudFailure, classifyCloudError } from './errors';
+import { ActionToolCollector, actionTools, toAnthropicToolMessages } from './nativeTools';
 import { flattenSchema } from './schema';
 import { StreamClock, bareBase64, contentChunk, imageMediaType, splitConversation } from './messages';
 
@@ -39,6 +45,8 @@ export interface AnthropicCaps {
   vision: boolean;
   contextWindow?: number;
   maxOutput?: number;
+  /** Effort levels the model takes; undefined = not known (the setting is sent as it is). */
+  efforts?: CloudEffort[];
 }
 
 const supported = (node: any): boolean => !!node && node.supported === true;
@@ -55,7 +63,22 @@ export function anthropicCapsFromModel(model: any): AnthropicCaps {
     vision: hasTree ? supported(caps.image_input) : guess.vision,
     contextWindow: Number(model?.max_input_tokens) || guess.contextWindow,
     maxOutput: Number(model?.max_tokens) || guess.maxOutput,
+    efforts: hasTree && caps.effort ? (supported(caps.effort) ? CLOUD_EFFORTS.filter((level) => supported(caps.effort[level])) : []) : guess.efforts,
   };
+}
+
+/**
+ * The level to send: the wanted one when the model has it, else the nearest lower one it has (or
+ * the lowest). Undefined when the model takes no effort setting.
+ */
+export function pickEffort(wanted: CloudEffort | undefined, available: CloudEffort[] | undefined): CloudEffort | undefined {
+  if (!wanted) return undefined;
+  if (!available) return wanted;
+  if (available.length === 0) return undefined;
+  if (available.includes(wanted)) return wanted;
+  const rank = CLOUD_EFFORTS.indexOf(wanted);
+  const lower = available.filter((level) => CLOUD_EFFORTS.indexOf(level) < rank);
+  return lower.length ? lower[lower.length - 1] : available[0];
 }
 
 /** What a Claude model can do, from its id, when the Models API gave nothing. */
@@ -86,6 +109,7 @@ export function anthropicModelInfo(model: any): CloudModelInfo {
     vision: caps.vision,
     thinking: caps.adaptiveThinking ? 'adaptive' : caps.budgetThinking ? 'budget' : false,
     structuredOutput: caps.structuredOutput,
+    ...(caps.efforts ? { efforts: caps.efforts } : {}),
     ...(Number.isFinite(created) ? { createdAt: Math.floor(created / 1000) } : {}),
   };
 }
@@ -103,7 +127,7 @@ function userContent(text: string, images: string[] | undefined): string | Conte
 export function buildAnthropicParams(
   request: CloudChatRequest,
   caps: AnthropicCaps,
-  options: { fallbacks?: boolean } = {}
+  options: { fallbacks?: boolean; effort?: boolean } = {}
 ): Params {
   const { system, messages } = splitConversation(request);
   if (messages.length === 0) throw new CloudFailure('invalid', 'The conversation has no user message.');
@@ -122,7 +146,14 @@ export function buildAnthropicParams(
   };
   if (system) params.system = system;
 
-  if (request.think) {
+  const tools = request.nativeTools ? actionTools(request.format) : null;
+  if (tools) {
+    params.messages = toAnthropicToolMessages(params.messages, tools.map((t) => t.name));
+    params.tools = tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.schema as any }));
+    params.tool_choice = { type: 'any', disable_parallel_tool_use: true };
+  }
+
+  if (request.think && !tools) {
     if (caps.adaptiveThinking) {
       params.thinking = { type: 'adaptive', display: 'summarized' };
     } else if (caps.budgetThinking && maxTokens >= 2048) {
@@ -130,9 +161,13 @@ export function buildAnthropicParams(
     }
   }
 
-  if (request.format && typeof request.format === 'object' && caps.structuredOutput) {
-    params.output_config = { format: { type: 'json_schema', schema: flattenSchema(request.format) } };
+  const outputConfig: NonNullable<Params['output_config']> = {};
+  if (request.format && typeof request.format === 'object' && caps.structuredOutput && !tools) {
+    outputConfig.format = { type: 'json_schema', schema: flattenSchema(request.format) };
   }
+  const effort = options.effort === false ? undefined : pickEffort(request.effort, caps.efforts);
+  if (effort) outputConfig.effort = effort;
+  if (Object.keys(outputConfig).length) params.output_config = outputConfig;
 
   if (options.fallbacks && FALLBACK_MODELS.has(request.model)) {
     params.fallbacks = 'default';
@@ -161,10 +196,14 @@ export class AnthropicStreamTranslator {
   private stopCategory: string | undefined;
   private wrote = false;
   readonly clock: StreamClock;
+  /** Native tool mode: the tool call, and the text held back as its thought. */
+  readonly toolCall = new ActionToolCollector();
+  private readonly bufferText: boolean;
 
-  constructor(model: string, now: () => number = Date.now) {
+  constructor(model: string, now: () => number = Date.now, options: { nativeTools?: boolean } = {}) {
     this.model = model;
     this.clock = new StreamClock(now);
+    this.bufferText = !!options.nativeTools;
   }
 
   /** Whether any text has been passed on (a retry is then no longer possible). */
@@ -183,12 +222,29 @@ export class AnthropicStreamTranslator {
         this.outputTokens = Number(usage.output_tokens) || 0;
         return [];
       }
+      case 'content_block_start': {
+        const block = event.content_block || {};
+        if (block.type === 'tool_use' && block.name) {
+          this.clock.mark();
+          this.wrote = true;
+          this.toolCall.start(String(block.name));
+        }
+        return [];
+      }
       case 'content_block_delta': {
         const delta = event.delta || {};
         if (delta.type === 'text_delta' && delta.text) {
           this.clock.mark();
           this.wrote = true;
+          if (this.bufferText) {
+            this.toolCall.addText(String(delta.text));
+            return [];
+          }
           return [contentChunk(this.model, String(delta.text))];
+        }
+        if (delta.type === 'input_json_delta' && typeof delta.partial_json === 'string') {
+          this.toolCall.addArguments(delta.partial_json);
+          return [];
         }
         if (delta.type === 'thinking_delta' && delta.thinking) {
           this.clock.mark();
@@ -212,12 +268,15 @@ export class AnthropicStreamTranslator {
     }
   }
 
-  /** The last chunk, or the refusal as a CloudFailure. */
-  finish(): CloudChunk {
+  /** The tool call as the agent's JSON action (native tool mode) and the last chunk, or the refusal as a CloudFailure. */
+  finish(): CloudChunk[] {
     if (this.stopReason === 'refusal') {
       throw new CloudFailure('refusal', 'The request was declined by the provider.', { category: this.stopCategory });
     }
-    return {
+    const out: CloudChunk[] = [];
+    const action = this.toolCall.actionText() ?? (this.bufferText ? this.toolCall.bufferedText : '');
+    if (action) out.push(contentChunk(this.model, action));
+    out.push({
       model: this.model,
       created_at: new Date().toISOString(),
       message: { role: 'assistant', content: '' },
@@ -227,7 +286,8 @@ export class AnthropicStreamTranslator {
       cached_prompt_count: this.cacheRead,
       eval_count: this.outputTokens,
       ...this.clock.durations(),
-    };
+    });
+    return out;
   }
 }
 
@@ -244,7 +304,10 @@ export async function listAnthropicModels(client: Anthropic): Promise<CloudModel
   return models.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
 }
 
-/** Streams one answer. A request the server rejects because of the fallback field is sent once more without it. */
+/**
+ * Streams one answer. A request the server rejects because of the fallback field, or because of the
+ * effort level, is sent once more without it (as long as nothing was written yet).
+ */
 export async function runAnthropic(
   client: Anthropic,
   request: CloudChatRequest,
@@ -253,20 +316,26 @@ export async function runAnthropic(
   signal: AbortSignal
 ): Promise<void> {
   let fallbacks = true;
+  let effort = true;
+  const native = !!request.nativeTools && !!actionTools(request.format);
   for (;;) {
-    const params = buildAnthropicParams(request, caps, { fallbacks });
-    const translator = new AnthropicStreamTranslator(request.model);
+    const params = buildAnthropicParams(request, caps, { fallbacks, effort });
+    const translator = new AnthropicStreamTranslator(request.model, Date.now, { nativeTools: native });
     try {
       const stream = await client.beta.messages.create(params, { signal });
       for await (const event of stream) {
         for (const chunk of translator.handle(event)) emit(chunk);
       }
-      emit(translator.finish());
+      for (const chunk of translator.finish()) emit(chunk);
       return;
     } catch (err: any) {
-      const usedFallbacks = !!params.fallbacks;
-      if (usedFallbacks && !translator.hasOutput && err?.status === 400 && /fallback/i.test(String(err?.message || ''))) {
+      const retryable = !translator.hasOutput && !signal.aborted && err?.status === 400;
+      if (retryable && params.fallbacks && /fallback/i.test(String(err?.message || ''))) {
         fallbacks = false;
+        continue;
+      }
+      if (retryable && params.output_config?.effort && classifyCloudError(err).code === 'think_unsupported') {
+        effort = false;
         continue;
       }
       throw err;

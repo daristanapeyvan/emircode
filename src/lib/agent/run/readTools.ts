@@ -1,5 +1,5 @@
 import { WorkspaceFileInfo } from '../../../../electron/preload';
-import { findClosestPath, formatKb, hashText } from '../engineHelpers';
+import { findClosestPath, formatKb, hashText, isSafePath } from '../engineHelpers';
 import { lineCount, lineRangeExcerpt, sanitizeFileContent } from '../AgentProtocol';
 import { looksJsonEscaped } from '../TaskValidator';
 import { wrapUntrustedFileContent, wrapUntrustedGitOutput, wrapUntrustedSearchResults } from '../UntrustedData';
@@ -159,6 +159,129 @@ export async function handleReadFile(ctx: RunContext, { assistantText, parsed, p
     `[read_file "${filePath}": ${totalLines} lines, content removed from history to save space; read it again if you need it]`
   );
   ctx.seenActions.set(signature, { step: ctx.stepCount, entry });
+  return 'continue';
+}
+
+/**
+ * The "read_files" step (large models): several files in one round trip. Each file follows the
+ * read_file rules (decoded escapes, the per-file size limit, "already read and unchanged"); the
+ * files together stay within MAX_READ_FILES_CHARS, and what does not fit is named so the model
+ * can read it next.
+ */
+export async function handleReadFiles(ctx: RunContext, { assistantText, parsed, payload }: Pick<StepVars, 'assistantText' | 'parsed' | 'payload'>): Promise<LoopFlow> {
+  const requested: string[] = Array.isArray(payload.paths) ? payload.paths : [];
+  const limit = Math.max(1, ctx.READ_FILES_MAX || 1);
+  const paths = requested.slice(0, limit);
+  ctx.callbacks.onStep({
+    id: `step_reads_${Date.now()}`,
+    timestamp: Date.now(),
+    type: 'tool_call',
+    toolName: 'read_file',
+    toolArgs: { paths },
+    content: et('readingFiles', { count: paths.length, paths: paths.join(', ') }),
+  });
+
+  const blocks: string[] = [];
+  const notes: string[] = [];
+  const read: Array<{ path: string; signature: string; lines: number }> = [];
+  const repeated: Array<{ path: string; step: number }> = [];
+  let budget = Math.max(ctx.MAX_READ_CHARS, ctx.MAX_READ_FILES_CHARS || 0);
+  let failed = 0;
+  for (const filePath of paths) {
+    if (!isSafePath(filePath)) {
+      failed++;
+      notes.push(`[BLOCKED]: "${filePath}" is not a valid path inside the project.`);
+      continue;
+    }
+    const readRes = await window.electronAPI?.readWorkspaceFile(filePath);
+    if (!(readRes?.success && readRes.content !== undefined)) {
+      failed++;
+      if (!ctx.ledger.invalidPaths.includes(filePath)) ctx.ledger.invalidPaths.push(filePath);
+      const suggestion = findClosestPath(filePath, ctx.ledger.projectTree);
+      notes.push(`[ERROR]: "${filePath}" does not exist.${suggestion && suggestion !== filePath ? ` Did you mean "${suggestion}"?` : ''}`);
+      continue;
+    }
+    const content = readRes.content;
+    const signature = `read:${filePath}:${readRes.hash || hashText(content)}:-`;
+    const seen = ctx.seenActions.get(signature);
+    if (seen && seen.step !== 0 && ctx.stillVisible(seen.entry)) {
+      repeated.push({ path: filePath, step: seen.step });
+      continue;
+    }
+    if (budget <= 0) {
+      notes.push(`"${filePath}" was not read: this step's read limit is used up. Read it in the next step.`);
+      continue;
+    }
+    const escaped = looksJsonEscaped(content);
+    const source = escaped ? sanitizeFileContent(filePath, content).content : content;
+    const sourceLines = lineCount(source);
+    const cap = Math.min(ctx.MAX_READ_CHARS, budget);
+    let shown = source;
+    let header = `"${filePath}" (${sourceLines} lines, ${formatKb(content.length)})${
+      escaped ? ' — WARNING: stored with literal \\n and \\" escape sequences; shown decoded. Rewrite it with write_file using real line breaks and quotes' : ''
+    }`;
+    if (shown.length > cap) {
+      shown = shown.slice(0, cap);
+      header += ` — only the first ${lineCount(shown)} lines are shown; call read_file with start_line/end_line for the rest`;
+    }
+    budget -= shown.length;
+    ctx.ledger.knownFiles[filePath] = { size: content.length, lastAction: 'read' };
+    blocks.push(`${header}:\n${wrapUntrustedFileContent(filePath, shown)}`);
+    read.push({ path: filePath, signature, lines: sourceLines });
+  }
+  if (requested.length > paths.length) {
+    notes.push(`Only the first ${paths.length} paths were read (at most ${limit} per step): ${requested.slice(paths.length).map((p) => `"${p}"`).join(', ')} still need reading.`);
+  }
+  if (repeated.length > 0) {
+    notes.push(`Already read and unchanged (content above): ${repeated.map((r) => `"${r.path}" (step ${r.step})`).join(', ')}.`);
+  }
+
+  if (read.length === 0) {
+    // Nothing new: the same bookkeeping as a failed or repeated read_file.
+    if (repeated.length > 0 && failed === 0) {
+      ctx.repeatStreak++;
+      ctx.stepsWithoutProgress++;
+      ctx.notice(et('repeatedRead', { path: repeated.map((r) => r.path).join(', '), step: repeated[0].step }), 'rejected');
+      ctx.pushExchange(
+        assistantText,
+        parsed.rawJson,
+        `[REPEATED]: ${notes.join(' ')}${ctx.acceptanceNote()}${ctx.repeatNudge() || ' Continue with the next step (for example edit_file or write_file).'}`
+      );
+    } else {
+      ctx.consecutiveErrors++;
+      ctx.stepsWithoutProgress++;
+      ctx.callbacks.onStep({
+        id: `step_reads_fail_${Date.now()}`,
+        timestamp: Date.now(),
+        type: 'tool_result',
+        toolName: 'read_file',
+        content: et('filesNotRead', { count: paths.length }),
+        status: 'failed',
+      });
+      ctx.pushExchange(assistantText, parsed.rawJson, `${notes.join('\n')}\nIf a file is new, create it with write_file.`);
+    }
+    return 'continue';
+  }
+
+  ctx.consecutiveErrors = 0;
+  ctx.repeatStreak = 0;
+  ctx.stepsWithoutProgress = 0;
+  const observation = [...blocks, ...notes].join('\n\n');
+  ctx.callbacks.onStep({
+    id: `step_reads_res_${Date.now()}`,
+    timestamp: Date.now(),
+    type: 'tool_result',
+    toolName: 'read_file',
+    content: et('filesRead', { count: read.length, lines: read.reduce((sum, r) => sum + r.lines, 0) }),
+    status: failed > 0 ? 'failed' : 'success',
+  });
+  const entry = ctx.pushExchange(
+    assistantText,
+    parsed.rawJson,
+    observation,
+    `[read_files ${read.map((r) => `"${r.path}"`).join(', ')}: content removed from history to save space; read a file again if you need it]`
+  );
+  for (const r of read) ctx.seenActions.set(r.signature, { step: ctx.stepCount, entry });
   return 'continue';
 }
 

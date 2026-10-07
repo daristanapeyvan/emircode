@@ -4,7 +4,7 @@
 
 # Emir Code
 
-**AI models on your own computer, or Ollama Cloud, Claude and GPT when you want them: chat with one, or let a coding agent build and fix your project while you review every change.**
+**AI models on your own computer, or Ollama Cloud, Claude, GPT, Gemini and Mistral when you want them: chat with one, or let a coding agent build and fix your project while you review every change.**
 
 [![Latest release](https://img.shields.io/github/v/release/daristanapeyvan/emircode?label=Download&color=2ea44f)](https://github.com/daristanapeyvan/emircode/releases/latest)
 [![Platform](https://img.shields.io/badge/Windows%20x64%20%7C%20Linux%20x64-blue.svg)](https://github.com/daristanapeyvan/emircode/releases)
@@ -19,7 +19,7 @@
 
 </div>
 
-Emir Code is a desktop app for Windows and Linux. It runs models through [Ollama](https://ollama.com) on your machine, with no account and no telemetry. When a task needs a bigger model, add **Ollama Cloud**, **Claude** (Anthropic) or **GPT** (OpenAI) with your own API key and pick them in the same model selector.
+Emir Code is a desktop app for Windows and Linux. It runs models through [Ollama](https://ollama.com) on your machine, with no account and no telemetry. When a task needs a bigger model, add **Ollama Cloud**, **Claude** (Anthropic), **GPT** (OpenAI), **Gemini** (Google), **Mistral** or any **OpenAI-compatible server** (OpenRouter, Groq, LM Studio, vLLM …) with your own API key and pick them in the same model selector.
 
 ## ✨ What you get
 
@@ -31,7 +31,7 @@ Emir Code is a desktop app for Windows and Linux. It runs models through [Ollama
 | 🔒 **Isolated commands** | Programs the agent runs are kept away from your other files and from the network, as far as your system provides it. |
 | 🧙 **Wizards** | Website, Mini App and Script wizards turn a few choices into a detailed request. |
 | 📦 **Model manager** | Browse the Ollama library, see what fits your memory, download and verify. |
-| ☁️ **Cloud models** | Ollama Cloud, Claude and GPT next to your local models, with your own API key, kept encrypted by your system. |
+| ☁️ **Cloud models** | Ollama Cloud, Claude, GPT, Gemini, Mistral and OpenAI-compatible servers next to your local models, with your own API key, kept encrypted by your system; costs are estimated and a task budget stops the agent. |
 | 🌐 **Web when you want it** | Current questions are searched and the page is read; switch it off any time. |
 | 🌍 **English and Turkish** | The interface comes in both; write requests in any language your model understands. |
 
@@ -151,9 +151,9 @@ The Model Manager (**Ctrl+Shift+M**) lists the Ollama library from ollama.com by
 
 All listed runs passed their checks. Settings › Agent sets the context length, the maximum output per step and "Think before each step" for thinking models such as qwen3; *Auto* picks values for this computer.
 
-On a slow computer or for a large project, a cloud model is much faster; the benchmark has no measured cloud results yet.
+On a slow computer or for a large project, a cloud model is much faster. The benchmark runs cloud models too (`scripts/agent-e2e.ts anthropic::claude-sonnet-5-5 …`, see [CONTRIBUTING.md](./CONTRIBUTING.md#cloud-models-live-checks)); measured cloud results will be added to this table once they are run with real keys.
 
-## ☁️ Cloud models (Ollama Cloud, Claude, GPT)
+## ☁️ Cloud models
 
 Settings › **Cloud models** (also in the command palette and as **Add cloud models** in the model selector) takes an API key per provider:
 
@@ -162,10 +162,17 @@ Settings › **Cloud models** (also in the command palette and as **Add cloud mo
 | Ollama Cloud | Large open models on ollama.com (`gpt-oss:120b`, `qwen3-coder:480b`, `deepseek-v3.1:671b`, …) | An API key from ollama.com, **or** a signed-in Ollama (`ollama signin`) |
 | Claude (Anthropic) | Claude models such as `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-4-5` | An Anthropic API key |
 | GPT (OpenAI) | The GPT and o-series models of your account, such as `gpt-5`, `gpt-4.1` | An OpenAI API key |
+| Gemini (Google) | Gemini models such as `gemini-2.5-pro`, `gemini-2.5-flash` | A Gemini API key (Google AI Studio) |
+| Mistral | Mistral, Codestral and Magistral models | A Mistral API key |
+| OpenAI-compatible server | Whatever the server offers: OpenRouter, Groq, DeepSeek, Together, or LM Studio, vLLM, llama.cpp on your own machine | Its address, and a key if it needs one |
 
-- **Keys.** A key is checked with the provider before it is saved. It is stored in its own file, `cloud_keys.json`, encrypted with the system's key store (DPAPI on Windows, GNOME Keyring or KWallet on Linux), never in `emir_code_data.json`, and it never reaches the window: the interface only sees its last four characters. Without a system key store a key lasts until the app closes. `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` and `OLLAMA_API_KEY` in the environment are used when no key is saved; the agent's commands do not get them.
-- **Ollama Cloud through Ollama.** Sign in once with `ollama signin`, then add a cloud tag in Models › Discover › Cloud (or `ollama pull gpt-oss:120b-cloud`). These models run on ollama.com through your Ollama, without a key in Emir Code.
-- **The agent** keeps every guard: approvals, file checks, isolated commands, undo. Its context window follows Settings › Cloud models › Context window (Automatic: 64K tokens, never more than the model takes), not this computer's memory; one step may write up to 16K tokens. Claude requests reuse the cached start of the task; OpenAI caches on its own. "Think before each step" turns on Claude's adaptive thinking (with a readable summary) and a higher reasoning effort on GPT's reasoning models. A request that Claude's safety classifiers decline is retried by Anthropic on its recommended fallback model.
+- **Keys.** A key is checked with the provider before it is saved. It is stored in its own file, `cloud_keys.json`, encrypted with the system's key store (DPAPI on Windows, GNOME Keyring or KWallet on Linux), never in `emir_code_data.json`, and it never reaches the window: the interface only sees its last four characters, and error messages from providers are stripped of anything that looks like a key. Without a system key store a key lasts until the app closes. `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `MISTRAL_API_KEY` and `OLLAMA_API_KEY` in the environment are used when no key is saved; the agent's commands do not get them.
+- **OpenAI-compatible servers.** Add a name and an address (presets fill in OpenRouter, Groq, DeepSeek, Together, LM Studio, vLLM and llama.cpp). Remote servers need `https://`; plain `http://` is accepted for this computer, and for a private address only when you mark the server as being on your local network. The key is saved together with the address it belongs to and is never sent anywhere else; redirects are not followed. Emir Code asks before it adds a remote server, because your prompts and files go there. A server on this computer counts as local: it shows no cloud icon and no cost.
+- **The model selector** groups models by provider. Providers can offer dozens of models, so each one shows a selection: Claude's three newest, OpenAI's five newest, Gemini's newest, Mistral's `-latest` models, every Ollama Cloud model and every model of a small server. **Choose models** on a provider changes it; the selector's search and the command palette still find every model.
+- **Effort and reasoning.** *Effort of the agent* and *Effort in chats* (Automatic, Low … Maximum) become Claude's effort, the reasoning effort of OpenAI's reasoning models and Gemini's thinking level; a model gets the nearest level it supports. OpenAI's reasoning models run through the Responses API and show a readable summary of their reasoning in the answer's thinking block (*Reasoning summaries*).
+- **Costs.** Replies and finished tasks show their tokens and an **estimated** cost from a price table (US dollars per million tokens, built in for models whose price was known, editable in Settings › Cloud models › Prices). Ollama Cloud is a plan with usage limits, not per-token billing; when its hourly or weekly limit is reached the message says so and when it resets. A **task budget** stops the agent before a new step once a task's estimated cost reaches it; the changes made so far are kept.
+- **The agent** keeps every guard: approvals, file checks, isolated commands, undo. On a cloud model (or a local model of 24B and more) it works with more room: more steps, larger reads, several files in one step (`read_files`), a longer kept history and fewer instructions meant for small models; the base stylesheet for web pages is left to the model. Its context window follows Settings › Cloud models › Context window (Automatic: 64K tokens, never more than the model takes). Claude requests reuse the cached start of the task; OpenAI and Gemini cache on their own. A request that Claude's safety classifiers decline is retried by Anthropic on its recommended fallback model.
+- **Experimental: native tool calls.** Settings › Cloud models › Experimental sends the agent's actions to Claude and GPT as their own tools instead of a JSON answer. The agent and its checks work the same way; whether this becomes the default is decided by the benchmark ([docs/PLAN_ACIK_NOKTALAR.md](./docs/PLAN_ACIK_NOKTALAR.md), Turkish).
 - **What leaves this computer.** With a cloud model, your messages and attachments, and in the Code tab the files the agent reads, command output and web results, go to that provider and are processed under its terms. Nothing changes for local models.
 
 The design and the security decisions are in [docs/PLAN_BULUT_MODELLERI.md](./docs/PLAN_BULUT_MODELLERI.md) (Turkish), [ARCHITECTURE.md](./ARCHITECTURE.md#13-cloud-models) and [docs/SECURITY_MODEL.md](./docs/SECURITY_MODEL.md#cloud-models).
@@ -241,9 +248,21 @@ Windows caches icons; unpin and pin the app again, or sign out and back in.
 </details>
 
 <details>
-<summary><b>A cloud model reports an invalid key, no quota or a rate limit</b></summary>
+<summary><b>A cloud model reports an invalid key, no quota, a usage limit or a rate limit</b></summary>
 
-Enter the key again in Settings › Cloud models (**Replace**). Quota and billing are settled on the provider's website; a rate limit usually passes within seconds, and Claude and GPT retry temporary errors twice on their own. An Ollama Cloud model added through Ollama that answers "unauthorized" needs `ollama signin` in a terminal.
+Enter the key again in Settings › Cloud models (**Replace**). Quota and billing are settled on the provider's website; a rate limit usually passes within seconds, and Claude, GPT, Gemini and Mistral retry temporary errors on their own. Ollama Cloud's hourly and weekly usage limits reset by themselves; the message says when, if the provider tells. An Ollama Cloud model added through Ollama that answers "unauthorized" needs `ollama signin` in a terminal.
+</details>
+
+<details>
+<summary><b>An OpenAI-compatible server cannot be added</b></summary>
+
+The address must be the server's API base, usually ending in `/v1` (LM Studio: `http://localhost:1234/v1`). Remote servers need `https://`; for a server on another computer of your network over `http://`, tick "This server is on my local network". Emir Code lists the server's models before it saves it, so the server must be running and, if it needs one, the key must be right.
+</details>
+
+<details>
+<summary><b>The task stopped with "The task budget is used up"</b></summary>
+
+Settings › Cloud models › Task budget limits the estimated cost of one task. Raise it or choose "No limit", then continue in the same session: the changes made so far are kept.
 </details>
 
 <details>
@@ -258,7 +277,7 @@ The **Logs** panel (button in the project bar) shows the agent's events and the 
 
 - 🚫 No telemetry, analytics or accounts. Chats, settings and tasks are stored on this computer (`emir_code_data.json` in the app's data folder); API keys of cloud providers are in `cloud_keys.json`, encrypted by the system.
 - 🏠 With a local model, prompts and code go only to the Ollama address in Settings (`http://localhost:11434` by default).
-- ☁️ With a cloud model (Ollama Cloud, Claude, GPT), prompts, attachments and, for the agent, the files it reads, command output and web results go to that provider: `ollama.com`, `api.anthropic.com` or `api.openai.com`. Saving a key or refreshing the list reads the provider's model list.
+- ☁️ With a cloud model, prompts, attachments and, for the agent, the files it reads, command output and web results go to that provider: `ollama.com`, `api.anthropic.com`, `api.openai.com`, `generativelanguage.googleapis.com`, `api.mistral.ai`, or the address of an OpenAI-compatible server you added. Saving a key or refreshing the list reads the provider's model list.
 - 🌐 Apart from the cloud models you choose, Emir Code connects to the internet only for:
   - web access, which is on by default and can be switched off completely or separately for chat and the agent in Settings › Web access. Searches go to DuckDuckGo; chat reads the first result page and the agent can open web pages. Addresses on this computer or the local network are never opened;
   - the Model Manager, which reads the model list from ollama.com and checks tags with registry.ollama.ai (the source `ollama pull` uses) while its Discover or Installed tab is open;
@@ -281,10 +300,12 @@ npm run build:installer  # Windows installer and portable exe in release/
 npm run build:linux      # Linux packages: deb, rpm, AppImage, tar.gz
 ```
 
-The agent benchmark runs against a local Ollama model; the scenarios are listed at the top of `scripts/agent-e2e.ts`:
+The agent benchmark runs against a local Ollama model or, with the key in the environment, a cloud model; the scenarios and flags are listed at the top of `scripts/agent-e2e.ts`. `scripts/cloud-smoke.ts` checks every provider that has a key in the environment:
 
 ```bash
 node ./scripts/run-ts-test.mjs scripts/agent-e2e.ts qwen2.5-coder:7b web-new
+ANTHROPIC_API_KEY=… node ./scripts/run-ts-test.mjs scripts/agent-e2e.ts anthropic::claude-sonnet-5-5 web-new,js-bugfix --effort=high
+ANTHROPIC_API_KEY=… OPENAI_API_KEY=… node ./scripts/run-ts-test.mjs scripts/cloud-smoke.ts
 ```
 
 Pushing a `vX.Y.Z` tag starts the release workflow: it builds the Windows and Linux packages, launches the Linux packages in a virtual display and publishes the GitHub release.
@@ -295,8 +316,8 @@ Pushing a `vX.Y.Z` tag starts the release workflow: it builds the Windows and Li
 | :--- | :--- |
 | 🇹🇷 [docs/KULLANIM.md](./docs/KULLANIM.md) | Turkish user guide |
 | 🧪 [docs/EXAMPLES.md](./docs/EXAMPLES.md) | What happens during typical agent tasks |
-| ☁️ [docs/PLAN_BULUT_MODELLERI.md](./docs/PLAN_BULUT_MODELLERI.md) | Plan and design of cloud models: Ollama Cloud, Claude, GPT (Turkish) |
-| 🗺️ [docs/PLAN_ACIK_NOKTALAR.md](./docs/PLAN_ACIK_NOKTALAR.md) | Roadmap of Emir Code 2.x: live checks, cloud benchmark, costs, more providers (Turkish) |
+| ☁️ [docs/PLAN_BULUT_MODELLERI.md](./docs/PLAN_BULUT_MODELLERI.md) | Plan and design of cloud models (Turkish) |
+| 🗺️ [docs/PLAN_ACIK_NOKTALAR.md](./docs/PLAN_ACIK_NOKTALAR.md) | The 2.x roadmap and its status: live checks, benchmark, costs, more providers, native tool calls (Turkish) |
 | 🏗️ [ARCHITECTURE.md](./ARCHITECTURE.md) | Processes, agent loop, checks, themes, wizards, model library, cloud models, packaging |
 | 🔒 [docs/SECURITY_MODEL.md](./docs/SECURITY_MODEL.md) | What the app allows and blocks, and where the limits are |
 | 🚨 [SECURITY.md](./SECURITY.md) | How to report a vulnerability |

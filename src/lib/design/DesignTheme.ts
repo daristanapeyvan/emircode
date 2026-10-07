@@ -120,9 +120,14 @@ export function userGaveFonts(goal: string): boolean {
   return FONT_REQUEST.test(goal);
 }
 
-function baseEnabled(config: DesignThemeConfig, modelSizeB: number | null): boolean {
+/**
+ * Automatic: the base stylesheet helps models below 8B that write thin CSS. A large model (a cloud
+ * model, or >= 24B locally) writes complete styles itself, so it gets none even when its size is unknown.
+ */
+function baseEnabled(config: DesignThemeConfig, modelSizeB: number | null, largeModel = false): boolean {
   if (config.baseCss === 'on') return true;
   if (config.baseCss === 'off') return false;
+  if (largeModel) return false;
   return modelSizeB === null || modelSizeB < 8;
 }
 
@@ -134,6 +139,8 @@ export function planDesignTheme(input: {
   projectFiles: string[];
   config: Partial<DesignThemeConfig> | undefined;
   modelSizeB: number | null;
+  /** A cloud model or a large local one (see ModelRuntime tiers). */
+  largeModel?: boolean;
   /** Current content of theme/theme.css (null = the project has none). */
   existingThemeCss: string | null;
   random?: () => number;
@@ -153,7 +160,7 @@ export function planDesignTheme(input: {
     return {
       kind: 'new',
       theme: true,
-      base: baseEnabled(config, input.modelSizeB),
+      base: baseEnabled(config, input.modelSizeB, input.largeModel),
       webFonts: config.webFonts,
       fonts: true,
       icons: true,
@@ -167,7 +174,7 @@ export function planDesignTheme(input: {
     };
   }
   const themeOn = config.mode !== 'off';
-  const baseOn = baseEnabled(config, input.modelSizeB);
+  const baseOn = baseEnabled(config, input.modelSizeB, input.largeModel);
   if (!themeOn && !baseOn) return null;
   const colorsGiven = userGaveColors(goal);
   const fonts = !userGaveFonts(goal);

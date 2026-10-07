@@ -58,7 +58,9 @@ import {
   buildRuntimeInfo,
   buildAgentSamplingOptions,
   defaultContextForHardware,
+  buildCloudRuntimeInfo,
 } from './src/lib/ollama/ModelRuntime';
+import { agentLimitsFor } from './src/lib/agent/agentLimits';
 import { detectWebSearchIntent, detectKnowledgeRefusal, extractSearchQuery } from './src/lib/web/WebIntentDetector';
 import { AgentMemoryLedger } from './src/types/agent';
 
@@ -689,6 +691,25 @@ async function run() {
   const editVariant = schema.anyOf.find((v: any) => v.properties.action.const === 'edit_file');
   check(editVariant.properties.find.minLength === 1 && !editVariant.properties.replace.minLength, 'edit_file needs a non-empty "find" but may replace it with nothing');
   check(buildActionSchema(toolset, true).anyOf.length < buildActionSchema(toolset, false).anyOf.length, 'Small models get fewer tools');
+  const largeToolset: AgentToolset = { ...toolset, readFiles: 8 };
+  const largeActions = buildActionSchema(largeToolset, false).anyOf.map((v: any) => v.properties.action.const);
+  check(largeActions.includes('read_files') && !actions.includes('read_files') && !buildActionSchema(largeToolset, true).anyOf.some((v: any) => v.properties.action.const === 'read_files'), 'read_files is offered only to large models (never to compact prompts)', largeActions);
+  const largePrompt = buildAgentSystemPrompt({ securityProfile: 'autonomous', toolset: largeToolset, webSynthesisStrategy: 'auto', modificationStrategy: 'smart_injection', compact: false, large: true });
+  check(/read_files \{paths\}/.test(largePrompt) && /Work in few steps/.test(largePrompt) && !/Work in few steps/.test(promptA), 'Large models get read_files and the working-style rules; others do not');
+  check(largePrompt.length < 5600, `Large-model prompt stays compact (${largePrompt.length} chars)`);
+
+  // Tiers and limits
+  const qwen7 = buildRuntimeInfo('qwen2.5-coder:7b', { capabilities: ['completion'], details: { family: 'qwen2', parameter_size: '7.6B' } });
+  const qwen32 = buildRuntimeInfo('qwen2.5-coder:32b', { capabilities: ['completion'], details: { family: 'qwen2', parameter_size: '32.8B' } });
+  const ollamaCloudTag = buildRuntimeInfo('gpt-oss:120b-cloud', { capabilities: ['completion'], details: { family: 'gptoss', parameter_size: '116.8B' } });
+  const claude = buildCloudRuntimeInfo('anthropic::claude-opus-5-5', { provider: 'anthropic', id: 'claude-opus-5-5', label: 'Claude Opus 5.5', contextWindow: 1000000 });
+  check(gemma.tier === 'small' && qwen7.tier === 'medium' && qwen32.tier === 'large' && ollamaCloudTag.tier === 'large' && claude.tier === 'large', 'Model tiers: 2B small, 7B medium, 32B / cloud large', [gemma.tier, qwen7.tier, qwen32.tier, ollamaCloudTag.tier, claude.tier]);
+  const mediumLimits = agentLimitsFor('medium', 16384);
+  const cloudLimits = agentLimitsFor('large', 65536);
+  const tightLarge = agentLimitsFor('large', 8192);
+  check(mediumLimits.maxSteps === 35 && mediumLimits.maxReadChars === 16000 && mediumLimits.readFilesMax === 0, 'Small and medium models keep the tuned limits');
+  check(cloudLimits.maxSteps > 35 && cloudLimits.maxReadChars > 16000 && cloudLimits.readFilesMax === 8 && cloudLimits.compactionKeeps[0] === 8, 'Large models get more steps, bigger reads, read_files and a longer kept history', cloudLimits);
+  check(tightLarge.maxReadChars === 16000 && tightLarge.preloadChars <= 12000, 'A large model with an 8K window is not handed more than its window takes', tightLarge);
 
   // =====================================================================
   section('9. Context compaction & state line');

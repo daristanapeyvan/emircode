@@ -33,13 +33,44 @@ export interface CommandIsolationConfig {
   network: boolean;
 }
 
-/** Cloud models (Ollama Cloud, Claude, GPT). The API keys are not here: the main process keeps them. */
+/** "auto" = the provider's default; the rest: see CloudEffort (electron/cloud/types.ts). */
+export type CloudEffortSetting = 'auto' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
+/** A price per million tokens in US dollars (input, input read from the cache, output). */
+export interface ModelPrice {
+  input: number;
+  cachedInput?: number;
+  output: number;
+}
+
+/**
+ * Cloud models (Ollama Cloud, Claude, GPT, Gemini, Mistral, OpenAI-compatible servers). The API keys
+ * and server addresses are not here: the main process keeps them.
+ */
 export interface CloudConfig {
   /**
    * Context window of cloud models in tokens, for the agent's budget. 0 = automatic (64K, never
    * more than the model takes). Larger values shorten the history less but cost more per step.
    */
   contextLength: number;
+  /** Effort of the agent's steps (Claude effort, OpenAI reasoning effort, Gemini thinking level). */
+  agentEffort: CloudEffortSetting;
+  /** Effort of chat answers. */
+  chatEffort: CloudEffortSetting;
+  /** Show the reasoning summaries of OpenAI's reasoning models (in the thinking block). */
+  reasoningSummaries: boolean;
+  /**
+   * Models shown in the model selector, per provider ("anthropic" → ["claude-opus-5-5", …]). A
+   * provider without an entry shows its default selection (see visibleModels.ts). Hidden models stay
+   * reachable from the command palette and the selector's search.
+   */
+  visibleModels: Record<string, string[]>;
+  /** Prices the user set, by model reference; they win over the built-in table (pricing.ts). */
+  prices: Record<string, ModelPrice>;
+  /** Estimated cost after which the agent stops a task, in US dollars (0 = no limit). */
+  taskBudgetUsd: number;
+  /** Experimental: Claude and GPT get the agent's actions as their own tools (see nativeTools.ts). */
+  nativeTools: boolean;
 }
 
 export interface WebAccessConfig {
@@ -123,7 +154,16 @@ export const DEFAULT_SETTINGS: AppSettings = {
     chatEnabled: true,
     codingEnabled: true,
   },
-  cloud: { contextLength: 0 },
+  cloud: {
+    contextLength: 0,
+    agentEffort: 'auto',
+    chatEffort: 'auto',
+    reasoningSummaries: true,
+    visibleModels: {},
+    prices: {},
+    taskBudgetUsd: 0,
+    nativeTools: false,
+  },
   ollamaEndpoint: 'http://localhost:11434',
   ollamaTimeoutMs: 60000,
   keepAlive: '5m',

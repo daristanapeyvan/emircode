@@ -4,8 +4,32 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-10-07
+
+Emir Code 2.1 completes the cloud roadmap of 2.0 ([docs/PLAN_ACIK_NOKTALAR.md](./docs/PLAN_ACIK_NOKTALAR.md)): more providers, costs and a task budget, effort and reasoning settings, live checks, and an agent that makes better use of large models. Local use is unchanged.
+
+### Added
+- **Gemini** (Google) and **Mistral** as providers, with their own key, model list and heading in the model selector. Gemini runs through the official `@google/genai` SDK at the fixed Gemini API address (never Vertex AI): the answer schema as `responseJsonSchema`, thinking levels (Gemini 3) or budgets (2.5), thought summaries as thinking, blocked prompts explained. Mistral runs through the OpenAI SDK at `api.mistral.ai`, with Magistral's reasoning shown as thinking. `GEMINI_API_KEY` and `MISTRAL_API_KEY` are used when no key is saved.
+- **OpenAI-compatible servers** (OpenRouter, Groq, DeepSeek, Together, LM Studio, vLLM, llama.cpp …) in Settings › Cloud models, with presets. Remote servers need `https://`; `http://` is accepted for this computer, and for a private address only when the server is marked as being on the local network. The key is saved encrypted together with its address and used for that address only; redirects are not followed; adding a remote server asks for confirmation. A server on this computer counts as local (no cloud icon, no cost, sized like a local model).
+- **Costs and a task budget.** Replies and finished tasks show their tokens and an estimated cost from a price table (built in for models whose list price was known, editable per model in Settings › Cloud models › Prices). The task budget stops the agent before a new step once a task's estimated cost reaches it, with a notice at 80 %; the changes made so far are kept.
+- **Effort and reasoning.** *Effort of the agent* and *Effort in chats* become Claude's `output_config.effort` (at the nearest level the model lists), the reasoning effort of OpenAI's reasoning models and Gemini's thinking level. OpenAI's reasoning models now run through the Responses API (`store: false`) and show a readable summary of their reasoning in the answer's thinking block (*Reasoning summaries*).
+- **Models in the selector.** Each provider shows a selection by default (Claude's three newest, OpenAI's five newest, Gemini's newest, Mistral's `-latest`, all of Ollama Cloud, all of a small server); **Choose models** changes it. The selector groups models by provider and server, finds hidden models when searching, and always lists the selected one.
+- **Ollama Cloud usage limits** (hourly and weekly) have their own message, with when the limit resets when the provider says it; the same through a local Ollama's `-cloud` tags.
+- **Experimental native tool calls** (Settings › Cloud models › Experimental): the agent's actions go to Claude and GPT as the provider's own tools instead of a JSON answer, and come back as the same actions, so approvals and checks do not change. The benchmark decides whether it becomes the default; the decision criteria are in `docs/PLAN_ACIK_NOKTALAR.md`.
+- **Live checks.** `scripts/cloud-smoke.ts` checks every provider with a key in the environment (model list, a short answer, one agent step with the schema, thinking and effort, native tools, a wrong key masked) and prints a table; the hand-started `Cloud smoke test` workflow runs it with the repository's secrets and never for pushes, pull requests or forks. `scripts/agent-e2e.ts` runs cloud models through `scripts/cloud-bridge.ts` and reports tokens and the estimated cost (`--effort`, `--budget`, `--context`, `--native-tools`). A manual checklist is in the Turkish guide.
+- `test_cloud_features.ts` (part of `npm test`, no network): masking, usage limits, effort, the Responses API, Gemini, Mistral, the server rules with a real local HTTP server, the native tool mode, prices, the selector's defaults and the agent's cost and budget on a scripted cloud model. A sample tags page with cloud tags (`test_fixtures/ollama/tags_gpt-oss.html`); `npm run check:library` also checks cloud tags on the live page.
+
 ### Changed
-- The Anthropic and OpenAI SDKs are development dependencies: the main process bundles them at build time, so the packages no longer carry their `node_modules` (about 50 MB and 6,000 files less inside the app).
+- **The agent on large models.** It was tuned for small local models; a model of 24B and more, or any cloud model, now gets a *large* tier: 60 steps and 90 tool calls instead of 35 and 50, reads sized to the context window instead of 16,000 characters, `read_files` for up to 8 files in one step, up to 12 preloaded files, 8 kept exchanges and rarer compaction (so the provider's prompt cache lasts), and working-style rules instead of small-model hand-holding. All of it stays bounded by the context window. Small and medium models keep their limits.
+- The base stylesheet of design themes is off on Automatic for cloud models (it was on whenever the model's size was unknown).
+- **API keys are masked in every error text** that leaves the main process: the keys the app knows and anything key-shaped are cut to their last four characters.
+- Every cloud client refuses redirects, and clients for other hosts get no OpenAI organization or project headers from the environment.
+- Stops of the agent (budget, limits, errors) are shown in amber in the timeline.
+- The Anthropic and OpenAI SDKs (and now `@google/genai`) are development dependencies: the main process bundles them at build time, so the packages no longer carry their `node_modules` (about 50 MB and 6,000 files less inside the app).
+- Documentation: the README, the Turkish guide (new parts on servers, effort, costs, the selector, large models and a manual checklist), the architecture (model tiers; cloud providers, servers, native tools, costs), the security model (servers, the key bound to its address, masked errors), the contributing guide (live checks) and the security policy.
+
+### Not yet measured
+- The benchmark has no measured results for cloud models yet, and the native tool mode stays experimental until the comparison in `docs/PLAN_ACIK_NOKTALAR.md` is run with real keys.
 
 ## [2.0.0] - 2026-10-07
 

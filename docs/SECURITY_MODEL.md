@@ -13,7 +13,7 @@ An agent driven by a local model can be steered by text it reads (files, git out
 3. **Unwanted commands.** The model tries to install packages, run a shell, chain commands or run code that is in no file.
 4. **Programs that do more than they should.** A program the agent wrote or a test it runs reads other files, uses the network or starts other programs.
 5. **Half-written or unwanted changes.** A crash during a write, or a change the user did not want.
-6. **Leaked API keys.** The key of a cloud provider ends up in a file, in the window, in a program the agent runs, or at an address other than the provider's.
+6. **Leaked API keys.** The key of a cloud provider ends up in a file, in the window, in an error message or a log, in a program the agent runs, or at an address other than the one it was saved for.
 
 ---
 
@@ -176,27 +176,39 @@ The Model Manager's requests use separate functions (`models:library`, `models:t
 
 ## Cloud models
 
-Ollama Cloud, Claude (Anthropic) and GPT (OpenAI) are used only after the user enters an API key (or, for Ollama Cloud, signs in the local Ollama with `ollama signin`) and selects one of their models.
+Ollama Cloud, Claude (Anthropic), GPT (OpenAI), Gemini (Google), Mistral and OpenAI-compatible servers are used only after the user enters an API key or adds a server (or, for Ollama Cloud, signs in the local Ollama with `ollama signin`) and selects one of their models.
 
 **API keys** (`electron/cloud/keyStore.ts`):
 - A key is saved only after the provider's model list could be read with it. It is stored in `cloud_keys.json` in the app's data folder, written with mode 600, and encrypted with Electron `safeStorage`, which uses the system's key store: DPAPI on Windows, libsecret (GNOME Keyring) or KWallet on Linux. Keys are never part of `emir_code_data.json`, so backups or exports of the chats do not contain them.
 - On Linux without a key store, `safeStorage` falls back to a fixed password (`basic_text`). Emir Code does not treat that as encryption: the key is then kept in the main process's memory until the app closes, and Settings › Cloud models says so.
-- `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` and `OLLAMA_API_KEY` are read from the app's environment when no key is saved.
+- `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `MISTRAL_API_KEY` and `OLLAMA_API_KEY` are read from the app's environment when no key is saved.
 - The key stays in the main process. The window can save, replace or remove a key and learns only whether one is set, where it comes from and its last four characters; no IPC channel returns a key. Programs the agent runs do not get the variables above (see Commands), and `cloud_keys.json` is outside every project folder, so the agent's file tools cannot read it.
+- **Error texts are masked.** Some providers repeat part of a wrong key in their error. Before an error leaves the main process, `redactSecrets` (`electron/cloud/errors.ts`) replaces every key the key store knows, and anything key-shaped (provider prefixes such as `sk-`, `sk-ant-`, `AIza`, `gsk_`, bearer tokens, long random runs), with `…` and its last four characters. The interface, the logs and the scripts only ever see the masked text.
 
 **Where requests go** (`electron/cloud/`):
-- Each provider has one fixed address: `https://api.anthropic.com`, `https://api.openai.com/v1` and `https://ollama.com`. `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN` and `OPENAI_BASE_URL` in the environment are ignored, and requests to ollama.com do not follow redirects, so a key is sent to its provider only. The window cannot choose an address.
-- Requests from the window are checked in the main process before they are sent: a known provider, a model id of letters, digits and `. _ : / @ -`, the roles `system`, `user`, `assistant` and `tool`, numeric generation options only, and at most 48 MB including images. Requests of a window that was closed are stopped.
+- Each built-in provider has one fixed address: `https://api.anthropic.com`, `https://api.openai.com/v1`, `https://generativelanguage.googleapis.com` (never Vertex AI), `https://api.mistral.ai/v1` and `https://ollama.com`. `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `OPENAI_BASE_URL` and the Google SDK's project and location variables are ignored. No client follows redirects, so a key is sent to its provider only. The window cannot choose an address.
+- Requests from the window are checked in the main process before they are sent: a known provider, a model id of letters, digits and `. _ : / @ -`, the roles `system`, `user`, `assistant` and `tool`, numeric generation options only, known effort levels, and at most 48 MB including images. Requests of a window that was closed are stopped.
 
-**What the provider receives.** With a cloud model selected, the chat sends the conversation, the system instructions, attachments and web results; the agent sends its system prompt, the task, the files it reads, search results, git output, command output and web results, every step. The provider processes them under its own terms (retention, training, location). Emir Code adds no telemetry or identifiers of its own. An Ollama Cloud model added to the local Ollama (`…-cloud` tags) sends the same data to ollama.com through Ollama.
+**OpenAI-compatible servers** (`electron/cloud/endpoints.ts`). Here the user chooses the address, so the rules are stricter:
+- The address is checked in the main process: `https://` for every remote server; plain `http://` only for this computer (`localhost`, `127.0.0.0/8`, `::1`) and, when the user marks the server as being on the local network, for private addresses (`10/8`, `172.16/12`, `192.168/16`, link-local, `fc00::/7`, `*.local` …). A public address over `http://` is refused, because the key and every prompt would travel in clear text; a public address cannot be marked as local. User names, passwords, queries and fragments are refused.
+- The definitions live in the main process (`cloud_endpoints.json`, no secrets); the window names a server only by its id. An address cannot be edited: the server is removed (with its key) and added again. Entries edited by hand must pass the same rules when they are loaded.
+- **The key is bound to the address.** A server's key is encrypted together with the address it was saved for, and the key store hands it out only for that exact address. Pointing a saved server at another address in `cloud_endpoints.json` therefore does not send the key there: the key is simply not used.
+- Before a remote server is added, the interface asks for confirmation and names the host that will receive prompts, files and the key. The server is saved only after its model list could be read.
+- Servers get no native tool calls and none of OpenAI's organization or project headers from the environment. A server without a key receives a placeholder bearer value, never another provider's key.
 
-**What does not change.** A cloud model is driven by the same agent engine: every file, command and web request still goes through the checks, approvals and isolation of this document, and content from files and the web is still marked as untrusted. A cloud model can be misled by hidden instructions just like a local one.
+**What the provider receives.** With a cloud model selected, the chat sends the conversation, the system instructions, attachments and web results; the agent sends its system prompt, the task, the files it reads, search results, git output, command output and web results, every step. The provider processes them under its own terms (retention, training, location). OpenAI requests through the Responses API are sent with `store: false`. Emir Code adds no telemetry or identifiers of its own. An Ollama Cloud model added to the local Ollama (`…-cloud` tags) sends the same data to ollama.com through Ollama.
+
+**What does not change.** A cloud model is driven by the same agent engine: every file, command and web request still goes through the checks, approvals and isolation of this document, and content from files and the web is still marked as untrusted. A cloud model can be misled by hidden instructions just like a local one. The experimental native tool mode changes only how actions are encoded between Emir Code and Claude or GPT: the provider's tool call is turned back into the same action and goes through the same handlers, approvals and checks; the provider never runs a tool itself.
+
+**Costs.** Estimated costs and the task budget (Settings › Cloud models) are a convenience, not a guarantee: prices come from a table the user can edit, cache writes and long-context surcharges are not counted, and the budget is checked between steps, so one step can go past it. The provider's own spending limits remain the hard limit.
 
 Limits:
 - A program running as the user can ask the system's key store to decrypt `cloud_keys.json` just as Emir Code does; the encryption protects against copies of the file and other accounts, not against malware in the user's session.
 - While Emir Code runs, the keys are in the main process's memory.
 - A key in an environment variable is visible to every program started from that environment (but not to the agent's commands).
-- Emir Code cannot limit what a provider does with the data it receives, nor the costs a task causes; the provider's own spending limits apply.
+- An OpenAI-compatible server the user adds receives everything a provider would; Emir Code checks its address, not its trustworthiness.
+- A server on the local network marked as local can be reached over plain `http://`; anyone who can read that network can read the traffic.
+- Emir Code cannot limit what a provider does with the data it receives.
 
 ---
 

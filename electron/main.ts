@@ -9,7 +9,7 @@ import { checkCommand, CREDENTIAL_OR_RUNNER_CONFIG } from './commandPolicy';
 import { WebError, searchWeb, fetchPage } from './web';
 import { readOnlyGit } from './git';
 import { Sandbox, IsolationOptions, IsolationReason, IsolationWarning, isSandboxSetupFailure, commandEnvironment } from './sandbox';
-import { CloudService, KeyStore, registerCloudIpc, safeStorageBox } from './cloud';
+import { CloudService, EndpointStore, KeyStore, registerCloudIpc, safeStorageBox } from './cloud';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -1803,7 +1803,10 @@ ipcMain.handle('models:manifest', async (_event, { name, tag }: { name: string; 
 // in this process, encrypted with the system's key store in cloud_keys.json (never in
 // emir_code_data.json); each provider has one fixed address.
 // ---------------------------------------------------------------------------
-const cloudService = new CloudService(new KeyStore(path.join(userDataPath, 'cloud_keys.json'), safeStorageBox(safeStorage)));
+const cloudService = new CloudService(
+  new KeyStore(path.join(userDataPath, 'cloud_keys.json'), safeStorageBox(safeStorage)),
+  new EndpointStore(path.join(userDataPath, 'cloud_endpoints.json'))
+);
 registerCloudIpc(ipcMain, cloudService);
 app.on('before-quit', () => cloudService.abortAll());
 

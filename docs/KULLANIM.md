@@ -2,7 +2,7 @@
 
 Emir Code, yapay zekâ modellerini Ollama ile kendi bilgisayarınızda çalıştıran bir masaüstü uygulamasıdır. Modelle sohbet edebilir ya da bir proje klasöründe kod yazan, hata düzelten ve test çalıştıran bir ajan kullanabilirsiniz. Varsayılan olarak istekleriniz ve kodunuz yalnızca bilgisayarınızdaki Ollama'ya gider.
 
-İsterseniz yerel modellerin yanında **bulut modellerini** de kullanabilirsiniz: **Ollama Cloud** (ollama.com'daki büyük açık modeller), **Claude** (Anthropic) ve **GPT** (OpenAI). Bunun için kendi API anahtarınızı girersiniz; bir bulut modeli seçtiğinizde istekleriniz o sağlayıcıya gider (bkz. [Bulut modelleri](#bulut-modelleri-ollama-cloud-claude-gpt)).
+İsterseniz yerel modellerin yanında **bulut modellerini** de kullanabilirsiniz: **Ollama Cloud** (ollama.com'daki büyük açık modeller), **Claude** (Anthropic), **GPT** (OpenAI), **Gemini** (Google), **Mistral** ya da OpenRouter, Groq, LM Studio gibi **OpenAI uyumlu bir sunucu**. Bunun için kendi API anahtarınızı girersiniz; bir bulut modeli seçtiğinizde istekleriniz o sağlayıcıya gider (bkz. [Bulut modelleri](#bulut-modelleri)).
 
 ---
 
@@ -230,7 +230,7 @@ Temanın renklerini değiştirmek için `theme/theme.css` dosyasının başında
 <p align="center"><img src="images/tr-models.png" alt="Model Yöneticisi, Keşfet sekmesi" width="820" /></p>
 
 - **Kategoriler:** Önerilen (ajan testlerimizde kullanılan modeller), Kodlama, Ajan ve araç kullanımı, Akıl yürütme, Görüntü ve ses, Hafif (4B ve altı), Sohbet ve genel, Gömme (arama), **Bulut (ollama.com)** ve Tümü. Üstteki kutudan ada ya da açıklamaya göre arayabilirsiniz. Yalnızca ollama.com bulutunda çalışan modeller yalnızca Bulut kategorisinde ve aramada görünür.
-- **Bulut etiketleri:** Bir modelin sayfasındaki **Bulut** grubu, ollama.com'da çalışan etiketleri (ör. `gpt-oss:120b-cloud`) listeler. **Ekle** yalnızca küçük bir kayıt indirir; model bilgisayarınızda değil ollama.com'da çalışır. Bunun için Ollama'nızda bir kez `ollama signin` ile oturum açmış olmanız gerekir (bkz. [Bulut modelleri](#bulut-modelleri-ollama-cloud-claude-gpt)).
+- **Bulut etiketleri:** Bir modelin sayfasındaki **Bulut** grubu, ollama.com'da çalışan etiketleri (ör. `gpt-oss:120b-cloud`) listeler. **Ekle** yalnızca küçük bir kayıt indirir; model bilgisayarınızda değil ollama.com'da çalışır. Bunun için Ollama'nızda bir kez `ollama signin` ile oturum açmış olmanız gerekir (bkz. [Bulut modelleri](#bulut-modelleri)).
 - **Boyut:** Bir modele tıklayınca tüm boyutları görünür (ör. qwen3 için 0.6B'den 235B'ye). Bu bilgisayarda rahat çalışan en büyük boyut önceden seçilidir.
 - **Nicemleme:** Varsayılan (Q4_K_M) ile daha doğru ama daha büyük seçenekler (Q5_K_M, Q6_K, Q8_0, FP16) dosya boyutları ve kısa açıklamalarıyla listelenir. Her satırda "Rahat çalışır", "Sınırda: yavaş çalışabilir" ya da "Belleğe sığmaz" yazar. Seyrek nicemlemeler ve diğer sürümler **Diğer sürümler** altındadır.
 - **Doğrulama:** Seçtiğiniz etiket, Ollama'nın indirme yaptığı kayıt deposunda kendiliğinden kontrol edilir ve kesin boyutu gösterilir. İndirme bitince model depodakiyle karşılaştırılır. **Yüklü** sekmesi her modelin güncel olup olmadığını gösterir; yeni sürüm varsa **Güncelle** düğmesi çıkar.
@@ -253,11 +253,11 @@ Ajan testlerinin (`scripts/agent-e2e.ts`) GPU'suz bir dizüstü bilgisayardaki (
 
 Ayarlar › Ajan'dan bağlam uzunluğunu, adım başına en fazla çıktıyı ve qwen3 gibi düşünen modeller için "Adımlardan önce düşün" seçeneğini ayarlayabilirsiniz. "Otomatik", bu bilgisayara uygun değerleri seçer.
 
-**Bilgisayarınız yavaşsa ya da büyük bir projede çalışıyorsanız** bir bulut modeli (Claude, GPT ya da `qwen3-coder:480b`, `gpt-oss:120b` gibi Ollama Cloud modelleri) çok daha hızlı ve isabetli olabilir; karşılığında istekleriniz ve ajanın okuduğu dosyalar sağlayıcıya gider ve kullanım, sağlayıcının koşullarına göre ücretlendirilir ya da sınırlanır. Bulut modelleri için yukarıdaki tablodaki gibi ölçülmüş sonuçlar henüz yoktur.
+**Bilgisayarınız yavaşsa ya da büyük bir projede çalışıyorsanız** bir bulut modeli (Claude, GPT, Gemini, Mistral ya da `qwen3-coder:480b`, `gpt-oss:120b` gibi Ollama Cloud modelleri) çok daha hızlı ve isabetli olabilir; karşılığında istekleriniz ve ajanın okuduğu dosyalar sağlayıcıya gider ve kullanım, sağlayıcının koşullarına göre ücretlendirilir ya da sınırlanır. Ajan testleri bulut modelleriyle de çalışır (bkz. [CONTRIBUTING.md](../CONTRIBUTING.md#cloud-models-live-checks)); ölçülmüş bulut sonuçları gerçek anahtarlarla çalıştırıldıktan sonra bu tabloya eklenecek.
 
 ---
 
-## Bulut modelleri (Ollama Cloud, Claude, GPT)
+## Bulut modelleri
 
 Yerel modellerin yanında, bir sağlayıcının sunucularında çalışan büyük modelleri de kullanabilirsiniz. Ayarları **Ayarlar › Bulut modelleri**'ndedir (komut paletinde "Bulut modelleri", model seçicide **Bulut modeli ekle**).
 
@@ -266,31 +266,68 @@ Yerel modellerin yanında, bir sağlayıcının sunucularında çalışan büyü
 | Ollama Cloud | ollama.com'daki büyük açık modeller (`gpt-oss:120b`, `qwen3-coder:480b`, `deepseek-v3.1:671b` …) | API anahtarı (ollama.com › Settings › Keys) **ya da** Ollama'da `ollama signin` |
 | Claude (Anthropic) | Claude modelleri (ör. `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-4-5`) | Anthropic Console'dan API anahtarı |
 | GPT (OpenAI) | Hesabınızın erişebildiği GPT ve o serisi modeller (ör. `gpt-5`, `gpt-4.1`) | OpenAI Platform'dan API anahtarı |
+| Gemini (Google) | Gemini modelleri (ör. `gemini-2.5-pro`, `gemini-2.5-flash`) | Google AI Studio'dan Gemini API anahtarı |
+| Mistral | Mistral, Codestral ve Magistral modelleri | Mistral Console'dan API anahtarı |
+| OpenAI uyumlu sunucu | Sunucunun sunduğu modeller: OpenRouter, Groq, DeepSeek, Together ya da kendi bilgisayarınızdaki LM Studio, vLLM, llama.cpp | Adresi ve gerekiyorsa anahtarı |
 
 ### Anahtar ekleme
 1. Ayarlar › Bulut modelleri'nde sağlayıcının **API anahtarı al** bağlantısından anahtarınızı oluşturun.
 2. Anahtarı kutuya yapıştırıp **Kaydet**'e basın. Emir Code anahtarı sağlayıcının model listesini isteyerek dener; çalışmıyorsa kaydetmez ve nedenini yazar.
-3. Sağlayıcının modelleri model seçicide kendi başlıkları altında (Claude, GPT, Ollama Cloud) bulut simgesiyle görünür. Çok model varsa seçicinin üstünde bir arama kutusu çıkar.
+3. Sağlayıcının modelleri model seçicide kendi başlıkları altında bulut simgesiyle görünür. Çok model varsa seçicinin üstünde bir arama kutusu çıkar.
 
-**Anahtarınız nerede durur?** Anahtarlar sohbetlerin ve ayarların saklandığı `emir_code_data.json` dosyasında **tutulmaz**; ayrı bir `cloud_keys.json` dosyasında, işletim sisteminin anahtar deposuyla (Windows'ta DPAPI, Linux'ta GNOME Keyring/KWallet) şifreli durur. Linux'ta bir anahtar deposu yoksa anahtar diske yazılmaz, Emir Code kapanana kadar bellekte kalır ve ayarlar bunu söyler. Arayüz anahtarı bir daha göremez; yalnızca son dört karakteri gösterilir. `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` ve `OLLAMA_API_KEY` ortam değişkenleri de, kayıtlı anahtar yoksa kullanılır. Ajanın çalıştırdığı komutlar bu değişkenleri almaz. **Kaldır** anahtarı unutur.
+**Anahtarınız nerede durur?** Anahtarlar sohbetlerin ve ayarların saklandığı `emir_code_data.json` dosyasında **tutulmaz**; ayrı bir `cloud_keys.json` dosyasında, işletim sisteminin anahtar deposuyla (Windows'ta DPAPI, Linux'ta GNOME Keyring/KWallet) şifreli durur. Linux'ta bir anahtar deposu yoksa anahtar diske yazılmaz, Emir Code kapanana kadar bellekte kalır ve ayarlar bunu söyler. Arayüz anahtarı bir daha göremez; yalnızca son dört karakteri gösterilir. Sağlayıcının hata mesajlarında anahtara benzeyen her şey de maskelenir (`…abcd`). `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `MISTRAL_API_KEY` ve `OLLAMA_API_KEY` ortam değişkenleri de, kayıtlı anahtar yoksa kullanılır. Ajanın çalıştırdığı komutlar bu değişkenleri almaz. **Kaldır** anahtarı unutur.
+
+### Model seçicide hangi modeller görünür?
+Sağlayıcılar onlarca model sunabilir; bu yüzden her sağlayıcı bir seçki gösterir: Claude'un en yeni üç modeli, OpenAI'ın en yeni beş sohbet modeli, Gemini'nin en yeni modelleri, Mistral'ın `-latest` modelleri, Ollama Cloud'un bütün modelleri ve az modelli bir sunucunun bütün modelleri. Sağlayıcının **Modelleri seç** düğmesiyle kutuları işaretleyerek değiştirebilirsiniz (**Önerilenler** varsayılana döner). Seçicinin araması ve komut paleti gizli modelleri de bulur; seçili model her zaman listede kalır.
+
+### OpenAI uyumlu sunucular
+OpenAI API'sini konuşan her sunucuyu ekleyebilirsiniz. **Hazır** düğmeleri OpenRouter, Groq, DeepSeek, Together, LM Studio, vLLM ve llama.cpp için adı ve adresi doldurur.
+
+- **Adres kuralları:** Uzak sunucular `https://` ister. Düz `http://` yalnızca bu bilgisayar (`localhost`, `127.0.0.1`) için ve, "Bu sunucu yerel ağımda" işaretliyse, özel bir ağ adresi (`192.168.x.x`, `10.x.x.x`, `*.local` …) için kabul edilir. Adreste kullanıcı adı, parola, `?` ya da `#` olamaz.
+- **Anahtar adrese bağlıdır:** Anahtar, ait olduğu adresle birlikte şifrelenir ve başka hiçbir adrese gönderilmez; yönlendirmeler izlenmez. Bir sunucunun adresi değiştirilemez: kaldırıp yeniden ekleyin.
+- Uzak bir sunucu eklenirken Emir Code onay ister, çünkü istekleriniz ve ajanın okuduğu dosyalar oraya gider. Bu bilgisayardaki bir sunucu (LM Studio gibi) yerel sayılır: bulut simgesi ve ücret göstermez, ajan onu yerel bir model gibi boyutuna göre ayarlar.
 
 ### Ollama üzerinden Ollama Cloud (API anahtarsız)
-Ollama kuruluysa bir terminalde bir kez `ollama signin` çalıştırın. Sonra Model Yöneticisi › Keşfet › **Bulut (ollama.com)** kategorisinden bir modelin bulut etiketini **Ekle**yin (ya da terminalde `ollama pull gpt-oss:120b-cloud`). Bu modeller model seçicide **Ollama Cloud (Ollama üzerinden)** başlığı altında görünür ve Ollama'nız üzerinden ollama.com'da çalışır. Ollama oturum açmamışsa Emir Code "ollama signin" gerektiğini söyler.
+Ollama kuruluysa bir terminalde bir kez `ollama signin` çalıştırın. Sonra Model Yöneticisi › Keşfet › **Bulut (ollama.com)** kategorisinden bir modelin bulut etiketini **Ekle**yin (ya da terminalde `ollama pull gpt-oss:120b-cloud`). Bu modeller model seçicide **Ollama Cloud (Ollama üzerinden)** başlığı altında görünür ve Ollama'nız üzerinden ollama.com'da çalışır. Ollama oturum açmamışsa Emir Code "ollama signin" gerektiğini söyler. Ollama Cloud'un saatlik ya da haftalık kullanım sınırı dolarsa mesaj bunu ve sağlayıcı bildiriyorsa sınırın ne zaman sıfırlanacağını yazar.
+
+### Çaba ve akıl yürütme
+- **Ajanın çabası** ve **Sohbette çaba** (Otomatik, Düşük, Orta, Yüksek, Çok yüksek, En yüksek): Claude'un çaba (effort) ayarına, OpenAI'ın akıl yürüten modellerinin akıl yürütme çabasına ve Gemini'nin düşünme düzeyine dönüşür. Her model desteklediği en yakın düzeyi alır; Otomatik sağlayıcının varsayılanını kullanır. Yüksek düzey daha titizdir ama daha yavaştır ve daha çok token harcar.
+- **Akıl yürütme özetleri:** OpenAI'ın akıl yürüten modelleri (GPT-5, o serisi) Responses API üzerinden çalışır ve nasıl düşündüklerinin okunabilir özeti cevabın **Düşünme** bölümünde görünür.
+
+### Maliyet ve görev bütçesi
+- Cevaplar ve biten görevler kullandıkları token'ları ve **tahmini** ücreti gösterir. Ücret, Ayarlar › Bulut modelleri › **Fiyatlar** tablosundan (milyon token başına ABD doları: giriş, önbellekten giriş, çıkış) hesaplanır. Tablo uygulamayla gelir ama sağlayıcılar fiyatlarını değiştirir: **Düzenle** ile kendi fiyatınızı girin. Fiyatı bilinmeyen modelde yalnızca token sayıları görünür.
+- Ollama Cloud token başına değil, kullanım sınırlı bir planla ücretlendirilir; yerel modeller ve bu bilgisayardaki sunucular ücretsizdir.
+- **Görev bütçesi:** Bir görevin tahmini maliyeti bu tutara ulaşınca ajan yeni adım başlatmaz ve görevi "Görev bütçesi doldu" notuyla durdurur; o ana kadarki değişiklikler korunur. Bütçenin %80'i harcandığında bir uyarı görünür. Bütçe yalnızca fiyatı bilinen modellerde denetlenebilir.
 
 ### Ajan bulut modelleriyle nasıl çalışır?
 - Bütün korumalar aynıdır: onay seviyeleri, dosya kontrolleri, yalıtılmış komutlar, geri alma.
+- **Büyük modellere göre ayar:** Ajan küçük yerel modeller için ayarlanmıştı. Bir bulut modelinde (ya da 24B ve üzeri bir yerel modelde) daha fazla adım atar, dosyaları daha büyük parçalar hâlinde okur, birden çok dosyayı tek adımda okuyabilir (`read_files`), geçmişin daha büyük kısmını saklar ve küçük modeller için yazılmış ayrıntılı kurallar yerine "önce oku, sonra değiştir, sonra doğrula" çalışma düzenini alır. Yeni web sayfalarında temel stil katmanı bulut modellerine eklenmez; tasarım teması yine uygulanır.
 - **Bağlam penceresi** bilgisayarınızın belleğine değil, Ayarlar › Bulut modelleri › **Bağlam penceresi** ayarına bağlıdır (Otomatik: 64K token, modelin sınırını aşmaz). Büyük pencere geçmişi daha az kısaltır ama her adım daha çok token harcar.
 - Adım başına çıktı 16K tokene kadardır; cevap kesilirse ajan sınırı kendiliğinden yükseltir.
-- **Adımlardan önce düşün** açıksa Claude modelleri düşünür ve düşüncelerinin özeti görünür; GPT'nin akıl yürüten modelleri (`gpt-5`, `o3` …) daha fazla akıl yürütme çabası kullanır.
-- Claude isteklerinde, görevin değişmeyen başı sağlayıcının önbelleğinden okunur; OpenAI bunu kendiliğinden yapar. Bu, adım başına ücreti düşürür.
+- **Adımlardan önce düşün** açıksa Claude modelleri düşünür ve düşüncelerinin özeti görünür; Gemini düşünce özetlerini gösterir; GPT'nin akıl yürüten modelleri (`gpt-5`, `o3` …) daha fazla akıl yürütme çabası kullanır.
+- Claude isteklerinde, görevin değişmeyen başı sağlayıcının önbelleğinden okunur; OpenAI ve Gemini bunu kendiliğinden yapar. Bu, adım başına ücreti düşürür.
 - Sağlayıcı güvenlik nedeniyle bir isteği reddederse (Claude'un bazı modellerinde sınıflandırıcılar bunu yapabilir) Anthropic isteği önerdiği başka bir modelde otomatik olarak yeniden dener; yine reddedilirse görev bir açıklamayla durur.
 - Görev günlüğünün başında modelin nerede çalıştığı ve nelerin gönderildiği yazar.
-- Ayarlar › Üretim'deki örnekleme değerleri (sıcaklık, top-p …) Ollama modellerine (Ollama Cloud dahil) uygulanır; Claude ve GPT kendi varsayılanlarını kullanır.
+- Ayarlar › Üretim'deki örnekleme değerleri (sıcaklık, top-p …) Ollama modellerine (Ollama Cloud dahil) ve OpenAI uyumlu sunuculara uygulanır; Claude, GPT, Gemini ve Mistral kendi varsayılanlarını kullanır.
+- **Deneysel: yerel araç çağrıları.** Ayarlar › Bulut modelleri › Deneysel'den açılır. Ajanın eylemleri Claude ve GPT'ye JSON cevap yerine sağlayıcının kendi araç (tool) biçiminde gider; cevap yine ajanın anladığı eyleme çevrilir, onaylar ve denetimler aynen çalışır. Bu kipte Claude adımlardan önce düşünmez. Varsayılan olup olmayacağına ajan testleriyle yapılacak ölçüm karar verecek ([PLAN_ACIK_NOKTALAR.md](./PLAN_ACIK_NOKTALAR.md)).
 
 ### Bilgisayardan ne çıkar?
-Bir bulut modeli seçtiğinizde mesajlarınız ve ekleriniz, Kod sekmesinde de ajanın okuduğu proje dosyaları, komut çıktıları ve web sonuçları sağlayıcıya gönderilir ve onun koşullarına göre işlenir. Yerel modelleri kullanırken hiçbir şey değişmez: bir bulut modeli seçmedikçe sağlayıcıya istek gitmez (anahtarı kaydederken ve model listesini yenilerken yalnızca model listesi okunur). Emir Code'un kendisi telemetri göndermez.
+Bir bulut modeli seçtiğinizde mesajlarınız ve ekleriniz, Kod sekmesinde de ajanın okuduğu proje dosyaları, komut çıktıları ve web sonuçları sağlayıcıya (ya da eklediğiniz sunucuya) gönderilir ve onun koşullarına göre işlenir. Yerel modelleri kullanırken hiçbir şey değişmez: bir bulut modeli seçmedikçe sağlayıcıya istek gitmez (anahtarı kaydederken ve model listesini yenilerken yalnızca model listesi okunur). Emir Code'un kendisi telemetri göndermez.
 
-Tasarım kararları [PLAN_BULUT_MODELLERI.md](./PLAN_BULUT_MODELLERI.md), sonraki sürümlerin planı (maliyet göstergesi, görev bütçesi, OpenAI uyumlu adresler, Gemini ve Mistral …) [PLAN_ACIK_NOKTALAR.md](./PLAN_ACIK_NOKTALAR.md) belgesindedir.
+### Elle doğrulama listesi
+Yeni bir sürümde ya da bir sağlayıcının API'si değiştiğinde aşağıdakiler elle denenir (sonuçlar sürüm notlarına yazılır):
+1. Anahtar kaydet → model listesi gelir; **Kaldır** → modeller seçiciden çıkar; uygulamayı kapatıp aç → kayıtlı anahtar yerindedir.
+2. Yanlış anahtar → "kabul etmedi" mesajı; mesajda anahtarın kendisi görünmez.
+3. Linux'ta anahtar deposu olmadan (ör. `--password-store=basic`) → "bu oturum için" notu; anahtar diske yazılmaz.
+4. Sohbette görsel ekle (Claude, GPT, Gemini) → model görseli anlatır; cevabın altında token ve tahmini ücret görünür.
+5. Kod sekmesinde küçük bir görev → onay penceresi, dosya kontrolleri ve görev kartındaki ücret; **Durdur** isteği hemen keser.
+6. Görev bütçesi $0.05 → görev "Görev bütçesi doldu" ile durur, yapılan değişiklikler kalır.
+7. Çaba Yüksek / Düşük ve akıl yürütme özetleri → GPT-5'te özet görünür, Claude'da düşünme özeti görünür.
+8. LM Studio (`http://localhost:1234/v1`) ve OpenRouter (`https://openrouter.ai/api/v1`) ekle → modeller gelir, sohbet ve ajan çalışır; `http://` ile uzak adres reddedilir.
+9. `ollama signin` olmadan bir `-cloud` etiketi → "ollama signin" mesajı; oturum açınca çalışır.
+10. Deneysel yerel araç çağrıları açıkken Claude ve GPT ile bir görev → görev aynı biçimde tamamlanır.
+
+Otomatik canlı denetim için `scripts/cloud-smoke.ts` ve kıyaslama için `scripts/agent-e2e.ts` kullanılır ([CONTRIBUTING.md](../CONTRIBUTING.md#cloud-models-live-checks)). Tasarım kararları [PLAN_BULUT_MODELLERI.md](./PLAN_BULUT_MODELLERI.md), yol haritası ve durumu [PLAN_ACIK_NOKTALAR.md](./PLAN_ACIK_NOKTALAR.md) belgesindedir.
 
 ---
 
@@ -329,11 +366,17 @@ Windows simgeleri önbellekte tutar. Uygulamayı görev çubuğundan kaldırıp 
 **Linux'ta AppImage açılmıyor.**
 AppImage için FUSE 2 gerekir: Ubuntu 24.04'te `sudo apt install libfuse2t64`, 22.04'te `sudo apt install libfuse2`. Ubuntu 23.10 ve sonrasındaki sandbox kısıtlamasını Emir Code algılar ve uygulamayı sandbox olmadan başlatır.
 
-**"API anahtarı kabul edilmedi", "kota kalmamış" ya da "istekler sınırlanıyor" hatası alıyorum.**
-Anahtarı Ayarlar › Bulut modelleri'nden **Değiştir** ile yeniden girin. Kota ve ödeme sorunları sağlayıcının sitesinden çözülür; sınırlama (rate limit) genellikle kısa sürede geçer. Claude ve GPT'de geçici hatalar (sınırlama, sunucu yoğunluğu, bağlantı kopması) iki kez kendiliğinden yeniden denenir.
+**"API anahtarı kabul edilmedi", "kota kalmamış", "kullanım sınırı doldu" ya da "istekler sınırlanıyor" hatası alıyorum.**
+Anahtarı Ayarlar › Bulut modelleri'nden **Değiştir** ile yeniden girin. Kota ve ödeme sorunları sağlayıcının sitesinden çözülür; sınırlama (rate limit) genellikle kısa sürede geçer. Ollama Cloud'un saatlik ve haftalık kullanım sınırları kendiliğinden sıfırlanır. Claude, GPT, Gemini ve Mistral'da geçici hatalar (sınırlama, sunucu yoğunluğu, bağlantı kopması) kendiliğinden yeniden denenir.
+
+**OpenAI uyumlu sunucu eklenmiyor.**
+Adres sunucunun API tabanı olmalı, genellikle `/v1` ile biter (LM Studio: `http://localhost:1234/v1`). Uzak sunucular `https://` ister; ağınızdaki başka bir bilgisayarda `http://` ile çalışan bir sunucu için "Bu sunucu yerel ağımda" kutusunu işaretleyin. Emir Code kaydetmeden önce sunucunun model listesini okur; sunucu çalışıyor ve gerekiyorsa anahtar doğru olmalı.
+
+**Görev "Görev bütçesi doldu" ile durdu.**
+Ayarlar › Bulut modelleri › Görev bütçesi bir görevin tahmini maliyetini sınırlar. Bütçeyi yükseltin ya da "Sınırsız" seçin ve aynı oturumda devam edin; yapılan değişiklikler korunur.
 
 **Ollama Cloud modeli "unauthorized" diyor.**
 Ollama'nız ollama.com'da oturum açmamış: bir terminalde `ollama signin` çalıştırıp yeniden deneyin. Ollama kurmadan kullanmak için Ayarlar › Bulut modelleri'nde bir Ollama API anahtarı girebilirsiniz.
 
 **Kodum internete gider mi?**
-Yerel bir model seçtiyseniz hayır: model bilgisayarınızda çalışır. Bir bulut modeli (Ollama Cloud, Claude, GPT) seçtiyseniz istekleriniz ve ajanın okuduğu dosyalar o sağlayıcıya gider. Bunun dışında Emir Code internete yalnızca şunlar için bağlanır: web erişimi (aramalar DuckDuckGo'ya gider; sohbet ilk sonucun sayfasını okur, ajan web sayfası açabilir; bilgisayarınızdaki ya da yerel ağdaki adresler hiçbir zaman açılmaz), Model Yöneticisi (Keşfet ve Yüklü sekmeleri açıkken model listesi için ollama.com, doğrulama için Ollama kayıt deposu), siz istediğinizde kurulum sihirbazının Ollama ya da Node.js indirmesi ve, Windows'ta tam yalıtım kuruluysa, yalıtımı denetlerken yalıtılmış hesaptan `1.1.1.1` adresine yapılan tek bir bağlantı denemesi (engellendiğini görmek için; veri gönderilmez). Web erişimi varsayılan olarak açıktır; Ayarlar › Web erişimi'nden tamamen ya da sohbet ve ajan için ayrı ayrı kapatabilirsiniz.
+Yerel bir model seçtiyseniz hayır: model bilgisayarınızda çalışır. Bir bulut modeli (Ollama Cloud, Claude, GPT, Gemini, Mistral ya da eklediğiniz bir sunucu) seçtiyseniz istekleriniz ve ajanın okuduğu dosyalar o sağlayıcıya gider. Bunun dışında Emir Code internete yalnızca şunlar için bağlanır: web erişimi (aramalar DuckDuckGo'ya gider; sohbet ilk sonucun sayfasını okur, ajan web sayfası açabilir; bilgisayarınızdaki ya da yerel ağdaki adresler hiçbir zaman açılmaz), Model Yöneticisi (Keşfet ve Yüklü sekmeleri açıkken model listesi için ollama.com, doğrulama için Ollama kayıt deposu), siz istediğinizde kurulum sihirbazının Ollama ya da Node.js indirmesi ve, Windows'ta tam yalıtım kuruluysa, yalıtımı denetlerken yalıtılmış hesaptan `1.1.1.1` adresine yapılan tek bir bağlantı denemesi (engellendiğini görmek için; veri gönderilmez). Web erişimi varsayılan olarak açıktır; Ayarlar › Web erişimi'nden tamamen ya da sohbet ve ajan için ayrı ayrı kapatabilirsiniz.

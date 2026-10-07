@@ -14,7 +14,7 @@ import { GenerationOptions, OllamaShowResponse, OllamaThinkValue } from '@/types
 import { HardwareInfo } from '@/types/hardware';
 import { AgentOptimizationConfig, HardwareOptimizationProfile } from '@/types/settings';
 import type { CloudModelInfo } from '../../../electron/preload';
-import { ProviderId, formatModelRef, isOllamaCloudTag, parseModelRef } from '../providers/modelRef';
+import { ProviderId, compatEndpointInfo, formatModelRef, isCompatProvider, isOllamaCloudTag, parseModelRef } from '../providers/modelRef';
 
 export interface ModelRuntimeInfo {
   name: string;
@@ -39,6 +39,23 @@ export interface ModelRuntimeInfo {
   maxOutput: number | null;
   /** <= ~4.5B parameters: needs the leanest prompt and tool set. */
   isSmall: boolean;
+  /**
+   * How much the agent can hand the model at once: "small" (<= ~4.5B, leanest prompt and tools),
+   * "medium" (a typical local model) or "large" (>= 24B, or any model running in the cloud: more
+   * steps, bigger reads, several files per step, a longer kept history).
+   */
+  tier: ModelTier;
+}
+
+export type ModelTier = 'small' | 'medium' | 'large';
+
+/** Local models from this size up get the large-model agent settings. */
+export const LARGE_MODEL_MIN_B = 24;
+
+export function modelTier(info: { remote: boolean; isSmall: boolean; parameterSizeB: number | null }): ModelTier {
+  if (info.remote) return 'large';
+  if (info.isSmall) return 'small';
+  return info.parameterSizeB !== null && info.parameterSizeB >= LARGE_MODEL_MIN_B ? 'large' : 'medium';
 }
 
 export interface ResolvedRequestProfile {
@@ -123,6 +140,7 @@ export function buildRuntimeInfo(model: string, show: OllamaShowResponse | null)
   const supportsThinking =
     capabilities.includes('thinking') ||
     (capabilities.length === 0 && /qwen3|deepseek-r1|gpt-oss|magistral/.test(lower));
+  const isSmall = remote ? false : parameterSizeB !== null ? parameterSizeB <= 4.5 : /tinyllama|smollm|phi3:mini|:0\.5b|:1b|:1\.5b|:2b|:3b/.test(lower);
   return {
     name: model,
     provider: 'ollama',
@@ -135,13 +153,16 @@ export function buildRuntimeInfo(model: string, show: OllamaShowResponse | null)
     supportsTools: capabilities.includes('tools'),
     supportsVision: capabilities.includes('vision'),
     maxOutput: null,
-    isSmall: remote ? false : parameterSizeB !== null ? parameterSizeB <= 4.5 : /tinyllama|smollm|phi3:mini|:0\.5b|:1b|:1\.5b|:2b|:3b/.test(lower),
+    isSmall,
+    tier: modelTier({ remote, isSmall, parameterSizeB }),
   };
 }
 
 /**
  * Runtime facts of a model of a cloud provider ("anthropic::claude-opus-5-5"), from the provider's
- * model list or, for Ollama Cloud, from its /api/show. Cloud models are never treated as small.
+ * model list or, for Ollama Cloud, from its /api/show. Cloud models are never treated as small; a
+ * model of a local OpenAI-compatible server (LM Studio on this computer) is a local model like any
+ * other: its size decides its tier and this computer's settings its context window.
  */
 export function buildCloudRuntimeInfo(ref: string, info: CloudModelInfo | null | undefined, show?: OllamaShowResponse | null): ModelRuntimeInfo {
   const { provider, model } = parseModelRef(ref);
@@ -150,19 +171,23 @@ export function buildCloudRuntimeInfo(ref: string, info: CloudModelInfo | null |
   const thinking = info?.thinking ?? null;
   const supportsThinking = capabilities.includes('thinking') || (thinking !== null ? !!thinking : provider === 'anthropic' || /gpt-oss|deepseek|qwen3|kimi-k2-thinking/i.test(model));
   const vision = capabilities.includes('vision') || (info?.vision ?? provider === 'anthropic');
+  const localServer = isCompatProvider(provider) && !!compatEndpointInfo(provider)?.local;
+  const parameterSizeB = parseParameterSize(info?.parameterSize) ?? fromShow?.parameterSizeB ?? (localServer ? parameterSizeFromName(model) : null);
+  const isSmall = localServer && parameterSizeB !== null && parameterSizeB <= 4.5;
   return {
     name: ref,
     provider,
-    remote: true,
+    remote: !localServer,
     family: (info?.family || fromShow?.family || provider).toLowerCase(),
-    parameterSizeB: parseParameterSize(info?.parameterSize) ?? fromShow?.parameterSizeB ?? null,
+    parameterSizeB,
     nativeContext: info?.contextWindow || fromShow?.nativeContext || null,
     capabilities: capabilities.length ? capabilities : ['completion', ...(vision ? ['vision'] : []), ...(supportsThinking ? ['thinking'] : [])],
     supportsThinking,
     supportsTools: true,
     supportsVision: vision,
     maxOutput: info?.maxOutput || null,
-    isSmall: false,
+    isSmall,
+    tier: localServer ? modelTier({ remote: false, isSmall, parameterSizeB }) : 'large',
   };
 }
 
@@ -272,8 +297,9 @@ export function resolveCloudContextLength(configured: number | undefined, native
 
 export function resolveThinkParam(info: ModelRuntimeInfo, enabled: boolean): OllamaThinkValue | undefined {
   if (!info.supportsThinking) return undefined;
-  // Claude and GPT: the main process turns this into adaptive thinking or a reasoning effort.
-  if (info.provider === 'anthropic' || info.provider === 'openai') return enabled;
+  // Claude, GPT, Gemini, Mistral and compatible servers: the main process turns this into adaptive
+  // thinking, a reasoning effort or thought summaries.
+  if (info.provider !== 'ollama' && info.provider !== 'ollama-cloud') return enabled;
   // gpt-oss cannot switch reasoning off; the lowest effort is the closest equivalent.
   if (/gpt-oss/i.test(info.name)) return enabled ? 'medium' : 'low';
   return enabled;

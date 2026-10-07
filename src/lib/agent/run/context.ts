@@ -18,7 +18,11 @@ export type LoopFlow = 'continue' | 'break' | 'return' | 'next';
 
 export interface RunContext {
   engine: AgentEngine;
-  MAX_READ_CHARS: 16000;
+  /** Characters of one file read_file shows (by model tier, see agentLimits.ts). */
+  MAX_READ_CHARS: number;
+  /** Paths one read_files step may name, and the characters they may show together. */
+  READ_FILES_MAX: number;
+  MAX_READ_FILES_CHARS: number;
   acceptanceNote: () => string;
   afterMutation: (filePath: string, finalContent: string, previousContent?: string | null) => Promise<string>;
   appliedEdits: Map<string, number>;

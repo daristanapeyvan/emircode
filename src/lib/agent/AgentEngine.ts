@@ -1,7 +1,9 @@
 import { ollamaClient } from '../ollama/OllamaClient';
 import { modelGateway, isCloudRequestError } from '../providers/ModelGateway';
 import { cloudErrorText } from '../providers/errorText';
-import { PROVIDER_COMPANIES, cloudOwner, modelLabel } from '../providers/modelRef';
+import { cloudOwner, modelLabel, parseModelRef, providerCompany, runsInCloud } from '../providers/modelRef';
+import { TokenUsage, addUsage, estimateCost, formatUsd, priceFor } from '../providers/pricing';
+import type { CloudEffort } from '../../../electron/preload';
 import {
   AgentStep,
   AgentStatus,
@@ -132,9 +134,10 @@ import type {
 } from './engineHelpers';
 
 import { et } from './engineText';
+import { agentLimitsFor } from './agentLimits';
 export * from './engineHelpers';
 import { handleFinish } from './run/finishTool';
-import { handleListDir, handleReadFile, handleSearchCode, handleGit } from './run/readTools';
+import { handleListDir, handleReadFile, handleReadFiles, handleSearchCode, handleGit } from './run/readTools';
 import { handleWebSearch, handleFetchUrl } from './run/webTools';
 import { handleWriteFile } from './run/writeTool';
 import { handleEditFile } from './run/editTool';
@@ -174,6 +177,17 @@ export class AgentEngine {
     }
   }
 
+  /** Token usage of the current run's model calls (cloud models: the cost and the task budget). */
+  private usageSink: ((usage: TokenUsage) => void) | null = null;
+
+  private recordUsage(chunk: { prompt_eval_count?: number; eval_count?: number }): void {
+    this.usageSink?.({
+      prompt: chunk.prompt_eval_count || 0,
+      cached: (chunk as { cached_prompt_count?: number }).cached_prompt_count || 0,
+      output: chunk.eval_count || 0,
+    });
+  }
+
   /** One streamed model call. Aborts early when the output degenerates into a repetition loop. */
   private async streamOnce(params: {
     model: string;
@@ -182,6 +196,9 @@ export class AgentEngine {
     options: GenerationOptions;
     format?: OllamaFormat;
     think?: OllamaThinkValue;
+    /** Cloud models: Settings › Cloud models › Effort (agent) and the experimental native tools. */
+    effort?: CloudEffort;
+    nativeTools?: boolean;
     callbacks: AgentEngineCallbacks;
   }): Promise<StreamOutcome> {
     const { callbacks } = params;
@@ -207,6 +224,8 @@ export class AgentEngine {
           keep_alive: '30m',
           format: params.format,
           think: params.think,
+          ...(params.effort ? { effort: params.effort } : {}),
+          ...(params.nativeTools ? { nativeTools: true } : {}),
         },
         (chunk) => {
           if (chunk.message?.thinking) {
@@ -232,6 +251,7 @@ export class AgentEngine {
             }
           }
           if (chunk.done) {
+            this.recordUsage(chunk);
             done = {
               doneReason: chunk.done_reason,
               evalCount: chunk.eval_count || 0,
@@ -285,6 +305,7 @@ export class AgentEngine {
         },
         (chunk) => {
           if (chunk.message?.content) text += chunk.message.content;
+          if (chunk.done) this.recordUsage(chunk);
         },
         controller.signal
       );
@@ -311,14 +332,10 @@ export class AgentEngine {
     this.pendingInterruptDirective = null;
 
     // Circuit Breakers: Minimum 30 minutes for slow CPU/GPU inference
-    const MAX_STEPS = 35;
-    const MAX_TOOL_CALLS = 50;
     const effectiveMinutes = Math.max(30, timeoutMinutes || 30);
     const MAX_TASK_TIME_MS = effectiveMinutes * 60 * 1000;
     const MAX_CONSECUTIVE_ERRORS = 3;
     const MAX_REPEAT_STREAK = 3;
-    const MAX_STEPS_WITHOUT_PROGRESS = 10;
-    const MAX_READ_CHARS = 16000;
 
     // Active Execution Timer (pauses while waiting for user interaction)
     let activeExecutionTimeMs = 0;
@@ -403,6 +420,31 @@ export class AgentEngine {
       cloudContextLength: settingsState.settings.cloud?.contextLength,
     });
     const requestedMaxTokens = agentOpt?.maxTokens || 4096;
+    // Steps, read sizes, preloading and kept history by model tier (see agentLimits.ts).
+    const limits = agentLimitsFor(runtime.tier, requestProfile.numCtx);
+    const MAX_STEPS = limits.maxSteps;
+    const MAX_TOOL_CALLS = limits.maxToolCalls;
+    const MAX_STEPS_WITHOUT_PROGRESS = limits.maxStepsWithoutProgress;
+    const MAX_READ_CHARS = limits.maxReadChars;
+
+    // Cloud models: effort, native tools (experimental), token usage, cost and the task budget.
+    const cloudConfig = settingsState.settings.cloud;
+    const agentEffort = cloudConfig?.agentEffort && cloudConfig.agentEffort !== 'auto' ? cloudConfig.agentEffort : undefined;
+    const modelProvider = parseModelRef(model).provider;
+    const nativeTools = !!cloudConfig?.nativeTools && (modelProvider === 'anthropic' || modelProvider === 'openai');
+    let usage: TokenUsage = { prompt: 0, cached: 0, output: 0 };
+    this.usageSink = (u) => {
+      usage = addUsage(usage, u);
+    };
+    const pricing = priceFor(model, cloudConfig?.prices);
+    const budgetUsd = cloudConfig?.taskBudgetUsd && cloudConfig.taskBudgetUsd > 0 ? cloudConfig.taskBudgetUsd : 0;
+    const spentUsd = (): number | null => (pricing.price ? estimateCost(usage, pricing.price) : null);
+    let budgetWarned = false;
+    /** Tokens and estimated cost of the run, for the final card (cloud models only). */
+    const usageMetadata = () =>
+      runsInCloud(model) && (usage.prompt || usage.output)
+        ? { usage: { ...usage }, cost: spentUsd(), priceSource: pricing.source, model }
+        : undefined;
     let think = requestProfile.think;
     let formatSupported = true;
     // Start with a moderate output reserve so small windows (8K) keep room for the prompt;
@@ -464,6 +506,7 @@ export class AgentEngine {
       ask: securityProfile !== 'autonomous',
       commands: true,
       checklist: subtasks.length > 1,
+      readFiles: limits.readFilesMax,
     };
     const systemPrompt = buildAgentSystemPrompt({
       securityProfile,
@@ -471,11 +514,20 @@ export class AgentEngine {
       webSynthesisStrategy: synthesisStrategy,
       modificationStrategy: modStrategy,
       compact: runtime.isSmall,
+      large: runtime.tier === 'large',
     });
     const actionSchema = buildActionSchema(toolset, runtime.isSmall);
 
     const owner = cloudOwner(model);
-    if (owner) callbacks.onLog(et('cloudModelNotice', { model: modelLabel(model), company: PROVIDER_COMPANIES[owner] }));
+    if (owner) callbacks.onLog(et('cloudModelNotice', { model: modelLabel(model), company: providerCompany(owner) }));
+    if (budgetUsd > 0 && runsInCloud(model)) {
+      callbacks.onLog(
+        pricing.price
+          ? et('budgetSet', { budget: formatUsd(budgetUsd) })
+          : et(pricing.source === 'plan' ? 'budgetPlan' : 'budgetNoPrice', { model: modelLabel(model) })
+      );
+    }
+    if (nativeTools) callbacks.onLog(et('nativeToolsOn'));
     callbacks.onLog(
       et('modelProfile', {
         model: `${modelLabel(model)}${runtime.parameterSizeB ? ` (${runtime.parameterSizeB}B)` : ''}`,
@@ -500,6 +552,7 @@ export class AgentEngine {
         projectFiles,
         config: settingsState.settings.designTheme,
         modelSizeB: runtime.parameterSizeB,
+        largeModel: runtime.tier === 'large',
         existingThemeCss,
         override: runOptions.design,
       });
@@ -1154,8 +1207,8 @@ export class AgentEngine {
     const preloaded: Array<{ path: string; hash: string }> = [];
     // The design theme's stylesheet is not the model's work and would eat the context budget.
     const preloadable = projectFiles.filter((f) => !isThemeAsset(f) && !seeded.has(f));
-    if (preloadable.length > 0 && preloadable.length <= 6) {
-      const charBudget = Math.min(12000, Math.floor(requestProfile.numCtx * 0.25 * charsPerToken));
+    if (preloadable.length > 0 && preloadable.length <= limits.preloadFiles) {
+      const charBudget = limits.preloadChars;
       let used = 0;
       const blocks: string[] = [];
       for (const rel of preloadable) {
@@ -1248,6 +1301,7 @@ export class AgentEngine {
       if (changed.length > 0) content += `\n\n${et('changedFiles', { files: changed.join(', ') })}`;
       if (warnings.length > 0) content += `\n\n${et('unverifiedItems')}\n${warnings.map((w) => `• ${w}`).join('\n')}`;
       if (note) content += `\n\nℹ️ ${note}`;
+      const usageInfo = usageMetadata();
       callbacks.onStep({
         id: `step_fin_${Date.now()}`,
         timestamp: Date.now(),
@@ -1256,6 +1310,7 @@ export class AgentEngine {
         content,
         status: status === 'finished' ? 'success' : 'failed',
         rawOutput,
+        ...(usageInfo ? { metadata: usageInfo } : {}),
       });
       callbacks.onStatusChange(status);
     };
@@ -1306,13 +1361,24 @@ export class AgentEngine {
       if (state === 'BLOCKED') moveTo(['BLOCKED'], message);
       else moveTo(['RETRYING', 'FAILED'], message);
       releaseSubtasks(ledger);
-      notice(message, 'failed');
+      const info = usageMetadata();
+      const spent = info?.cost;
+      const usageLine = info
+        ? et('usageLine', {
+            input: info.usage.prompt.toLocaleString(),
+            output: info.usage.output.toLocaleString(),
+            cost: typeof spent === 'number' ? ` · ≈ ${formatUsd(spent)}` : '',
+          })
+        : '';
+      notice(usageLine ? `${message}\n${usageLine}` : message, 'failed');
       callbacks.onStatusChange('error');
     };
     // The run as the tool handlers (./run/*) see it; `let` members are live views of the variables above.
     const ctx: RunContext = {
       engine: this,
       MAX_READ_CHARS,
+      READ_FILES_MAX: limits.readFilesMax,
+      MAX_READ_FILES_CHARS: limits.maxReadFilesChars,
       acceptanceNote,
       afterMutation,
       appliedEdits,
@@ -1433,6 +1499,21 @@ export class AgentEngine {
         break;
       }
 
+      // Task budget (Settings › Cloud models): no new step once the estimated cost reached it.
+      if (budgetUsd > 0) {
+        const spent = spentUsd();
+        if (spent !== null && spent >= budgetUsd) {
+          const why = et('limitBudget', { spent: formatUsd(spent), budget: formatUsd(budgetUsd) });
+          if (await tryGracefulCompletion(why)) break;
+          stopWithError(why);
+          break;
+        }
+        if (spent !== null && !budgetWarned && spent >= budgetUsd * 0.8) {
+          budgetWarned = true;
+          notice(et('budgetWarning', { spent: formatUsd(spent), budget: formatUsd(budgetUsd) }), 'success');
+        }
+      }
+
       // Circuit Breaker: Max Tool Calls Check
       if (toolCallCount >= MAX_TOOL_CALLS) {
         notice(et('limitToolCalls', { count: MAX_TOOL_CALLS }), 'failed');
@@ -1510,11 +1591,11 @@ export class AgentEngine {
         let promptTokens = systemTokens + historyTokens();
         const budget = numCtx - Math.min(desiredPredict, Math.floor(numCtx / 2)) - 256;
         if (promptTokens > budget) {
-          for (const keep of [4, 2, 1]) {
+          for (const keep of limits.compactionKeeps) {
             const compacted = compressConversationContext(conversation, keep);
             conversation.splice(0, conversation.length, ...compacted);
             promptTokens = systemTokens + historyTokens();
-            if (promptTokens <= budget * 0.7) break;
+            if (promptTokens <= budget * limits.compactionTarget) break;
           }
           // Still too big: drop the oldest exchanges (keep the task message and recent work)
           const isSummaryNote = (m: ConversationEntry) => m.meta?.kind === 'steer' && m.content.startsWith('[EARLIER STEPS');
@@ -1575,6 +1656,8 @@ export class AgentEngine {
               options,
               format: formatSupported ? actionSchema : undefined,
               think,
+              effort: agentEffort,
+              nativeTools,
               callbacks,
             });
           } catch (streamErr: any) {
@@ -1810,6 +1893,13 @@ export class AgentEngine {
         // =========================================================
         if (parsed.type === 'read_directory') {
           const flow = await handleListDir(ctx, { assistantText, parsed, payload, readOnlySignature });
+          if (flow === 'continue') continue;
+          if (flow === 'break') break;
+          if (flow === 'return') return;
+        }
+
+        if (parsed.type === 'read_files') {
+          const flow = await handleReadFiles(ctx, { assistantText, parsed, payload });
           if (flow === 'continue') continue;
           if (flow === 'break') break;
           if (flow === 'return') return;

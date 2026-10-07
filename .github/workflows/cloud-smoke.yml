@@ -1,0 +1,59 @@
+name: Cloud smoke test
+
+# Live check of the cloud providers with the repository's own keys (scripts/cloud-smoke.ts).
+# Started by hand only: no push, pull request or schedule runs it, so a fork or a pull request can
+# never reach the secrets, and every run costs a few cents at most.
+on:
+  workflow_dispatch:
+    inputs:
+      providers:
+        description: 'Providers to test (comma separated: anthropic,openai,gemini,mistral,ollama-cloud; empty = every provider with a key)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Cloud providers
+    runs-on: ubuntu-latest
+    # Only in this repository, never in a fork that copied the workflow.
+    if: github.repository == 'daristanapeyvan/emircode'
+    timeout-minutes: 20
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run the smoke test
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
+          PROVIDERS: ${{ inputs.providers }}
+        run: |
+          if [ -n "$PROVIDERS" ]; then
+            node scripts/run-ts-test.mjs scripts/cloud-smoke.ts "--only=$PROVIDERS" | tee smoke.md
+          else
+            node scripts/run-ts-test.mjs scripts/cloud-smoke.ts | tee smoke.md
+          fi
+          exit "${PIPESTATUS[0]}"
+
+      - name: Summary
+        if: always()
+        run: |
+          if [ -f smoke.md ]; then
+            echo '## Cloud smoke test' >> "$GITHUB_STEP_SUMMARY"
+            grep '^|' smoke.md >> "$GITHUB_STEP_SUMMARY" || true
+          fi

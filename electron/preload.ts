@@ -1,10 +1,12 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { CloudChatRequest, CloudEvent, CloudModelInfo, CloudResult, CloudStatus } from './cloud/types';
+import type { CloudChatRequest, CloudEvent, CloudModelInfo, CloudResult, CloudStatus, CompatEndpointStatus } from './cloud/types';
 import type { CloudProviderId } from '../src/lib/providers/modelRef';
 
 export type {
   CloudChatRequest,
   CloudChunk,
+  CloudEffort,
+  CompatEndpointStatus,
   CloudError,
   CloudErrorCode,
   CloudEvent,
@@ -196,7 +198,8 @@ export interface ElectronAPI {
   modelTags?: (name: string) => Promise<string>;
   modelManifest?: (name: string, tag: string) => Promise<ModelManifestResult>;
 
-  // Cloud providers (Ollama Cloud, Claude, GPT). Keys go in and never come back out.
+  // Cloud providers (Ollama Cloud, Claude, GPT, Gemini, Mistral, OpenAI-compatible servers).
+  // Keys go in and never come back out; a server's address stays bound to its key in the main process.
   cloudStatus?: () => Promise<CloudStatus>;
   /** Checks the key with the provider and saves it when it works. */
   cloudSetKey?: (provider: CloudProviderId, key: string) => Promise<CloudResult<{ status: CloudStatus; persisted: boolean; models: CloudModelInfo[] }>>;
@@ -206,6 +209,14 @@ export interface ElectronAPI {
   /** Starts a streamed answer; it arrives through onCloudEvent with the same request id. */
   cloudChat?: (requestId: string, request: CloudChatRequest) => Promise<CloudResult>;
   cloudAbort?: (requestId: string) => Promise<boolean>;
+  /** Adds an OpenAI-compatible server after listing its models (address rules: see electron/cloud/endpoints.ts). */
+  cloudAddEndpoint?: (input: {
+    name: string;
+    baseURL: string;
+    key?: string;
+    localServer?: boolean;
+  }) => Promise<CloudResult<{ status: CloudStatus; endpoint: CompatEndpointStatus; models: CloudModelInfo[]; persisted: boolean }>>;
+  cloudRemoveEndpoint?: (id: string) => Promise<CloudStatus>;
   onCloudEvent?: (callback: (event: CloudEvent) => void) => () => void;
 }
 
@@ -298,6 +309,8 @@ const electronAPI: ElectronAPI = {
   cloudDescribe: (provider, model) => ipcRenderer.invoke('cloud:describe', { provider, model }),
   cloudChat: (requestId, request) => ipcRenderer.invoke('cloud:chat', { requestId, request }),
   cloudAbort: (requestId) => ipcRenderer.invoke('cloud:abort', requestId),
+  cloudAddEndpoint: (input) => ipcRenderer.invoke('cloud:addEndpoint', input),
+  cloudRemoveEndpoint: (id) => ipcRenderer.invoke('cloud:removeEndpoint', id),
   onCloudEvent: (callback) => {
     const handler = (_: unknown, event: CloudEvent) => callback(event);
     ipcRenderer.on('cloud:event', handler);

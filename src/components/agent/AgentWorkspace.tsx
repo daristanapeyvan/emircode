@@ -37,6 +37,7 @@ import {
   X,
   ArrowUp,
   Code2,
+  Coins,
 } from 'lucide-react';
 import { Button } from '../common/Button';
 import { StartIcon } from '../common/StartIcon';
@@ -44,13 +45,15 @@ import { IconButton } from '../common/IconButton';
 import { Tabs } from '../common/Tabs';
 import { useUIStore } from '@/stores/uiStore';
 import { useSettingsStore } from '@/stores/settingsStore';
-import { getTranslations, Translations } from '@/lib/localization/i18n';
+import { format, getTranslations, Translations } from '@/lib/localization/i18n';
+import { formatUsd } from '@/lib/providers/pricing';
 import { cn } from '@/lib/utils/cn';
 import { SecurityProfile, DEFAULT_SETTINGS } from '@/types/settings';
 import { tokenizeCode, getTokenClassName } from '@/lib/utils/SyntaxHighlighter';
 import { cleanChatContent, cleanThoughtContent } from '@/lib/web/WebIntentDetector';
 
 type ActionLabels = Translations['agent']['actionLabels'];
+type AgentTexts = Translations['agent'];
 
 /** Decodes a (possibly unterminated) JSON string body such as the streaming "thought" value. */
 function decodePartialJsonString(body: string): string {
@@ -59,6 +62,30 @@ function decodePartialJsonString(body: string): string {
     .replace(/\\(["\\/bfnrt])/g, (_m, c) => ({ b: '\b', f: '\f', n: '\n', r: '', t: '\t' } as Record<string, string>)[c] ?? c)
     .replace(/\\$/, '');
 }
+
+/** Tokens and estimated cost of a finished task on a cloud model (from the final step's metadata). */
+const TaskUsageLine: React.FC<{ meta: Record<string, any>; t: AgentTexts }> = ({ meta, t }) => {
+  const usage = meta.usage as { prompt: number; cached?: number; output: number };
+  const tokens = format(usage.cached ? t.usageTokensCached : t.usageTokens, {
+    input: usage.prompt.toLocaleString(),
+    cached: (usage.cached || 0).toLocaleString(),
+    output: usage.output.toLocaleString(),
+  });
+  const cost =
+    typeof meta.cost === 'number'
+      ? format(t.usageCost, { cost: formatUsd(meta.cost) })
+      : meta.priceSource === 'plan'
+        ? t.usagePlan
+        : meta.priceSource === 'unknown'
+          ? t.usagePriceUnknown
+          : '';
+  return (
+    <p className="pt-1 text-[11px] text-zinc-500 flex items-center gap-1.5">
+      <Coins size={12} strokeWidth={1.5} className="shrink-0" />
+      <span>{[tokens, cost].filter(Boolean).join(' · ')}</span>
+    </p>
+  );
+};
 
 /** The tool a streaming step is about to call, named in the interface language. */
 function actionLabel(action: string, labels: ActionLabels): string {
@@ -74,6 +101,7 @@ function actionLabel(action: string, labels: ActionLabels): string {
     case 'delete_file':
       return labels.delete;
     case 'read_file':
+    case 'read_files':
       return labels.read;
     case 'read_directory':
     case 'list_dir':
@@ -750,6 +778,7 @@ export const AgentWorkspace: React.FC = () => {
                               {step.title || t.agent.taskCompleted}
                             </p>
                             <div className="text-xs text-zinc-200 leading-relaxed whitespace-pre-wrap select-text">{cleanChatContent(step.content)}</div>
+                            {step.metadata?.usage && <TaskUsageLine meta={step.metadata} t={t.agent} />}
                           </div>
                         );
                       }
@@ -759,7 +788,15 @@ export const AgentWorkspace: React.FC = () => {
                       }
 
                       return (
-                        <p key={step.id} title={timeOf(step.timestamp)} className="text-[11px] text-zinc-500 whitespace-pre-wrap">
+                        <p
+                          key={step.id}
+                          title={timeOf(step.timestamp)}
+                          className={cn(
+                            'text-[11px] whitespace-pre-wrap',
+                            // A stop (budget, limits, errors) must not look like a routine note.
+                            step.type === 'system_notice' && step.status === 'failed' ? 'text-amber-400/90' : 'text-zinc-500'
+                          )}
+                        >
                           {step.content}
                         </p>
                       );

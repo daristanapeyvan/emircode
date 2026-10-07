@@ -8,6 +8,7 @@ import { useChatStore } from '@/stores/chatStore';
 import { format, getTranslations } from '@/lib/localization/i18n';
 import { formatBytes } from '@/lib/utils/formatters';
 import { modelLabel, runsInCloud } from '@/lib/providers/modelRef';
+import { estimateCost, formatUsd, priceFor } from '@/lib/providers/pricing';
 import { cleanChatContent } from '@/lib/web/WebIntentDetector';
 import { Button } from '../common/Button';
 import { cn } from '@/lib/utils/cn';
@@ -61,10 +62,19 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, isStreaming, 
           cached: (meta.cachedPromptCount || 0).toLocaleString(),
         })
       : '';
+  // Estimated cost of this answer, when the model's price is known (Settings › Cloud models › Prices).
+  const price = cloudTokens && message.model ? priceFor(message.model, settings.cloud?.prices).price : null;
+  const cost =
+    price && meta
+      ? format(t.chat.costEstimate, {
+          cost: formatUsd(estimateCost({ prompt: meta.promptEvalCount || 0, cached: meta.cachedPromptCount || 0, output: meta.evalCount || 0 }, price)),
+        })
+      : '';
   const metaText = [
     meta?.tokensPerSecond ? `${meta.tokensPerSecond} ${t.chat.tokensPerSecond}` : '',
     meta?.durationSeconds ? `${meta.durationSeconds} ${t.chat.secondsShort}` : '',
     cloudTokens,
+    cost,
   ]
     .filter(Boolean)
     .join(' · ');

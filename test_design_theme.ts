@@ -231,6 +231,9 @@ async function run() {
   check(modePreference('koyu temalı bir portfolyo') === 'dark' && modePreference('portfolyo') === null, 'Dark-mode wish detected');
   check(planDesignTheme({ ...base, goal: 'kafe sitesi', config: { ...cfg, mode: 'off', baseCss: 'off' } }) === null, 'Everything off = no plan');
   check(planDesignTheme({ ...base, goal: 'kafe sitesi', config: { ...cfg, mode: 'off' }, modelSizeB: 14 }) === null, 'Theme off + big model (automatic base off) = no plan');
+  const cloudCafe = planDesignTheme({ ...base, goal: 'Bir kafe için web sitesi yap', modelSizeB: null, largeModel: true });
+  check(!!cloudCafe && cloudCafe.theme && !cloudCafe.base, 'A cloud model (size unknown) gets the theme but no base stylesheet', cloudCafe);
+  check(!!planDesignTheme({ ...base, goal: 'Bir kafe için web sitesi yap', modelSizeB: null })?.base, 'An unknown local model still gets the base stylesheet');
   const fixed = planDesignTheme({ ...base, goal: 'site yap', config: { ...cfg, mode: 'fixed', fixedThemeId: 'dergi' } });
   check(fixed?.themeId === 'dergi', 'Fixed theme');
   const cont = planDesignTheme({ ...base, goal: 'iletişim sayfası ekle', projectFiles: ['index.html', 'theme/theme.css'], existingThemeCss: css });

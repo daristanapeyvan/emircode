@@ -99,9 +99,22 @@ The cart total is wrong after a discount is applied. Fix it and verify with npm 
 What happens:
 - The first log line says that the model runs at Anthropic and that the task, the files the agent reads, command output and web results are sent there.
 - The context window comes from Settings › Cloud models (Automatic: 64K tokens), not from this computer's memory, and one step may write up to 16K tokens. The full tool list is offered; there is no small-model shortcut.
+- A cloud model is a *large* model for the agent: it may take up to 60 steps, reads files in bigger pieces, and can read the cart module, its test and `package.json` in one `read_files` step instead of three. Its system prompt asks it to read everything it needs first, then change, then verify.
 - Every step goes from the agent engine through `ModelGateway` to the main process, which sends it to the Anthropic API with the key. The system prompt and the history so far are read from Anthropic's prompt cache, so a step pays the full price only for what is new.
 - The answer schema goes as structured output. If the provider rejects it, the log says so and the agent continues with the schema in the prompt only, as with an Ollama server that has no schema support.
 - Everything else is as in example 3: the file checks, the approval of `npm test` (or its isolated run under Autonomous), the refusal to change existing tests and the completion card.
 - The Logs panel shows the tokens of every step (prompt and answer) and how long it took. If the key is wrong, the quota is used up or Anthropic limits requests, the task stops with a message that says which of these it is.
 
 With an Ollama Cloud model added through a signed-in Ollama (`gpt-oss:120b-cloud`) the same happens through the local Ollama, which forwards the request to ollama.com.
+
+The completion card ends with the task's tokens and estimated cost, for example `284,310 tokens in (241,500 cached) · 9,120 out · ≈ $0.563 (estimate)`. With Settings › Cloud models › Task budget set to $0.50, the same task would show a notice at about $0.40 and stop before the next step once the estimate passed $0.50 ("The task budget is used up"), keeping the changes made so far. For a model whose price is not in the table (Settings › Cloud models › Prices), the card shows the tokens only, and the log says that the budget cannot be checked.
+
+## 9. A local OpenAI-compatible server
+
+**Setup**: LM Studio serving `qwen2.5-coder-7b-instruct` on this computer; in Settings › Cloud models › OpenAI-compatible servers, the **LM Studio** preset (`http://localhost:1234/v1`), no key.
+
+What happens:
+- Adding the server lists its models; because the address is on this computer, `http://` is accepted without the "local network" mark and no confirmation is asked. The models appear under **LM Studio** in the model selector, without a cloud icon.
+- The agent treats the model like a local one: its size is read from the name (7B, the *medium* tier), so it keeps the limits tuned for local models, and the context window comes from Settings › Agent. No cost is shown.
+- Requests go through the main process with the OpenAI API; the answer schema is sent as a `json_schema` response format. If the server does not support it, the agent continues with the schema in the prompt only.
+- The same server added at `http://192.168.1.20:1234/v1` from another computer needs the "This server is on my local network" mark; at a public address it needs `https://`.

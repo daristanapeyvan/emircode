@@ -5,7 +5,9 @@ import { useSettingsStore } from '@/stores/settingsStore';
 import { useUIStore } from '@/stores/uiStore';
 import { format, getTranslations } from '@/lib/localization/i18n';
 import { formatBytes, formatParameterSize } from '@/lib/utils/formatters';
-import { CloudProviderId, PROVIDER_COMPANIES, cloudOwner, formatModelRef, isOllamaCloudTag, modelShortName } from '@/lib/providers/modelRef';
+import { CloudProviderId, cloudOwner, formatModelRef, isCompatProvider, isOllamaCloudTag, modelShortName, providerCompany, providerName } from '@/lib/providers/modelRef';
+import { visibleIds } from '@/lib/providers/visibleModels';
+import { DEFAULT_SETTINGS } from '@/types/settings';
 import { cn } from '@/lib/utils/cn';
 
 interface Item {
@@ -20,6 +22,10 @@ interface Group {
   id: string;
   label: string;
   items: Item[];
+  /** Models of the provider hidden by Settings › Cloud models › Models in the selector (found by search). */
+  hidden: Item[];
+  /** Runs on this computer (local Ollama, a local OpenAI-compatible server): no cloud icon. */
+  local?: boolean;
 }
 
 /** "1M", "200K", "128K" */
@@ -52,6 +58,7 @@ export const ModelSelector: React.FC = () => {
     if (!isOpen) setQuery('');
   }, [isOpen]);
 
+  const chosen = (settings.cloud || DEFAULT_SETTINGS.cloud).visibleModels;
   const groups = useMemo<Group[]>(() => {
     const runningSet = new Set(runningModels.map((m) => m.name));
     const localItem = (m: (typeof installedModels)[number]): Item => {
@@ -66,30 +73,45 @@ export const ModelSelector: React.FC = () => {
       };
     };
     const local = installedModels.map(localItem);
-    const providerItems = (provider: CloudProviderId): Item[] =>
-      cloudModels
-        .filter((m) => m.provider === provider)
-        .map((m) => ({
+    const providerGroup = (provider: CloudProviderId, label: string): Group => {
+      const shown = visibleIds(provider, cloudModels, chosen);
+      const items: Item[] = [];
+      const hidden: Item[] = [];
+      for (const m of cloudModels) {
+        if (m.provider !== provider) continue;
+        const item: Item = {
           value: formatModelRef(provider, m.id),
           name: m.id,
           detail: [m.label !== m.id ? m.label : '', m.parameterSize || '', m.contextWindow ? `${tokens(m.contextWindow)} ${t.models.contextShort.toLowerCase()}` : '']
             .filter(Boolean)
             .join(' · '),
           cloud: true,
-        }));
+        };
+        // The selected model is always listed, even when it is hidden in the settings.
+        (shown.has(m.id) || item.value === selectedModel ? items : hidden).push(item);
+      }
+      return { id: provider, label, items, hidden, local: isCompatProvider(provider) && !cloudOwner(formatModelRef(provider, 'x')) };
+    };
+    const servers = Array.from(new Set(cloudModels.map((m) => m.provider).filter(isCompatProvider)));
     return [
-      { id: 'local', label: c.groupLocal, items: local.filter((i) => !i.cloud) },
-      { id: 'ollama-local-cloud', label: c.groupOllamaThroughOllama, items: local.filter((i) => i.cloud) },
-      { id: 'ollama-cloud', label: c.groupOllamaCloud, items: providerItems('ollama-cloud') },
-      { id: 'anthropic', label: c.groupAnthropic, items: providerItems('anthropic') },
-      { id: 'openai', label: c.groupOpenAI, items: providerItems('openai') },
-    ].filter((g) => g.items.length > 0);
-  }, [installedModels, runningModels, cloudModels, c, t.models.contextShort]);
+      { id: 'local', label: c.groupLocal, items: local.filter((i) => !i.cloud), hidden: [], local: true },
+      { id: 'ollama-local-cloud', label: c.groupOllamaThroughOllama, items: local.filter((i) => i.cloud), hidden: [] },
+      providerGroup('ollama-cloud', c.groupOllamaCloud),
+      providerGroup('anthropic', c.groupAnthropic),
+      providerGroup('openai', c.groupOpenAI),
+      providerGroup('gemini', c.groupGemini),
+      providerGroup('mistral', c.groupMistral),
+      ...servers.map((provider) => providerGroup(provider, providerName(provider))),
+    ].filter((g) => g.items.length > 0 || g.hidden.length > 0);
+  }, [installedModels, runningModels, cloudModels, chosen, selectedModel, c, t.models.contextShort]);
 
-  const total = groups.reduce((n, g) => n + g.items.length, 0);
+  const total = groups.reduce((n, g) => n + g.items.length + g.hidden.length, 0);
   const q = query.trim().toLowerCase();
+  // Searching also finds the models hidden in the settings.
   const visible = q
-    ? groups.map((g) => ({ ...g, items: g.items.filter((i) => `${i.name} ${i.detail}`.toLowerCase().includes(q)) })).filter((g) => g.items.length > 0)
+    ? groups
+        .map((g) => ({ ...g, items: [...g.items, ...g.hidden].filter((i) => `${i.name} ${i.detail}`.toLowerCase().includes(q)), hidden: [] }))
+        .filter((g) => g.items.length > 0)
     : groups;
   const selectedOwner = selectedModel ? cloudOwner(selectedModel) : null;
   const showStatusDot = connectionStatus !== 'connected' && !selectedOwner;
@@ -100,7 +122,7 @@ export const ModelSelector: React.FC = () => {
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        title={selectedOwner ? format(c.runsAt, { company: PROVIDER_COMPANIES[selectedOwner] }) : undefined}
+        title={selectedOwner ? format(c.runsAt, { company: providerCompany(selectedOwner) }) : undefined}
         className={cn(
           'inline-flex items-center gap-2 px-2.5 py-1 text-xs font-medium rounded border transition-colors cursor-pointer',
           'bg-zinc-800/80 hover:bg-zinc-700/80 border-zinc-700/60 text-zinc-200'
@@ -156,7 +178,7 @@ export const ModelSelector: React.FC = () => {
           )}
 
           {/* Model List */}
-          <div className="max-h-72 overflow-y-auto">
+          <div className="max-h-[min(60vh,30rem)] overflow-y-auto">
             {total === 0 ? (
               <div className="px-3 py-4 text-center text-zinc-500 text-xs">
                 {connectionStatus === 'disconnected' ? (
@@ -173,7 +195,7 @@ export const ModelSelector: React.FC = () => {
                 <div key={group.id} role="group" aria-label={group.label}>
                   {(groups.length > 1 || group.id !== 'local') && (
                     <div className="px-3 pt-2 pb-1 text-[11px] font-medium text-zinc-500 flex items-center gap-1.5">
-                      {group.id !== 'local' && <Cloud size={11} strokeWidth={1.75} className="text-sky-400/80" />}
+                      {!group.local && <Cloud size={11} strokeWidth={1.75} className="text-sky-400/80" />}
                       {group.label}
                     </div>
                   )}
@@ -204,6 +226,18 @@ export const ModelSelector: React.FC = () => {
                       </button>
                     );
                   })}
+                  {group.hidden.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsOpen(false);
+                        openSettings('cloud');
+                      }}
+                      className="w-full text-left px-3 pb-1.5 text-[11px] text-zinc-500 hover:text-zinc-300 cursor-pointer"
+                    >
+                      {format(c.moreModels, { count: group.hidden.length })}
+                    </button>
+                  )}
                 </div>
               ))
             )}

@@ -55,11 +55,13 @@ const sent: Array<{ system?: string; messages: Array<{ role: string; content: st
     prompt_eval_duration: 1e9,
   });
 };
-(ollamaClient as any).showModel = async () => ({
-  details: { parameter_size: '7.6B', family: 'qwen2' },
-  model_info: { 'qwen2.context_length': 32768 },
+(ollamaClient as any).showModel = async (name: string) => ({
+  details: { parameter_size: /:32b/.test(name) ? '32.8B' : '7.6B', family: 'qwen2' },
+  model_info: { 'qwen2.context_length': /:32b/.test(name) ? 131072 : 32768 },
   capabilities: ['completion', 'tools'],
 });
+/** The model of the next runs: a 7B model by default, a 32B one for the large-model tier. */
+let runModel = 'scripted:7b';
 
 let commandApprovals = 0;
 
@@ -82,7 +84,7 @@ async function run(goal: string, seed: Record<string, string>, replies: Reply[],
   let subtasks: any[] = [];
   await agentEngine.runGoal(
     goal,
-    'scripted:7b',
+    runModel,
     {
       onStep: (step) => steps.push(step),
       onStatusChange: (st) => {
@@ -784,6 +786,39 @@ if __name__ == "__main__":
   check(/\[CHECK\]: You have not changed any file yet/.test(lastUserMessage(1)), 'and for "… olsun"', lastUserMessage(1).slice(0, 200));
   const explained = await run('bu sayfa ne işe yarıyor', { 'index.html': SHOP }, [{ thought: 'Açıklıyorum.', action: 'finish', summary: 'Bir dükkan sayfası.' }]);
   check(explained.status === 'finished' && sent.length === 1, 'A question is answered without that check', sent.length);
+
+  // -------------------------------------------------------------------------
+  console.log('\n--- Large models: more room, several files per step ---');
+  const many: Record<string, string> = {};
+  for (let i = 1; i <= 8; i++) many[`mod${i}.js`] = `export const value${i} = ${i};\n`;
+  const small7b = await run('mod1.js ile mod2.js dosyalarını incele', many, [{ thought: 'Bakıyorum.', action: 'read_files', paths: ['mod1.js', 'mod2.js'] }]);
+  check(!/read_files/.test(sent[0]?.system || ''), 'A 7B model is not offered read_files', (sent[0]?.system || '').slice(0, 200));
+  check(!/CURRENT FILE CONTENTS/.test(sent[0]?.messages[0]?.content || ''), 'and 8 files are too many to preload for it');
+  check(small7b.status === 'finished', 'but a read_files it sends anyway still works', small7b.status);
+
+  runModel = 'scripted:32b';
+  const agentOptBefore = useSettingsStore.getState().settings.agentOptimization;
+  useSettingsStore.setState((state: any) => ({ settings: { ...state.settings, agentOptimization: { ...state.settings.agentOptimization, contextLength: 65536 } } }));
+  const large = await run(
+    'mod1.js ile mod7.js dosyalarını incele ve toplamı açıkla',
+    { ...many, 'big.js': `// big\n${'x'.repeat(30000)}\n` },
+    [
+      { thought: 'Hepsini birden okuyorum.', action: 'read_files', paths: ['big.js', 'mod1.js', 'missing.js', '../etc/passwd'] },
+      { thought: 'Tekrar okuyorum.', action: 'read_files', paths: ['big.js'] },
+      { thought: 'Toplam 8.', action: 'finish', summary: 'mod1 ve mod7 toplamı 8.' },
+    ]
+  );
+  const largeSystem = sent[0]?.system || '';
+  check(/read_files \{paths\}: read up to 8 files/.test(largeSystem), 'A 32B model is offered read_files', largeSystem.slice(0, 400));
+  check(/Work in few steps/.test(largeSystem), 'and gets the large-model working rules');
+  check(/CURRENT FILE CONTENTS/.test(sent[0]?.messages[0]?.content || ''), 'and a 9-file project is preloaded for it');
+  const readsObs = lastUserMessage(1);
+  check(/"big\.js" \(\d+ lines/.test(readsObs) && !/only the first/.test(readsObs.split('"mod1.js"')[0]), 'big.js (30 KB) is shown whole with a 64K window: the read limit grows with the model', readsObs.slice(0, 300));
+  check(/"missing\.js" does not exist/.test(readsObs) && /\[BLOCKED\]: "\.\.\/etc\/passwd"/.test(readsObs), 'a missing file and an unsafe path are reported, the rest is read', readsObs.slice(-400));
+  check(/Already read and unchanged/.test(lastUserMessage(2)) || /\[REPEATED\]/.test(lastUserMessage(2)), 'reading an unchanged file again is caught', lastUserMessage(2).slice(0, 300));
+  check(large.status === 'finished', 'and the task finishes', large.status);
+  runModel = 'scripted:7b';
+  useSettingsStore.setState((state: any) => ({ settings: { ...state.settings, agentOptimization: agentOptBefore } }));
 
   // -------------------------------------------------------------------------
   console.log('\n--- The agent speaks the interface language ---');

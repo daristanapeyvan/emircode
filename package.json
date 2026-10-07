@@ -1,6 +1,6 @@
 {
   "name": "emir-code",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Desktop app for chatting with local Ollama models or cloud models (Ollama Cloud, Claude, GPT) and running a coding agent in a project folder",
   "main": "dist-electron/main.js",
   "author": {
@@ -26,7 +26,7 @@
     "build:dir": "tsc && vite build && node ./scripts/build-sandbox.cjs && electron-builder --dir && node ./scripts/postbuild.js",
     "build:vite": "tsc && vite build",
     "preview": "vite preview",
-    "test": "node ./scripts/verify_functionality.js && node ./scripts/run-ts-test.mjs test_agent_reliability.ts && node ./scripts/run-ts-test.mjs test_agent_engine.ts && node ./scripts/run-ts-test.mjs test_production_architecture.ts && node ./scripts/run-ts-test.mjs test_web_access.ts && node ./scripts/run-ts-test.mjs test_design_theme.ts && node ./scripts/run-ts-test.mjs test_site_wizard.ts && node ./scripts/run-ts-test.mjs test_tool_wizard.ts && node ./scripts/run-ts-test.mjs test_model_library.ts && node ./scripts/run-ts-test.mjs test_cloud_providers.ts && node ./scripts/run-ts-test.mjs test_projects.ts && node ./scripts/run-ts-test.mjs test_markdown.ts && node ./scripts/run-ts-test.mjs test_security.ts",
+    "test": "node ./scripts/verify_functionality.js && node ./scripts/run-ts-test.mjs test_agent_reliability.ts && node ./scripts/run-ts-test.mjs test_agent_engine.ts && node ./scripts/run-ts-test.mjs test_production_architecture.ts && node ./scripts/run-ts-test.mjs test_web_access.ts && node ./scripts/run-ts-test.mjs test_design_theme.ts && node ./scripts/run-ts-test.mjs test_site_wizard.ts && node ./scripts/run-ts-test.mjs test_tool_wizard.ts && node ./scripts/run-ts-test.mjs test_model_library.ts && node ./scripts/run-ts-test.mjs test_cloud_providers.ts && node ./scripts/run-ts-test.mjs test_cloud_features.ts && node ./scripts/run-ts-test.mjs test_projects.ts && node ./scripts/run-ts-test.mjs test_markdown.ts && node ./scripts/run-ts-test.mjs test_security.ts",
     "test:sandbox": "node ./scripts/build-sandbox.cjs && node ./scripts/run-ts-test.mjs test_sandbox.ts",
     "test:agent": "node ./scripts/run-ts-test.mjs test_agent_reliability.ts && node ./scripts/run-ts-test.mjs test_agent_engine.ts",
     "check:library": "node ./scripts/run-ts-test.mjs scripts/check-model-library.ts"
@@ -41,6 +41,7 @@
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "^0.131.0",
+    "@google/genai": "^2.27.0",
     "@types/node": "^22.13.9",
     "@types/react": "^19.0.10",
     "@types/react-dom": "^19.0.4",

@@ -393,7 +393,7 @@ test('24. Agent Hardware Optimization: Configurable tokens and synthesis strateg
 });
 
 // 25. Cloud models: the API keys stay in the main process
-test('25. Cloud Models: keys are kept in the main process, encrypted, and never sent to the renderer', () => {
+test('25. Cloud Models: keys stay in the main process, encrypted, bound to fixed or user-approved addresses, masked in errors', () => {
   const read = (rel) => fs.readFileSync(path.join(__dirname, '..', rel), 'utf-8');
   const keyStore = read('electron/cloud/keyStore.ts');
   assert(keyStore.includes("'cloud_keys.json'") || read('electron/main.ts').includes("'cloud_keys.json'"), 'Keys must have their own file (cloud_keys.json)');
@@ -409,8 +409,22 @@ test('25. Cloud Models: keys are kept in the main process, encrypted, and never 
 
   // Fixed provider addresses: an environment variable must not redirect a key.
   assert(read('electron/cloud/anthropic.ts').includes("baseURL: ANTHROPIC_BASE_URL") && read('electron/cloud/anthropic.ts').includes('authToken: null'), 'The Anthropic client must use the fixed address and no token from the environment');
-  assert(read('electron/cloud/openai.ts').includes('baseURL: OPENAI_BASE_URL'), 'The OpenAI client must use the fixed address');
+  const openai = read('electron/cloud/openai.ts');
+  assert(openai.includes('baseURL: string = OPENAI_BASE_URL') && openai.includes("MISTRAL_BASE_URL = 'https://api.mistral.ai/v1'"), 'The OpenAI and Mistral clients must use their fixed addresses');
+  assert(openai.includes("redirect: 'error'") && openai.includes('fetch: noRedirectFetch'), 'OpenAI, Mistral and compatible servers must not follow redirects');
+  assert(openai.includes('organization: null, project: null'), "Other servers must not get OpenAI's organization headers from the environment");
+  const gemini = read('electron/cloud/gemini.ts');
+  assert(gemini.includes('vertexai: false') && gemini.includes('baseUrl: GEMINI_BASE_URL') && gemini.includes('fetch: noRedirectFetch'), 'The Gemini client must use the fixed Gemini API address, never Vertex AI');
   assert(read('electron/cloud/ollamaCloud.ts').includes("redirect: 'manual'"), 'Ollama Cloud requests must not follow redirects');
+
+  // OpenAI-compatible servers: https for remote addresses, the key bound to the address.
+  const endpoints = read('electron/cloud/endpoints.ts');
+  assert(endpoints.includes("'https_required'") && endpoints.includes("'credentials'"), 'endpoints.ts must refuse http to remote servers and credentials in the address');
+  assert(keyStore.includes('decodeSecret') && keyStore.includes('secret.url === boundUrl'), 'A server key must only be used for the address it was saved with');
+  assert(!/cloud:setEndpointUrl|cloud:editEndpoint/.test(service), 'A server address cannot be changed (remove and add it again)');
+
+  // Keys are masked in every error text the main process sends.
+  assert(read('electron/cloud/errors.ts').includes('export function redactSecrets') && service.includes('this.keys.knownKeys()'), 'Error texts must be stripped of keys');
 
   // The renderer never talks to a provider itself, and keys are no setting.
   const settings = read('src/types/settings.ts');
@@ -423,10 +437,10 @@ test('25. Cloud Models: keys are kept in the main process, encrypted, and never 
 
   // Commands of the agent do not get the provider variables.
   const sandbox = read('electron/sandbox.ts');
-  assert(!/ANTHROPIC_API_KEY|OPENAI_API_KEY|OLLAMA_API_KEY/.test(sandbox), 'commandEnvironment must not pass API keys to commands');
+  assert(!/ANTHROPIC_API_KEY|OPENAI_API_KEY|OLLAMA_API_KEY|GEMINI_API_KEY|MISTRAL_API_KEY/.test(sandbox), 'commandEnvironment must not pass API keys to commands');
 
   // Translations of the cloud texts in both languages.
-  for (const key of ['privacyNote', 'errAuth', 'errOllamaSignin', 'encryptionMissing']) {
+  for (const key of ['privacyNote', 'errAuth', 'errOllamaSignin', 'encryptionMissing', 'errOllamaUsageLimit', 'serverConfirm', 'errAddress_https_required', 'budgetDesc', 'nativeToolsDesc']) {
     assert(read('src/lib/localization/translations/en.ts').includes(`${key}:`) && read('src/lib/localization/translations/tr.ts').includes(`${key}:`), `Cloud text "${key}" missing in en.ts or tr.ts`);
   }
 });

@@ -8,12 +8,24 @@
  * imports only).
  */
 
-/** Providers reached through the main process with an API key. */
-export type CloudProviderId = 'ollama-cloud' | 'anthropic' | 'openai';
+/** Built-in providers reached through the main process with an API key. */
+export type BuiltinCloudProviderId = 'ollama-cloud' | 'anthropic' | 'openai' | 'gemini' | 'mistral';
+/**
+ * An OpenAI-compatible server the user added (OpenRouter, Groq, LM Studio, vLLM …):
+ * "openai-compatible:<id>". Its address and key live in the main process, bound together.
+ */
+export type CompatProviderId = `openai-compatible:${string}`;
+/** Providers reached through the main process. */
+export type CloudProviderId = BuiltinCloudProviderId | CompatProviderId;
 /** Every provider: the local Ollama server and the cloud providers. */
 export type ProviderId = 'ollama' | CloudProviderId;
+export type BuiltinProviderId = 'ollama' | BuiltinCloudProviderId;
 
-export const CLOUD_PROVIDERS: CloudProviderId[] = ['ollama-cloud', 'anthropic', 'openai'];
+export const CLOUD_PROVIDERS: BuiltinCloudProviderId[] = ['ollama-cloud', 'anthropic', 'openai', 'gemini', 'mistral'];
+
+export const COMPAT_PREFIX = 'openai-compatible:';
+/** Ids of OpenAI-compatible servers: lowercase letters, digits and dashes. */
+export const COMPAT_ID_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
 
 const SEPARATOR = '::';
 
@@ -26,8 +38,48 @@ export interface ModelRef {
   model: string;
 }
 
-export function isCloudProvider(value: unknown): value is CloudProviderId {
+export function isBuiltinCloudProvider(value: unknown): value is BuiltinCloudProviderId {
   return typeof value === 'string' && (CLOUD_PROVIDERS as string[]).includes(value);
+}
+
+export function isCompatProvider(value: unknown): value is CompatProviderId {
+  return typeof value === 'string' && value.startsWith(COMPAT_PREFIX) && COMPAT_ID_RE.test(value.slice(COMPAT_PREFIX.length));
+}
+
+export function isCloudProvider(value: unknown): value is CloudProviderId {
+  return isBuiltinCloudProvider(value) || isCompatProvider(value);
+}
+
+export function compatProviderId(id: string): CompatProviderId {
+  return `${COMPAT_PREFIX}${id}`;
+}
+
+/** The server id of "openai-compatible:<id>", or null. */
+export function compatEndpointId(provider: unknown): string | null {
+  return isCompatProvider(provider) ? provider.slice(COMPAT_PREFIX.length) : null;
+}
+
+/** What the renderer and the main process know about an OpenAI-compatible server (never its key). */
+export interface CompatEndpointInfo {
+  id: string;
+  name: string;
+  /** "openrouter.ai", "localhost:1234": where prompts go. */
+  host: string;
+  /** On this computer (loopback) or a server the user marked as being on the local network. */
+  local: boolean;
+}
+
+const endpoints = new Map<string, CompatEndpointInfo>();
+
+/** The OpenAI-compatible servers, for names and "where does it run" (set from the cloud status). */
+export function registerCompatEndpoints(list: CompatEndpointInfo[]): void {
+  endpoints.clear();
+  for (const e of list) endpoints.set(e.id, e);
+}
+
+export function compatEndpointInfo(provider: unknown): CompatEndpointInfo | undefined {
+  const id = compatEndpointId(provider);
+  return id ? endpoints.get(id) : undefined;
 }
 
 export function parseModelRef(ref: string): ModelRef {
@@ -59,38 +111,63 @@ export function isOllamaCloudTag(name: string): boolean {
   return tag === 'cloud' || tag.endsWith('-cloud');
 }
 
-/** Whether a model runs somewhere other than this computer (any cloud provider or a "-cloud" tag). */
-export function runsInCloud(ref: string): boolean {
-  const { provider, model } = parseModelRef(ref);
-  return provider !== 'ollama' || isOllamaCloudTag(model);
+/** A local OpenAI-compatible server (loopback, or marked as on the local network). */
+function isLocalCompat(provider: ProviderId): boolean {
+  return isCompatProvider(provider) && !!compatEndpointInfo(provider)?.local;
 }
 
-export const PROVIDER_NAMES: Record<ProviderId, string> = {
+/**
+ * Whether a model runs somewhere other than this computer: a cloud provider, a "-cloud" tag, or a
+ * remote OpenAI-compatible server. A local one (LM Studio on this computer) does not count.
+ */
+export function runsInCloud(ref: string): boolean {
+  const { provider, model } = parseModelRef(ref);
+  if (provider === 'ollama') return isOllamaCloudTag(model);
+  return !isLocalCompat(provider);
+}
+
+export const PROVIDER_NAMES: Record<BuiltinProviderId, string> = {
   ollama: 'Ollama',
   'ollama-cloud': 'Ollama Cloud',
   anthropic: 'Claude',
   openai: 'GPT',
+  gemini: 'Gemini',
+  mistral: 'Mistral',
 };
 
 /** The company behind the provider, for texts such as "is sent to Anthropic". */
-export const PROVIDER_COMPANIES: Record<ProviderId, string> = {
+export const PROVIDER_COMPANIES: Record<BuiltinProviderId, string> = {
   ollama: 'Ollama',
   'ollama-cloud': 'Ollama (ollama.com)',
   anthropic: 'Anthropic',
   openai: 'OpenAI',
+  gemini: 'Google',
+  mistral: 'Mistral AI',
 };
+
+/** "Claude", "Gemini", or the name the user gave an OpenAI-compatible server. */
+export function providerName(provider: ProviderId): string {
+  if (isCompatProvider(provider)) return compatEndpointInfo(provider)?.name || compatEndpointId(provider) || provider;
+  return PROVIDER_NAMES[provider as BuiltinProviderId] || provider;
+}
+
+/** "Anthropic", "Google", or the host of an OpenAI-compatible server ("openrouter.ai"). */
+export function providerCompany(provider: ProviderId): string {
+  if (isCompatProvider(provider)) return compatEndpointInfo(provider)?.host || providerName(provider);
+  return PROVIDER_COMPANIES[provider as BuiltinProviderId] || provider;
+}
 
 /** The provider whose cloud runs this model: "ollama-cloud" for a "-cloud" tag of the local Ollama. */
 export function cloudOwner(ref: string): ProviderId | null {
   const { provider, model } = parseModelRef(ref);
-  if (provider !== 'ollama') return provider;
+  if (provider !== 'ollama') return isLocalCompat(provider) ? null : provider;
   return isOllamaCloudTag(model) ? 'ollama-cloud' : null;
 }
 
-/** "claude-opus-5-5 · Claude" for cloud models, the plain name for local ones. */
+/** "claude-opus-5-5 · Claude" for models of a provider, the plain name for local Ollama ones. */
 export function modelLabel(ref: string): string {
   const { provider, model } = parseModelRef(ref);
-  return provider === 'ollama' ? model : `${model} · ${PROVIDER_NAMES[provider]}`;
+  return provider === 'ollama' ? model : `${model} · ${providerName(provider)}`;
 }
 
 /** The model id alone, without the provider. */

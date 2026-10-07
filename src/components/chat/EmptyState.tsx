@@ -6,7 +6,7 @@ import { useUIStore } from '@/stores/uiStore';
 import { getTranslations } from '@/lib/localization/i18n';
 import { Button } from '../common/Button';
 import { StartIcon } from '../common/StartIcon';
-import { PROVIDER_COMPANIES, cloudOwner, isCloudRef, modelShortName } from '@/lib/providers/modelRef';
+import { cloudOwner, providerCompany, isCloudRef, modelLabel, modelShortName } from '@/lib/providers/modelRef';
 import { format } from '@/lib/localization/i18n';
 
 /** The start of a chat: the mode's icon, a greeting and the model that will answer. Without a model, the way to get one. */
@@ -45,8 +45,8 @@ export const EmptyState: React.FC = () => {
         {selectedModel && (
           <p className="text-xs text-zinc-500">
             {cloudOwner(selectedModel)
-              ? format(t.cloud.emptyModelLineCloud, { model: modelShortName(selectedModel), company: PROVIDER_COMPANIES[cloudOwner(selectedModel)!] })
-              : t.chat.emptyModelLine.replace('{model}', selectedModel)}
+              ? format(t.cloud.emptyModelLineCloud, { model: modelShortName(selectedModel), company: providerCompany(cloudOwner(selectedModel)!) })
+              : t.chat.emptyModelLine.replace('{model}', modelLabel(selectedModel))}
           </p>
         )}
       </div>

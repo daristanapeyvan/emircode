@@ -9,7 +9,7 @@
  */
 import { ollamaClient } from '../ollama/OllamaClient';
 import type { GenerationOptions, OllamaChatChunk, OllamaChatMessage, OllamaFormat, OllamaThinkValue } from '@/types/ollama';
-import type { CloudChatRequest, CloudErrorCode, CloudEvent } from '../../../electron/preload';
+import type { CloudChatRequest, CloudEffort, CloudErrorCode, CloudEvent } from '../../../electron/preload';
 import { CloudProviderId, parseModelRef } from './modelRef';
 
 export interface GatewayChatParams {
@@ -21,6 +21,12 @@ export interface GatewayChatParams {
   keep_alive?: string;
   format?: OllamaFormat;
   think?: OllamaThinkValue;
+  /** Cloud models only: Settings › Cloud models › Effort (absent = the provider's default). */
+  effort?: CloudEffort;
+  /** Cloud models only: readable summaries of OpenAI's reasoning. */
+  summaries?: boolean;
+  /** Cloud models only: the agent's actions as the provider's own tools (experimental). */
+  nativeTools?: boolean;
 }
 
 /** A failed cloud request, with the code the interface and the agent react to. */
@@ -29,13 +35,16 @@ export class CloudRequestError extends Error {
   readonly provider: CloudProviderId;
   readonly status?: number;
   readonly category?: string;
-  constructor(provider: CloudProviderId, code: CloudErrorCode, message: string, extra: { status?: number; category?: string } = {}) {
+  /** Usage and rate limits: when the limit resets, as the provider said it. */
+  readonly resetsAt?: string;
+  constructor(provider: CloudProviderId, code: CloudErrorCode, message: string, extra: { status?: number; category?: string; resetsAt?: string } = {}) {
     super(message);
     this.name = 'CloudRequestError';
     this.provider = provider;
     this.code = code;
     this.status = extra.status;
     this.category = extra.category;
+    this.resetsAt = extra.resetsAt;
   }
 }
 
@@ -84,6 +93,9 @@ export function buildCloudRequest(provider: CloudProviderId, model: string, para
   }
   if (params.format) request.format = params.format;
   if (params.think !== undefined) request.think = params.think;
+  if (params.effort) request.effort = params.effort;
+  if (params.summaries) request.summaries = true;
+  if (params.nativeTools) request.nativeTools = true;
   return request;
 }
 
@@ -126,8 +138,8 @@ async function cloudChatStream(
       } else if (event.type === 'end') {
         settle(resolve);
       } else {
-        const { code, message, status, category } = event.error;
-        settle(() => reject(code === 'aborted' ? abortError() : new CloudRequestError(provider, code, message, { status, category })));
+        const { code, message, status, category, resetsAt } = event.error;
+        settle(() => reject(code === 'aborted' ? abortError() : new CloudRequestError(provider, code, message, { status, category, resetsAt })));
       }
     });
     listen();
@@ -147,7 +159,10 @@ async function cloudChatStream(
 export const modelGateway = {
   chatStream(params: GatewayChatParams, onChunk: (chunk: OllamaChatChunk) => void, signal?: AbortSignal): Promise<void> {
     const ref = parseModelRef(params.model);
-    if (ref.provider === 'ollama') return ollamaClient.chatStream({ ...params, model: ref.model }, onChunk, signal);
+    if (ref.provider === 'ollama') {
+      const { effort: _effort, summaries: _summaries, nativeTools: _nativeTools, ...local } = params;
+      return ollamaClient.chatStream({ ...local, model: ref.model }, onChunk, signal);
+    }
     return cloudChatStream(ref.provider, ref.model, params, onChunk, signal);
   },
 };

@@ -25,6 +25,8 @@ export interface AgentToolset {
   commands: boolean;
   /** Offer the optional checklist_done field (multi-item goals). */
   checklist: boolean;
+  /** Paths one read_files step may name (large models); 0 or absent = the tool is not offered. */
+  readFiles?: number;
 }
 
 export interface SystemPromptConfig {
@@ -34,6 +36,11 @@ export interface SystemPromptConfig {
   modificationStrategy: ModificationStrategy;
   /** Leaner wording and fewer tools for <= ~4B parameter models. */
   compact: boolean;
+  /**
+   * A large model (cloud, or >= 24B locally): it needs no hand-holding but wastes steps when it
+   * reads one file per round trip or rewrites whole files, so it gets working-style rules instead.
+   */
+  large?: boolean;
 }
 
 export const THOUGHT_MAX_CHARS = 500;
@@ -44,6 +51,9 @@ function toolLines(toolset: AgentToolset, compact: boolean): string[] {
     '- list_dir {path}: list a folder ("" = project root).',
     '- read_file {path, start_line?, end_line?}: read a file (use line ranges for big files).',
   ];
+  if (toolset.readFiles && toolset.readFiles > 1) {
+    lines.push(`- read_files {paths}: read up to ${toolset.readFiles} files in one step; use it instead of several read_file calls.`);
+  }
   if (!compact) lines.push('- search_code {query}: find text in project files.');
   lines.push(
     '- write_file {path, content}: create a file or replace a whole file. "content" is the COMPLETE file text.',
@@ -100,6 +110,13 @@ export function buildAgentSystemPrompt(config: SystemPromptConfig): string {
     approvalNote,
     'If a tool fails, read the error and change your approach instead of retrying the same call.'
   );
+  if (config.large && !compact) {
+    rules.push(
+      `Work in few steps: first read everything the change needs${toolset.readFiles ? ' (read_files for several files at once)' : ''}, then make the changes, then verify. Do not re-read files whose content you already have.`,
+      'Prefer edit_file or replace_lines for focused changes; rewrite a whole file with write_file only when most of it changes.',
+      'Keep "thought" short. Finish as soon as the task is done and checked; do not add features the user did not ask for.'
+    );
+  }
   if (toolset.checklist) {
     rules.push('The task has a numbered checklist. When a reply completes items, add "checklist_done": [item numbers] to it. Finish only after every item is done.');
   }
@@ -138,6 +155,9 @@ export function buildActionSchema(toolset: AgentToolset, compact: boolean): Reco
   const variants = [
     variant('list_dir', { path: str }, ['path'], c),
     variant('read_file', { path: nonEmpty, start_line: { type: 'integer' }, end_line: { type: 'integer' } }, ['path'], c),
+    ...(toolset.readFiles && toolset.readFiles > 1 && !compact
+      ? [variant('read_files', { paths: { type: 'array', items: nonEmpty, minItems: 1, maxItems: toolset.readFiles } }, ['paths'], c)]
+      : []),
     variant('write_file', { path: nonEmpty, content: nonEmpty }, ['path', 'content'], c),
     variant('edit_file', { path: nonEmpty, find: nonEmpty, replace: str }, ['path', 'find', 'replace'], c),
     variant(
@@ -289,6 +309,8 @@ export function describeAction(type: string, payload: any): string {
       return `list_dir "${payload?.path || '.'}"`;
     case 'read_file':
       return `read_file "${payload?.path}"${payload?.startLine ? ` (lines ${payload.startLine}-${payload.endLine ?? ''})` : ''}`;
+    case 'read_files':
+      return `read_files ${(Array.isArray(payload?.paths) ? payload.paths : []).map((p: string) => `"${p}"`).join(', ')}`;
     case 'search_code':
       return `search_code "${payload?.query}"`;
     case 'propose_create':
@@ -332,7 +354,7 @@ export function compactActionForHistory(raw: any): string {
  */
 export function summarizeActionForHistory(raw: any): string {
   const action = String(raw?.action || 'action');
-  const target = raw?.path || raw?.query || raw?.url || raw?.command || '';
+  const target = raw?.path || raw?.query || raw?.url || raw?.command || (Array.isArray(raw?.paths) ? raw.paths.join(', ') : '');
   const size =
     typeof raw?.content === 'string'
       ? ` (${lineCount(raw.content)} lines)`

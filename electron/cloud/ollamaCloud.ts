@@ -30,7 +30,7 @@ async function failure(res: Response): Promise<HttpStatusError> {
   } catch {
     // keep the status
   }
-  return new HttpStatusError(res.status, message);
+  return new HttpStatusError(res.status, message, res.headers?.get?.('retry-after') || undefined);
 }
 
 async function request(fetchImpl: Fetch, apiKey: string, path: string, init: RequestInit): Promise<Response> {

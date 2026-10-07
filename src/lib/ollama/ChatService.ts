@@ -28,6 +28,9 @@ export class ChatService {
       systemPrompt?: string;
       options?: GenerationOptions;
       keepAlive?: string;
+      /** Cloud models: Settings › Cloud models › Effort (chat) and reasoning summaries. */
+      effort?: GatewayChatParams['effort'];
+      summaries?: boolean;
     },
     callbacks: StreamCallbacks
   ): () => void {
@@ -80,6 +83,8 @@ export class ChatService {
             options: params.options,
             system: params.systemPrompt,
             keep_alive: params.keepAlive,
+            ...(params.effort ? { effort: params.effort } : {}),
+            ...(params.summaries ? { summaries: true } : {}),
           },
           (chunk) => {
             let contentDelta = '';

@@ -182,7 +182,7 @@ README (özellikler, başlangıç, modeller, gizlilik, sorun giderme), `docs/KUL
 
 ## 13. Sonraki adımlar
 
-Bu adımların ayrıntılı planı (sürümler, yaklaşım, dosyalar, kabul ölçütleri): [PLAN_ACIK_NOKTALAR.md](./PLAN_ACIK_NOKTALAR.md).
+Bu adımların ayrıntılı planı (sürümler, yaklaşım, dosyalar, kabul ölçütleri) ve durumu: [PLAN_ACIK_NOKTALAR.md](./PLAN_ACIK_NOKTALAR.md). Hepsi Emir Code 2.1.0'da uygulandı; 5. ve 6. maddelerin ölçümleri gerçek anahtarlarla çalıştırılmayı bekliyor.
 
 1. OpenAI uyumlu özel adres (OpenRouter, LM Studio, vLLM, Azure OpenAI) — anahtarın kullanıcı tarafından seçilen bir adrese gideceği açıkça onaylatılarak.
 2. Google Gemini ve Mistral sağlayıcıları.
@@ -202,5 +202,6 @@ Bu adımların ayrıntılı planı (sürümler, yaklaşım, dosyalar, kabul öl�
 | 3 | Ayarlar › Bulut modelleri, model seçici, Keşfet › Bulut, ilk açılış, komut paleti | ✅ |
 | 4 | Testler ve belgeler | ✅ |
 | 5 | Emir Code 2.0 sürümü (Windows ve Linux paketleri) | ✅ |
-| 6 | Gerçek anahtarlarla canlı deneme ve bulut modelleri için ajan kıyaslaması | Planlandı (2.0.x / 2.1) |
-| 7 | Sonraki adımlar (bölüm 13) | Planlandı: [PLAN_ACIK_NOKTALAR.md](./PLAN_ACIK_NOKTALAR.md) |
+| 6 | Gerçek anahtarlarla canlı deneme ve bulut modelleri için ajan kıyaslaması | Araçlar 2.1.0'da hazır (`scripts/cloud-smoke.ts`, `scripts/agent-e2e.ts`); gerçek anahtarlarla çalıştırma bekliyor |
+| 7 | Sonraki adımlar (bölüm 13) | ✅ 2.1.0: OpenAI uyumlu sunucular, Gemini, Mistral, maliyet ve görev bütçesi, çaba ve akıl yürütme özetleri, seçicide görünen modeller, Ollama Cloud kullanım sınırı, anahtar maskeleme; yerel araç çağırma deneysel (karar ölçüm bekliyor). Ayrıntılar: [PLAN_ACIK_NOKTALAR.md](./PLAN_ACIK_NOKTALAR.md) |
+| 8 | Ajanın büyük modellere göre ayarı (kademeler, `read_files`, sınırlar) | ✅ 2.1.0 |

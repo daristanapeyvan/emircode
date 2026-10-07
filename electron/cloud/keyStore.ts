@@ -4,18 +4,24 @@
  * folder), encrypted with the system's key store through Electron's safeStorage (DPAPI on
  * Windows, Keychain on macOS, libsecret/KWallet on Linux). Where no real key store exists (Linux
  * with safeStorage's "basic_text" backend), a key is kept in memory for this session only.
- * A key in the environment (ANTHROPIC_API_KEY, OPENAI_API_KEY, OLLAMA_API_KEY) is used when none
- * is saved.
+ * A key in the environment (ANTHROPIC_API_KEY, OPENAI_API_KEY, OLLAMA_API_KEY, GEMINI_API_KEY,
+ * MISTRAL_API_KEY) is used when none is saved.
+ *
+ * The key of an OpenAI-compatible server is bound to the server's address: the address is encrypted
+ * together with the key, and a key whose address no longer matches is not used. Editing the server
+ * list on disk therefore cannot send a saved key somewhere else.
  */
 import fs from 'fs';
 import path from 'path';
-import { CLOUD_PROVIDERS, CloudProviderId, isCloudProvider } from '../../src/lib/providers/modelRef';
+import { BuiltinCloudProviderId, CLOUD_PROVIDERS, CloudProviderId, isBuiltinCloudProvider, isCloudProvider, isCompatProvider } from '../../src/lib/providers/modelRef';
 import type { CloudKeySource, CloudProviderStatus, CloudStatus } from './types';
 
-export const ENV_KEYS: Record<CloudProviderId, string> = {
+export const ENV_KEYS: Record<BuiltinCloudProviderId, string> = {
   'ollama-cloud': 'OLLAMA_API_KEY',
   anthropic: 'ANTHROPIC_API_KEY',
   openai: 'OPENAI_API_KEY',
+  gemini: 'GEMINI_API_KEY',
+  mistral: 'MISTRAL_API_KEY',
 };
 
 /** Encryption with the system's key store; `available` is false when it would not really protect the key. */
@@ -63,11 +69,33 @@ export function validKeyFormat(key: string): boolean {
 
 interface KeyFile {
   version: 1;
-  keys: Partial<Record<CloudProviderId, { data: string }>>;
+  keys: Partial<Record<string, { data: string }>>;
+}
+
+/** Built-in providers keep the bare key; OpenAI-compatible servers the key with its address. */
+interface Secret {
+  key: string;
+  /** The server address the key belongs to (OpenAI-compatible servers only). */
+  url?: string;
+}
+
+function encodeSecret(provider: CloudProviderId, secret: Secret): string {
+  return isCompatProvider(provider) ? JSON.stringify({ k: secret.key, u: secret.url || '' }) : secret.key;
+}
+
+function decodeSecret(provider: CloudProviderId, text: string): Secret | null {
+  if (!isCompatProvider(provider)) return validKeyFormat(text) ? { key: text } : null;
+  try {
+    const value = JSON.parse(text);
+    if (typeof value?.k === 'string' && validKeyFormat(value.k) && typeof value?.u === 'string' && value.u) return { key: value.k, url: value.u };
+  } catch {
+    // not ours
+  }
+  return null;
 }
 
 export class KeyStore {
-  private session = new Map<CloudProviderId, string>();
+  private session = new Map<CloudProviderId, Secret>();
   private saved: KeyFile = { version: 1, keys: {} };
   private loaded = false;
 
@@ -104,40 +132,49 @@ export class KeyStore {
     return this.box.available();
   }
 
-  private savedKey(provider: CloudProviderId): string | null {
+  private savedSecret(provider: CloudProviderId): Secret | null {
     this.load();
     const entry = this.saved.keys[provider];
     if (!entry || !this.box.available()) return null;
     try {
-      const key = this.box.decrypt(Buffer.from(entry.data, 'base64'));
-      return validKeyFormat(key) ? key : null;
+      return decodeSecret(provider, this.box.decrypt(Buffer.from(entry.data, 'base64')));
     } catch {
       return null;
     }
   }
 
-  private lookup(provider: CloudProviderId): { key: string; source: CloudKeySource } | null {
-    const saved = this.savedKey(provider);
-    if (saved) return { key: saved, source: 'saved' };
+  /**
+   * The key of a provider and where it comes from. An OpenAI-compatible server's key is only
+   * returned for the address it was saved with (`boundUrl`).
+   */
+  private lookup(provider: CloudProviderId, boundUrl?: string): { key: string; source: CloudKeySource } | null {
+    const matches = (secret: Secret | null | undefined): secret is Secret =>
+      !!secret && (!isCompatProvider(provider) || (!!boundUrl && secret.url === boundUrl));
+    const saved = this.savedSecret(provider);
+    if (matches(saved)) return { key: saved.key, source: 'saved' };
     const session = this.session.get(provider);
-    if (session) return { key: session, source: 'session' };
-    const env = String(this.env[ENV_KEYS[provider]] || '').trim();
-    if (validKeyFormat(env)) return { key: env, source: 'env' };
+    if (matches(session)) return { key: session.key, source: 'session' };
+    if (isBuiltinCloudProvider(provider)) {
+      const env = String(this.env[ENV_KEYS[provider]] || '').trim();
+      if (validKeyFormat(env)) return { key: env, source: 'env' };
+    }
     return null;
   }
 
-  get(provider: CloudProviderId): string | null {
-    return this.lookup(provider)?.key ?? null;
+  get(provider: CloudProviderId, boundUrl?: string): string | null {
+    return this.lookup(provider, boundUrl)?.key ?? null;
   }
 
   /** Saves a key: encrypted on disk where the system can, otherwise for this session. */
-  set(provider: CloudProviderId, key: string): { persisted: boolean } {
+  set(provider: CloudProviderId, key: string, boundUrl?: string): { persisted: boolean } {
     const value = String(key || '').trim();
     if (!validKeyFormat(value)) throw new Error('invalid key format');
+    if (isCompatProvider(provider) && !boundUrl) throw new Error('a server key needs its address');
+    const secret: Secret = isCompatProvider(provider) ? { key: value, url: boundUrl } : { key: value };
     this.load();
     this.session.delete(provider);
     if (this.box.available()) {
-      this.saved.keys[provider] = { data: this.box.encrypt(value).toString('base64') };
+      this.saved.keys[provider] = { data: this.box.encrypt(encodeSecret(provider, secret)).toString('base64') };
       this.write();
       return { persisted: true };
     }
@@ -145,7 +182,7 @@ export class KeyStore {
       delete this.saved.keys[provider];
       this.write();
     }
-    this.session.set(provider, value);
+    this.session.set(provider, secret);
     return { persisted: false };
   }
 
@@ -159,16 +196,34 @@ export class KeyStore {
     }
   }
 
-  providerStatus(provider: CloudProviderId): CloudProviderStatus {
-    const found = this.lookup(provider);
+  providerStatus(provider: CloudProviderId, boundUrl?: string): CloudProviderStatus {
+    const found = this.lookup(provider, boundUrl);
     return found
       ? { provider, configured: true, source: found.source, hint: maskKey(found.key) }
       : { provider, configured: false, source: null };
   }
 
+  /** Every key this store can hand out (saved, session, environment), to mask them in error texts. */
+  knownKeys(): string[] {
+    this.load();
+    const keys = new Set<string>();
+    for (const provider of Object.keys(this.saved.keys)) {
+      if (!isCloudProvider(provider)) continue;
+      const secret = this.savedSecret(provider);
+      if (secret) keys.add(secret.key);
+    }
+    for (const secret of this.session.values()) keys.add(secret.key);
+    for (const name of Object.values(ENV_KEYS)) {
+      const env = String(this.env[name] || '').trim();
+      if (validKeyFormat(env)) keys.add(env);
+    }
+    return [...keys];
+  }
+
+  /** The built-in providers; CloudService adds the OpenAI-compatible servers. */
   status(): CloudStatus {
-    const providers = {} as Record<CloudProviderId, CloudProviderStatus>;
+    const providers = {} as Record<BuiltinCloudProviderId, CloudProviderStatus>;
     for (const provider of CLOUD_PROVIDERS) providers[provider] = this.providerStatus(provider);
-    return { providers, encryption: this.box.available() ? 'os' : 'none' };
+    return { providers, endpoints: [], encryption: this.box.available() ? 'os' : 'none' };
   }
 }

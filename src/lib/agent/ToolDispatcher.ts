@@ -5,6 +5,7 @@ import { looksJsonEscaped } from './TaskValidator';
 export type ParsedActionType =
   | 'read_directory'
   | 'read_file'
+  | 'read_files'
   | 'search_code'
   | 'read_git_status'
   | 'read_git_diff'
@@ -41,6 +42,9 @@ const ACTION_ALIASES: Record<string, ParsedActionType> = {
   open_file: 'read_file',
   view_file: 'read_file',
   cat: 'read_file',
+  read_files: 'read_files',
+  read_multiple_files: 'read_files',
+  open_files: 'read_files',
   search_code: 'search_code',
   grep: 'search_code',
   find_in_files: 'search_code',
@@ -365,6 +369,22 @@ export class ToolDispatcher {
           rawJson: jsonContent,
         };
 
+      case 'read_files': {
+        const raw = Array.isArray(jsonContent.paths)
+          ? jsonContent.paths
+          : Array.isArray(jsonContent.files)
+            ? jsonContent.files
+            : typeof jsonContent.paths === 'string'
+              ? jsonContent.paths.split(/[\n,]+/)
+              : [];
+        const paths: string[] = [];
+        for (const item of raw) {
+          const p = cleanPath(typeof item === 'string' ? item : String(item?.path || ''));
+          if (p && !PLACEHOLDER_PATHS.has(p.toLowerCase()) && !paths.includes(p)) paths.push(p);
+        }
+        return { type, payload: { paths }, rawJson: jsonContent };
+      }
+
       case 'search_code':
         return {
           type,
@@ -506,6 +526,8 @@ export class ToolDispatcher {
   static validateAction(parsed: ParsedAction): string | null {
     const p = parsed.payload || {};
     switch (parsed.type) {
+      case 'read_files':
+        return Array.isArray(p.paths) && p.paths.length > 0 ? null : '"read_files" needs "paths": a list of file paths.';
       case 'read_file':
       case 'propose_delete':
         return p.path ? null : `"${parsed.type === 'read_file' ? 'read_file' : 'delete_file'}" needs a "path".`;

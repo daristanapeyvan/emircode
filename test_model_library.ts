@@ -52,6 +52,7 @@ const section = (title: string) => console.log(`\n--- ${title} ---`);
 
 const LIBRARY_HTML = fs.readFileSync(path.join('test_fixtures', 'ollama', 'library.html'), 'utf8');
 const TAGS_HTML = fs.readFileSync(path.join('test_fixtures', 'ollama', 'tags_qwen3.html'), 'utf8');
+const CLOUD_TAGS_HTML = fs.readFileSync(path.join('test_fixtures', 'ollama', 'tags_gpt-oss.html'), 'utf8');
 
 async function main() {
   // ---------------------------------------------------------------------------
@@ -238,6 +239,21 @@ async function main() {
     withCloud.map((g) => `${g.size}:${g.options.length}`)
   );
   check(pickSize(withCloud, pc16) === '20b' && pickSize(withCloud.filter((g) => g.size === CLOUD_GROUP), pc16) === CLOUD_GROUP, 'The cloud group is preselected only for a cloud-only model');
+  const fromPage = parseTagsHtml('gpt-oss', CLOUD_TAGS_HTML);
+  const cloudRows = fromPage.filter((v) => v.group === CLOUD_GROUP);
+  check(
+    fromPage.map((v) => v.name).join(',') === 'latest,20b,120b,20b-cloud,120b-cloud' &&
+      cloudRows.length === 2 &&
+      cloudRows.every((v) => v.bytes === null && v.sizeLabel === '' && v.context === '128K' && v.digest.length === 12),
+    'The tags page sample: cloud tags are read with no download size',
+    fromPage.map((v) => `${v.name}:${v.group}:${v.sizeLabel}:${v.context}`)
+  );
+  const pageGroups = groupVariants('gpt-oss', fromPage);
+  check(
+    pageGroups.map((g) => g.size).join(',') === `20b,120b,${CLOUD_GROUP}` && pageGroups[0].options[0].variant.bytes === parseByteLabel('14GB') && pageGroups[0].latest,
+    'and grouped like the live page: local sizes first, the cloud group last',
+    pageGroups.map((g) => g.size)
+  );
   check(modelsFor(models, 'recommended').map((m) => m.name).join(',') === 'qwen2.5-coder,qwen3,deepseek-r1', 'Recommended models keep the order of our own benchmark', modelsFor(models, 'recommended').map((m) => m.name));
   check(modelsFor(models, 'all', 'CODER').map((m) => m.name)[0] === 'qwen2.5-coder' && modelsFor(models, 'all', 'görüntü').length === 0, 'Search looks at names and descriptions, case-insensitive');
 

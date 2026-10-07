@@ -1,16 +1,24 @@
 /**
- * agent-e2e.ts — end-to-end benchmark of the coding agent against a LOCAL Ollama model.
+ * agent-e2e.ts — end-to-end benchmark of the coding agent against a local Ollama model or a cloud
+ * model.
  *
  * Runs the real AgentEngine (autonomous profile, web access off) in temporary workspaces with an
  * fs-backed window.electronAPI that mirrors electron/main.ts (mutation tokens, command policy),
  * then verifies the produced files independently (npm test, Python AST parse, JSON, HTML checks).
  *
- * Requires a running Ollama with the model pulled. On a CPU-only laptop a 7B model needs
- * 5-15 minutes per scenario.
+ * A local model needs a running Ollama with the model pulled (on a CPU-only laptop a 7B model needs
+ * 5-15 minutes per scenario). A cloud model ("anthropic::claude-sonnet-5-5", "openai::gpt-5",
+ * "gemini::gemini-2.5-pro", "mistral::mistral-large-latest", "ollama-cloud::qwen3-coder:480b",
+ * "openai-compatible:<id>::<model>") goes through the main process's cloud service
+ * (scripts/cloud-bridge.ts) with the key from the environment; the result then also has the tokens
+ * and the estimated cost.
  *
  * Usage:
- *   node scripts/run-ts-test.mjs scripts/agent-e2e.ts <model> [scenario,scenario,...] [outDir]
+ *   node scripts/run-ts-test.mjs scripts/agent-e2e.ts <model> [scenario,scenario,...] [outDir] [flags]
  *   e.g. node scripts/run-ts-test.mjs scripts/agent-e2e.ts qwen2.5-coder:7b web-new,web-followup,js-bugfix
+ *        ANTHROPIC_API_KEY=… node scripts/run-ts-test.mjs scripts/agent-e2e.ts anthropic::claude-sonnet-5-5 web-new,js-bugfix --effort=high
+ * Flags: --native-tools (the experimental native tool mode), --effort=<low|medium|high|xhigh|max>,
+ *        --budget=<usd> (task budget), --context=<tokens> (cloud context window)
  * Scenarios: web-new, web-followup, repair-corrupted, js-bugfix, python-cli, json-config,
  *            nav-links, six-products (both replay requests from the in-app reports),
  *            wizard-site, wizard-mini, wizard-script (requests and run options of the wizards),
@@ -30,12 +38,26 @@ import type { RunGoalOptions, PreviousTask } from '../src/lib/agent/AgentEngine'
 import { compileSitePrompt, createWizardData } from '../src/lib/wizard/siteWizard';
 import { compileMiniAppPrompt, getMiniApp, CompiledTool } from '../src/lib/wizard/miniApps';
 import { compileScriptPrompt, getScript } from '../src/lib/wizard/scripts';
+import { parseModelRef } from '../src/lib/providers/modelRef';
+import { TokenUsage, addUsage, estimateCost, priceFor } from '../src/lib/providers/pricing';
+import { attachBridge, createBridge, registerModel, Bridge } from './cloud-bridge';
 
-const [model, scenarioArg, outDirArg] = process.argv.slice(2);
+const argv = process.argv.slice(2);
+const flags = new Map(
+  argv
+    .filter((a) => a.startsWith('--'))
+    .map((a) => {
+      const [k, v] = a.slice(2).split('=');
+      return [k, v ?? 'true'] as [string, string];
+    })
+);
+const [model, scenarioArg, outDirArg] = argv.filter((a) => !a.startsWith('--'));
 if (!model) {
-  console.error('usage: node scripts/run-ts-test.mjs scripts/agent-e2e.ts <model> [scenarios] [outDir]');
+  console.error('usage: node scripts/run-ts-test.mjs scripts/agent-e2e.ts <model> [scenarios] [outDir] [--native-tools] [--effort=high] [--budget=2] [--context=131072]');
   process.exit(2);
 }
+const cloudModel = parseModelRef(model).provider !== 'ollama';
+let bridge: Bridge | null = null;
 const outDir = path.resolve(outDirArg || path.join(os.tmpdir(), 'emir-code-agent-e2e'));
 fs.mkdirSync(outDir, { recursive: true });
 
@@ -535,7 +557,15 @@ async function runScenario(s: Scenario, previousTask?: PreviousTask, reuseDir?: 
     fs.mkdirSync(dir, { recursive: true });
     s.seed?.(dir);
   }
-  (globalThis as any).window = { electronAPI: makeElectronApi(dir) };
+  const api: any = makeElectronApi(dir);
+  let usage: TokenUsage = { prompt: 0, cached: 0, output: 0 };
+  if (bridge) {
+    attachBridge(api, bridge.service, (event) => {
+      const c: any = event.type === 'chunk' ? event.chunk : null;
+      if (c?.done) usage = addUsage(usage, { prompt: c.prompt_eval_count || 0, cached: c.cached_prompt_count || 0, output: c.eval_count || 0 });
+    });
+  }
+  (globalThis as any).window = { electronAPI: api };
 
   const started = Date.now();
   const log: string[] = [];
@@ -577,6 +607,7 @@ async function runScenario(s: Scenario, previousTask?: PreviousTask, reuseDir?: 
 
   const secs = Math.round((Date.now() - started) / 1000);
   const verdict = s.verify(dir);
+  const price = priceFor(model, useSettingsStore.getState().settings.cloud?.prices).price;
   const result = {
     model,
     scenario: s.id,
@@ -584,6 +615,16 @@ async function runScenario(s: Scenario, previousTask?: PreviousTask, reuseDir?: 
     verified: verdict.ok,
     seconds: secs,
     modelSteps,
+    ...(cloudModel
+      ? {
+          tokensIn: usage.prompt,
+          tokensCached: usage.cached || 0,
+          tokensOut: usage.output,
+          costUsd: price ? Number(estimateCost(usage, price).toFixed(4)) : null,
+          nativeTools: flags.has('native-tools'),
+          effort: flags.get('effort') || 'auto',
+        }
+      : {}),
     notes: verdict.notes,
     final: finalText.slice(0, 400),
     dir,
@@ -603,12 +644,25 @@ async function main() {
       ...DEFAULT_SETTINGS,
       securityProfile: 'autonomous',
       webAccess: { enabled: false, chatEnabled: false, codingEnabled: false },
+      cloud: {
+        ...DEFAULT_SETTINGS.cloud,
+        nativeTools: flags.has('native-tools'),
+        agentEffort: (flags.get('effort') as any) || 'auto',
+        taskBudgetUsd: Number(flags.get('budget')) || 0,
+        contextLength: Number(flags.get('context')) || 0,
+      },
     },
     hardware: {
       cpu: { model: 'AMD Ryzen 5 7530U', cores: 6, logicalProcessors: 12 },
       ram: { totalBytes: 15.9e9, availableBytes: 6e9, totalGb: 14.8, availableGb: 6 },
     },
   } as any);
+
+  if (cloudModel) {
+    bridge = await createBridge();
+    const info = await registerModel(bridge.service, model);
+    console.log(`cloud model ${model}: ${info ? `${info.contextWindow ?? '?'} context, ${info.maxOutput ?? '?'} output` : 'not in the provider list (guessed profile)'}`);
+  }
 
   const ids = (scenarioArg || 'web-new').split(',');
   const results: any[] = [];
@@ -628,10 +682,13 @@ async function main() {
     const out = await runScenario(s, s.previousTask ?? prev?.previousTask, prev?.dir);
     contexts[id] = { dir: out.dir, previousTask: out.previousTask };
     results.push(out.result);
-    fs.writeFileSync(path.join(outDir, `results_${model.replace(/[:/]/g, '_')}.json`), JSON.stringify(results, null, 2));
+    fs.writeFileSync(path.join(outDir, `results_${model.replace(/[:/]/g, '_')}${flags.has('native-tools') ? '_native' : ''}.json`), JSON.stringify(results, null, 2));
   }
   console.log('\nSUMMARY');
-  for (const r of results) console.log(`${r.verified ? 'PASS' : 'FAIL'}  ${r.model}  ${r.scenario}  status=${r.status}  ${r.seconds}s  steps=${r.modelSteps}`);
+  for (const r of results) {
+    const cost = cloudModel ? `  in=${r.tokensIn} (cached ${r.tokensCached}) out=${r.tokensOut} cost=${r.costUsd === null ? 'unknown' : '$' + r.costUsd}` : '';
+    console.log(`${r.verified ? 'PASS' : 'FAIL'}  ${r.model}  ${r.scenario}  status=${r.status}  ${r.seconds}s  steps=${r.modelSteps}${cost}`);
+  }
 }
 
 main().catch((e) => {

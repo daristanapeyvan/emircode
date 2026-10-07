@@ -238,6 +238,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     // ---- Web access in the chat ----
     const settingsNow = useSettingsStore.getState().settings;
+    // Cloud models: the chat's effort and OpenAI's reasoning summaries (Settings › Cloud models).
+    const chatEffort = settingsNow.cloud?.chatEffort;
+    const cloudReasoning = {
+      ...(chatEffort && chatEffort !== 'auto' ? { effort: chatEffort } : {}),
+      summaries: settingsNow.cloud?.reasoningSummaries !== false,
+    };
     const tChat = getTranslations(settingsNow.language).chat;
     const isChatWebAllowed = ToolDispatcher.isWebAccessAllowed('chat', settingsNow.webAccess);
     const hasWebIntent = detectWebSearchIntent(content);
@@ -361,6 +367,7 @@ Never tell the user to search the web or that you have no access; search yoursel
           systemPrompt,
           options: resolvedOptions,
           keepAlive,
+          ...cloudReasoning,
         },
         {
           onToken: (cDelta, thDelta) => {
@@ -419,6 +426,7 @@ Never tell the user to search the web or that you have no access; search yoursel
         systemPrompt: effectiveSystemPrompt,
         options: resolvedOptions,
         keepAlive,
+        ...cloudReasoning,
       },
       {
         onToken: (contentDelta, thinkingDelta) => {

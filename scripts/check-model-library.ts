@@ -6,7 +6,7 @@
  * Usage: npm run check:library
  */
 import { createHash } from 'node:crypto';
-import { groupVariants, isLocal, modelsFor, parseLibraryHtml, parseTagsHtml, LIBRARY_CATEGORIES } from '../src/lib/ollama/library';
+import { CLOUD_GROUP, groupVariants, isLocal, modelsFor, parseLibraryHtml, parseTagsHtml, LIBRARY_CATEGORIES } from '../src/lib/ollama/library';
 
 const UA = 'EmirCode-library-check (+https://github.com/daristanapeyvan/emircode)';
 const problems: string[] = [];
@@ -47,6 +47,19 @@ async function main() {
       expect(manifest.status === 200 && digest.startsWith(def.variant.digest), `${def.variant.tag}: registry digest ${digest.slice(0, 12)} = listed ${def.variant.digest}`);
     }
   }
+  // Cloud tags (run on ollama.com): no download size, a group of their own after the local sizes.
+  // test_fixtures/ollama/tags_gpt-oss.html is a sample of this page.
+  const cloudPage = await text('https://ollama.com/library/gpt-oss/tags');
+  const cloudVariants = parseTagsHtml('gpt-oss', cloudPage.body);
+  const cloudTags = cloudVariants.filter((v) => v.group === CLOUD_GROUP);
+  const cloudGroups = groupVariants('gpt-oss', cloudVariants);
+  expect(
+    cloudPage.status === 200 && cloudTags.length > 0 && cloudTags.every((v) => !v.bytes) && cloudGroups[cloudGroups.length - 1]?.size === CLOUD_GROUP,
+    `gpt-oss: ${cloudTags.length} cloud tags (${cloudTags.map((v) => v.name).join(', ')}), no download size, grouped last`
+  );
+  const cloudModels = modelsFor(models, 'cloud');
+  expect(cloudModels.length > 0 && cloudModels.every((m) => m.cloud), `cloud category: ${cloudModels.length} models`);
+
   const missing = await text('https://registry.ollama.ai/v2/library/qwen3/manifests/no-such-tag', 'application/vnd.docker.distribution.manifest.v2+json');
   expect(missing.status === 404, 'an unknown tag is a 404 in the registry');
 
