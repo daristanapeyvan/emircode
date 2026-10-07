@@ -167,11 +167,29 @@ jobs:
           name: linux-release
           path: release-dist
 
+      # "v2.0.0" is published as "Emir Code 2.0" (a patch release keeps its number: "Emir Code 2.0.1"),
+      # with the version's section of CHANGELOG.md as the release notes.
+      - name: Release Title and Notes
+        id: notes
+        shell: bash
+        env:
+          TAG_NAME: ${{ inputs.tag_name || github.ref_name }}
+        run: |
+          VERSION="${TAG_NAME#v}"
+          TITLE="Emir Code $(echo "$VERSION" | sed -E 's/^([0-9]+\.[0-9]+)\.0$/\1/')"
+          awk -v head="## [$VERSION]" 'index($0, "## [") == 1 { if (found) exit; if (index($0, head) == 1) { found = 1; next } } found' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then echo "See [CHANGELOG.md](CHANGELOG.md)." > release-notes.md; fi
+          echo "tag=$TAG_NAME" >> "$GITHUB_OUTPUT"
+          echo "title=$TITLE" >> "$GITHUB_OUTPUT"
+          echo "$TITLE"
+          head -n 5 release-notes.md
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: "Emir Code ${{ github.ref_name || inputs.tag_name }}"
-          tag_name: "${{ github.ref_name || inputs.tag_name }}"
+          name: "${{ steps.notes.outputs.title }}"
+          tag_name: "${{ steps.notes.outputs.tag }}"
+          body_path: release-notes.md
           generate_release_notes: true
           draft: false
           prerelease: false

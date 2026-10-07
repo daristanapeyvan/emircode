@@ -182,6 +182,8 @@ README (özellikler, başlangıç, modeller, gizlilik, sorun giderme), `docs/KUL
 
 ## 13. Sonraki adımlar
 
+Bu adımların ayrıntılı planı (sürümler, yaklaşım, dosyalar, kabul ölçütleri): [PLAN_ACIK_NOKTALAR.md](./PLAN_ACIK_NOKTALAR.md).
+
 1. OpenAI uyumlu özel adres (OpenRouter, LM Studio, vLLM, Azure OpenAI) — anahtarın kullanıcı tarafından seçilen bir adrese gideceği açıkça onaylatılarak.
 2. Google Gemini ve Mistral sağlayıcıları.
 3. Maliyet göstergesi: mesaj ve görev başına token ve tahmini ücret, isteğe bağlı görev bütçesi.
@@ -199,5 +201,6 @@ README (özellikler, başlangıç, modeller, gizlilik, sorun giderme), `docs/KUL
 | 2 | ModelGateway; sohbet ve ajanın bulut modelleriyle çalışması | ✅ |
 | 3 | Ayarlar › Bulut modelleri, model seçici, Keşfet › Bulut, ilk açılış, komut paleti | ✅ |
 | 4 | Testler ve belgeler | ✅ |
-| 5 | Gerçek anahtarlarla canlı deneme ve bulut modelleri için ajan kıyaslaması | Açık |
-| 6 | Sonraki adımlar (bölüm 13) | Planlandı |
+| 5 | Emir Code 2.0 sürümü (Windows ve Linux paketleri) | ✅ |
+| 6 | Gerçek anahtarlarla canlı deneme ve bulut modelleri için ajan kıyaslaması | Planlandı (2.0.x / 2.1) |
+| 7 | Sonraki adımlar (bölüm 13) | Planlandı: [PLAN_ACIK_NOKTALAR.md](./PLAN_ACIK_NOKTALAR.md) |

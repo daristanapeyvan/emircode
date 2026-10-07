@@ -290,6 +290,8 @@ Ollama kuruluysa bir terminalde bir kez `ollama signin` çalıştırın. Sonra M
 ### Bilgisayardan ne çıkar?
 Bir bulut modeli seçtiğinizde mesajlarınız ve ekleriniz, Kod sekmesinde de ajanın okuduğu proje dosyaları, komut çıktıları ve web sonuçları sağlayıcıya gönderilir ve onun koşullarına göre işlenir. Yerel modelleri kullanırken hiçbir şey değişmez: bir bulut modeli seçmedikçe sağlayıcıya istek gitmez (anahtarı kaydederken ve model listesini yenilerken yalnızca model listesi okunur). Emir Code'un kendisi telemetri göndermez.
 
+Tasarım kararları [PLAN_BULUT_MODELLERI.md](./PLAN_BULUT_MODELLERI.md), sonraki sürümlerin planı (maliyet göstergesi, görev bütçesi, OpenAI uyumlu adresler, Gemini ve Mistral …) [PLAN_ACIK_NOKTALAR.md](./PLAN_ACIK_NOKTALAR.md) belgesindedir.
+
 ---
 
 ## Kısayollar

@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-10-07
+
+Emir Code 2.0: cloud models next to the local ones. Local use stays as it was: no account, no telemetry, and nothing leaves the computer until a cloud model is chosen.
+
 ### Added
 - Cloud models next to the local ones: **Ollama Cloud**, **Claude** (Anthropic) and **GPT** (OpenAI) in the chat and in the Code tab. Settings › Cloud models takes an API key per provider; the key is checked with the provider before it is saved, and the provider's models appear in the model selector under their own heading with a cloud icon.
 - Ollama Cloud works two ways: with an ollama.com API key (no local Ollama needed), or through a local Ollama signed in with `ollama signin`. Model Manager › Discover has a Cloud category, and a model's cloud tags (`gpt-oss:120b-cloud`) form their own group that is added, not downloaded.
@@ -15,12 +19,14 @@ All notable changes to this project are documented in this file. The format foll
 - The setup wizard offers "Set up cloud models" for computers without Ollama; the command palette has "Cloud models" and switches to cloud models; the model selector has "Add cloud models" and a search box when there are many models.
 - `test_cloud_providers.ts` (part of `npm test`, no network): model references, the answer schema, the requests and streams of every provider, error codes, the key store, the main-process checks, the gateway and a whole agent task on a scripted cloud model. The static checks make sure keys never reach the interface, the settings file or the agent's commands.
 - The plan and design of cloud models, in Turkish: `docs/PLAN_BULUT_MODELLERI.md`.
+- The roadmap of the open points (live checks with real keys, a cloud benchmark, cost and task budgets, reasoning settings, OpenAI-compatible addresses, Gemini and Mistral, native tool calls), in Turkish: `docs/PLAN_ACIK_NOKTALAR.md`.
 
 ### Changed
 - Every model call of the chat and the agent goes through one gateway (`src/lib/providers/ModelGateway.ts`), which sends local models to Ollama and cloud models to the main process.
 - Models are stored as `provider::model` for cloud providers; plain names saved earlier still mean local Ollama models.
 - The "Ollama not detected" banner appears only while a local model is selected, and the chat's start screen offers both a download and cloud models when no model exists.
 - Settings › Agent › Context length applies to local models; Settings › Generation notes that Claude and GPT use their provider's sampling.
+- The release workflow names the release after the version ("Emir Code 2.0") and puts the version's changelog section into the release notes; started by hand it uses the given tag instead of the branch name.
 - Documentation: the README, the Turkish guide, the architecture (new section "Cloud models"), the security model (new section "Cloud models"), the examples, the contributing guide and the security policy describe cloud models, where keys are kept and what leaves the computer.
 
 ## [1.9.0] - 2026-10-02

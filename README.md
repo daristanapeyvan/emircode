@@ -296,6 +296,7 @@ Pushing a `vX.Y.Z` tag starts the release workflow: it builds the Windows and Li
 | 🇹🇷 [docs/KULLANIM.md](./docs/KULLANIM.md) | Turkish user guide |
 | 🧪 [docs/EXAMPLES.md](./docs/EXAMPLES.md) | What happens during typical agent tasks |
 | ☁️ [docs/PLAN_BULUT_MODELLERI.md](./docs/PLAN_BULUT_MODELLERI.md) | Plan and design of cloud models: Ollama Cloud, Claude, GPT (Turkish) |
+| 🗺️ [docs/PLAN_ACIK_NOKTALAR.md](./docs/PLAN_ACIK_NOKTALAR.md) | Roadmap of Emir Code 2.x: live checks, cloud benchmark, costs, more providers (Turkish) |
 | 🏗️ [ARCHITECTURE.md](./ARCHITECTURE.md) | Processes, agent loop, checks, themes, wizards, model library, cloud models, packaging |
 | 🔒 [docs/SECURITY_MODEL.md](./docs/SECURITY_MODEL.md) | What the app allows and blocks, and where the limits are |
 | 🚨 [SECURITY.md](./SECURITY.md) | How to report a vulnerability |
