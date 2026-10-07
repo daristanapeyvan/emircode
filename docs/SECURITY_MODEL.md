@@ -13,6 +13,7 @@ An agent driven by a local model can be steered by text it reads (files, git out
 3. **Unwanted commands.** The model tries to install packages, run a shell, chain commands or run code that is in no file.
 4. **Programs that do more than they should.** A program the agent wrote or a test it runs reads other files, uses the network or starts other programs.
 5. **Half-written or unwanted changes.** A crash during a write, or a change the user did not want.
+6. **Leaked API keys.** The key of a cloud provider ends up in a file, in the window, in a program the agent runs, or at an address other than the provider's.
 
 ---
 
@@ -86,7 +87,7 @@ The approval dialog shows the command, the `package.json` script that `npm` will
 - **cargo.** Only `build`, `check`, `test`, `run`, `fmt`, `clippy`, `bench` and `doc`.
 - **Arguments.** Arguments containing `;`, `&`, `|`, `$`, `<`, `>`, backticks or line breaks are refused.
 - **No shell.** Programs are started directly with an argument list. The exception is `npm` on Windows: it is a `.cmd` script, which Node.js does not start without a shell (CVE-2024-27980), so it runs through `cmd.exe` as one command line after the arguments have also been checked for `"`, `%`, `^`, `!`, `(` and `)`.
-- **Environment.** Only `PATH`, the Windows system variables (`SystemRoot`, `COMSPEC`, `PATHEXT`), temporary folders, `HOME`, `USER`, `SHELL`, the locale and the XDG folders are passed on, plus `NODE_ENV=test` and `PYTHONIOENCODING=utf-8`. Other variables, such as tokens in your environment, are not.
+- **Environment.** Only `PATH`, the Windows system variables (`SystemRoot`, `COMSPEC`, `PATHEXT`), temporary folders, `HOME`, `USER`, `SHELL`, the locale and the XDG folders are passed on, plus `NODE_ENV=test` and `PYTHONIOENCODING=utf-8`. Other variables, such as tokens in your environment and `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `OLLAMA_API_KEY`, are not.
 - **Limits.** A command runs in the project folder, is stopped after 60 seconds together with the programs it started, and at most 2 MB of output is read.
 
 These rules decide what may start. What a started program does is limited by the isolated environment (next section) as far as this computer provides it, and otherwise only by the user's approval: a program that runs without isolation has the same rights as the user.
@@ -170,6 +171,32 @@ All web requests are made by the main process (`electron/web.ts`):
 - Searches go to DuckDuckGo Lite; results with local addresses are dropped. If the search page cannot be read (its layout changed, or it shows a check for bots), the search fails with that message instead of reporting no results.
 
 The Model Manager's requests use separate functions (`models:library`, `models:tags`, `models:manifest`) that build fixed URLs on ollama.com and registry.ollama.ai from validated model names and reject responses that end on another host.
+
+---
+
+## Cloud models
+
+Ollama Cloud, Claude (Anthropic) and GPT (OpenAI) are used only after the user enters an API key (or, for Ollama Cloud, signs in the local Ollama with `ollama signin`) and selects one of their models.
+
+**API keys** (`electron/cloud/keyStore.ts`):
+- A key is saved only after the provider's model list could be read with it. It is stored in `cloud_keys.json` in the app's data folder, written with mode 600, and encrypted with Electron `safeStorage`, which uses the system's key store: DPAPI on Windows, libsecret (GNOME Keyring) or KWallet on Linux. Keys are never part of `emir_code_data.json`, so backups or exports of the chats do not contain them.
+- On Linux without a key store, `safeStorage` falls back to a fixed password (`basic_text`). Emir Code does not treat that as encryption: the key is then kept in the main process's memory until the app closes, and Settings › Cloud models says so.
+- `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` and `OLLAMA_API_KEY` are read from the app's environment when no key is saved.
+- The key stays in the main process. The window can save, replace or remove a key and learns only whether one is set, where it comes from and its last four characters; no IPC channel returns a key. Programs the agent runs do not get the variables above (see Commands), and `cloud_keys.json` is outside every project folder, so the agent's file tools cannot read it.
+
+**Where requests go** (`electron/cloud/`):
+- Each provider has one fixed address: `https://api.anthropic.com`, `https://api.openai.com/v1` and `https://ollama.com`. `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN` and `OPENAI_BASE_URL` in the environment are ignored, and requests to ollama.com do not follow redirects, so a key is sent to its provider only. The window cannot choose an address.
+- Requests from the window are checked in the main process before they are sent: a known provider, a model id of letters, digits and `. _ : / @ -`, the roles `system`, `user`, `assistant` and `tool`, numeric generation options only, and at most 48 MB including images. Requests of a window that was closed are stopped.
+
+**What the provider receives.** With a cloud model selected, the chat sends the conversation, the system instructions, attachments and web results; the agent sends its system prompt, the task, the files it reads, search results, git output, command output and web results, every step. The provider processes them under its own terms (retention, training, location). Emir Code adds no telemetry or identifiers of its own. An Ollama Cloud model added to the local Ollama (`…-cloud` tags) sends the same data to ollama.com through Ollama.
+
+**What does not change.** A cloud model is driven by the same agent engine: every file, command and web request still goes through the checks, approvals and isolation of this document, and content from files and the web is still marked as untrusted. A cloud model can be misled by hidden instructions just like a local one.
+
+Limits:
+- A program running as the user can ask the system's key store to decrypt `cloud_keys.json` just as Emir Code does; the encryption protects against copies of the file and other accounts, not against malware in the user's session.
+- While Emir Code runs, the keys are in the main process's memory.
+- A key in an environment variable is visible to every program started from that environment (but not to the agent's commands).
+- Emir Code cannot limit what a provider does with the data it receives, nor the costs a task causes; the provider's own spending limits apply.
 
 ---
 

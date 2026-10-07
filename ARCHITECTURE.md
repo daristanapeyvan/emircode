@@ -1,6 +1,6 @@
 # Emir Code Architecture
 
-Emir Code is an Electron app (React 19, TypeScript, Zustand, Tailwind CSS) that talks to a local Ollama server. This document describes how the parts fit together and where the code lives. Security details are in [docs/SECURITY_MODEL.md](./docs/SECURITY_MODEL.md).
+Emir Code is an Electron app (React 19, TypeScript, Zustand, Tailwind CSS) that talks to a local Ollama server and, when the user adds an API key, to cloud providers (Ollama Cloud, Anthropic for Claude, OpenAI for GPT). This document describes how the parts fit together and where the code lives. Security details are in [docs/SECURITY_MODEL.md](./docs/SECURITY_MODEL.md).
 
 ---
 
@@ -14,10 +14,11 @@ Emir Code is an Electron app (React 19, TypeScript, Zustand, Tailwind CSS) that 
 | | Web search and page fetching (section 10) | `electron/web.ts` |
 | | Read-only git with repository settings switched off | `electron/git.ts` |
 | | Texts of the main process in the interface language | `electron/i18n.ts` |
+| | Cloud providers: API keys, model lists, streamed answers (section 13) | `electron/cloud/` |
 | Preload | Exposes the typed `window.electronAPI` bridge; the window runs with `contextIsolation: true` and `nodeIntegration: false` | `electron/preload.ts` |
-| Renderer | The interface, the stores, the agent engine and all requests to Ollama (`/api/chat`, `/api/show`, `/api/pull`, …) | `src/` |
+| Renderer | The interface, the stores, the agent engine and all requests to the local Ollama (`/api/chat`, `/api/show`, `/api/pull`, …). Model calls go through `ModelGateway`, which sends cloud models to the main process. | `src/` |
 
-The agent engine runs in the renderer. It never touches the disk itself: every read, write, command and web request goes through an IPC call to the main process, which checks it again. Links in the window never open a new Electron window or navigate it away; web addresses go to the system browser.
+The agent engine runs in the renderer. It never touches the disk itself: every read, write, command, web request and cloud model request goes through an IPC call to the main process, which checks it again. Links in the window never open a new Electron window or navigate it away; web addresses go to the system browser.
 
 Texts the user sees come from the translation files (`src/lib/localization/translations`), also those of the main process and the agent engine. What the model reads (instructions, check results, errors) is English; the check results shown in the interface are rendered in the interface language (`checkTexts.ts`).
 
@@ -26,10 +27,10 @@ Texts the user sees come from the translation files (`src/lib/localization/trans
 ## 2. How an agent task runs
 
 1. **Start.** `agentStore.startGoal` calls `AgentEngine.runGoal` with the request, the model, the security profile and the previous task of the session. The model always learns which files the previous task changed and whether it finished; the previous request itself is included only when the new request continues it ("continue", "devam et"), so an unrelated request does not resume old work.
-2. **Probing.** The engine asks the main process for `git status` and the file list, and reads the model's size, native context length and capabilities from Ollama's `/api/show` (`ModelRuntime.ts`). If Git is not available, the git tools are left out; for the Autonomous profile `ask_user` is left out; without web access the web tools are left out. Models up to 4.5B parameters get a shorter tool list without `search_code` and `delete_file`.
+2. **Probing.** The engine asks the main process for `git status` and the file list, and reads the model's size, native context length and capabilities from Ollama's `/api/show`, or for a cloud model from the provider's model list (`ModelRuntime.ts`, section 13). If Git is not available, the git tools are left out; for the Autonomous profile `ask_user` is left out; without web access the web tools are left out. Models up to 4.5B parameters get a shorter tool list without `search_code` and `delete_file`.
 3. **Planning.** The request becomes a checklist only when the user wrote an explicit list or joined steps with sequencing words (section 4). For web pages, `TaskCompiler` creates acceptance checks (section 5). For a new web page, a design theme is chosen (section 7).
 4. **Tool loop** (at most 35 steps and 50 tool calls, within the task time limit from Settings › General, 30 minutes by default; time spent waiting for the user is not counted):
-   - The engine sends the static system prompt and the append-only history to `/api/chat`, with the JSON Schema of the enabled tools as Ollama `format`.
+   - The engine sends the static system prompt and the append-only history through `ModelGateway.chatStream` (Ollama's `/api/chat`, or a cloud provider), with the JSON Schema of the enabled tools as Ollama `format`.
    - The model answers with one action: `{"thought": …, "action": …, …fields}`. The tools are `list_dir`, `read_file`, `search_code`, `write_file`, `edit_file`, `replace_lines`, `delete_file`, `run_command`, `git_status`, `git_diff`, `web_search`, `fetch_url`, `ask_user` and `finish`.
    - Reads go through the main process. Writes and edits are checked (section 6), shown as a diff and, depending on the profile, approved by the user or applied directly. The main process then writes the file.
    - Every result goes back to the model with a one-line state (section 3).
@@ -58,7 +59,7 @@ BLOCKED, FAILED and DONE are final.
 
 - **Static system prompt.** The system prompt (`AgentProtocol.ts`) is the same in every step of a task, and the history is only appended to. Ollama can then reuse its cache for the unchanged beginning of the prompt instead of reading everything again at each step.
 - **State line.** Per-step information is appended to the newest tool result as one line, for example `[STATE] step 6/35 · changed files: index.html · checklist 1/3 done (next: #2) · acceptance checks 5/7 passing`. It can also name the last user decision, unavailable commands and missing paths.
-- **Context length.** Every request to Ollama sends an explicit `num_ctx`. It comes from Settings › Agent › Context length (Auto: chosen for this computer's hardware and capped by the model's native context). Chats use the same value unless a chat has its own override, so Ollama does not reload the model when you switch modes.
+- **Context length.** Every request to Ollama sends an explicit `num_ctx`. It comes from Settings › Agent › Context length (Auto: chosen for this computer's hardware and capped by the model's native context). Chats use the same value unless a chat has its own override, so Ollama does not reload the model when you switch modes. Cloud models use Settings › Cloud models › Context window instead (section 13).
 - **Compaction.** The engine estimates the prompt size before each request. When the prompt would not leave room for the answer, older tool results and actions are shortened (the newest exchanges stay complete). If that is not enough, the oldest exchanges are dropped and replaced by a short note that names the changed files. A file body removed from history is replaced by a line such as `[read_file "src/App.tsx": 870 lines, content removed from history to save space; read it again if you need it]`.
 - **Small projects.** In projects with up to 6 files the current file contents are part of the first task message, up to a quarter of the context window. When the model asks to read such a file anyway, the first read is answered; after that the rule for repeated reads applies.
 - **Output length.** When Ollama stops because the output limit was reached (`done_reason: "length"`), the step is retried with a larger `num_predict` (up to 60 % of the context window), then the model is asked for a smaller step.
@@ -188,15 +189,39 @@ Web access is on by default and can be switched off completely, or separately fo
 
 | Concern | How it works | Code |
 | --- | --- | --- |
-| Source | ollama.com's library page (name, description, capability labels, sizes, pulls) and each model's tags page (every tag with digest, size, context window and input types), parsed from the HTML. A list with fewer than 20 models is not accepted. The list and the tags are cached for 12 hours; offline, the saved copy or a short built-in list is shown. Models that only run in ollama.com's cloud are not listed. | `src/lib/ollama/library.ts`, `src/stores/modelLibraryStore.ts` |
+| Source | ollama.com's library page (name, description, capability labels, sizes, pulls) and each model's tags page (every tag with digest, size, context window and input types), parsed from the HTML. A list with fewer than 20 models is not accepted. The list and the tags are cached for 12 hours; offline, the saved copy or a short built-in list is shown. Models that only run in ollama.com's cloud appear only in the Cloud category and in a search. | `src/lib/ollama/library.ts`, `src/stores/modelLibraryStore.ts` |
 | Network | The renderer cannot fetch ollama.com itself. The main process offers `models:library`, `models:tags` and `models:manifest`, which build fixed URLs on ollama.com and registry.ollama.ai from validated names and reject responses that end on another host. | `electron/main.ts` |
 | Sizes and quantizations | Tags are grouped by size, tags with the same digest are one choice, and the default build's common quantizations are the main choices. The preselected size is the largest that runs comfortably: about file size × 1.2 + 1 GB within 60 % of RAM, or within the GPU's memory. | `groupVariants`, `pickSize`, `hardwareFit` |
 | Verification | `models:manifest` reads the registry manifest (as `ollama pull` does) and returns its digest and exact size. A finished download and every installed model are compared with it (identical or update available). | `verifyTag`, `compareInstalled`, `checkInstalledModels` |
-| Categories | From the capability labels (tools, thinking, vision, audio, embedding), the sizes and the name or description (coding). Recommended lists the models of the agent benchmark. | `categoriesOf`, `modelsFor` |
+| Categories | From the capability labels (tools, thinking, vision, audio, embedding, cloud), the sizes and the name or description (coding). Recommended lists the models of the agent benchmark. Cloud lists every model with a cloud offer, cloud-only ones included. | `categoriesOf`, `modelsFor` |
+| Cloud tags | Tags such as `120b-cloud` or `cloud` form their own group (`CLOUD_GROUP`) after the sizes; they have no memory fit and are preselected only for a cloud-only model. Adding one pulls the small manifest through the local Ollama, which then runs the model on ollama.com once signed in (section 13). | `isCloudTagName`, `groupVariants`, `pickSize` |
 
 ---
 
-## 13. Packaging and release
+## 13. Cloud models
+
+Ollama Cloud, Claude and GPT run next to the local models. The plan behind this, in Turkish, is [docs/PLAN_BULUT_MODELLERI.md](./docs/PLAN_BULUT_MODELLERI.md).
+
+**Model references.** Local models keep their plain Ollama names. A cloud model is stored as `provider::model` (`anthropic::claude-opus-5-5`, `openai::gpt-5`, `ollama-cloud::gpt-oss:120b`); `::` occurs in no Ollama name, so everything saved earlier still means a local model. An Ollama Cloud model added to the local Ollama after `ollama signin` keeps its plain name with a `-cloud` tag (`gpt-oss:120b-cloud`) and is an ordinary local model that runs remotely. Helpers: `src/lib/providers/modelRef.ts`.
+
+| Part | What it does | Code |
+| --- | --- | --- |
+| Gateway | `ModelGateway.chatStream` has the signature of `OllamaClient.chatStream`. A local model goes to Ollama; a cloud model goes to the main process with a request id (`cloud:chat`), and the answer comes back as Ollama chunks over `cloud:event` (`chunk`, then `end` or `error`). Stopping aborts the signal, rejects with an `AbortError` and sends `cloud:abort`. Errors arrive as `CloudRequestError` with a code. | `src/lib/providers/ModelGateway.ts` |
+| Main-process service | Checks every request field by field (provider, model id, roles, size up to 48 MB, numeric options only), runs it and streams the events to the window that asked; a closed window's requests are aborted. Also lists models, describes one model and saves or removes keys. | `electron/cloud/index.ts` |
+| Keys | One file, `cloud_keys.json` in the app's data folder (mode 600), with each key encrypted by Electron `safeStorage`. Where safeStorage has no real key store (Linux `basic_text`), a key is kept in memory for the session. Keys from `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` and `OLLAMA_API_KEY` are used when none is saved. A key is saved only after the provider's model list could be read with it. The window gets the source and the last four characters, never a key. | `electron/cloud/keyStore.ts` |
+| Claude | `@anthropic-ai/sdk`, `beta.messages.create` with streaming, fixed `https://api.anthropic.com` (an `ANTHROPIC_BASE_URL` or `ANTHROPIC_AUTH_TOKEN` in the environment is ignored). No sampling parameters. Top-level `cache_control` caches the static system prompt and the append-only history. Think → `thinking: {type: "adaptive", display: "summarized"}`, or a token budget on models without adaptive thinking. The answer schema → `output_config.format`. Models with safety classifiers get `fallbacks: "default"` (beta `server-side-fallback-2026-07-01`); a request the server rejects because of it is sent once more without it. Capabilities, context window and output limit come from the Models API. | `electron/cloud/anthropic.ts` |
+| GPT | `openai` SDK, Chat Completions with streaming and usage, fixed `https://api.openai.com/v1`. No sampling parameters. The answer schema → a non-strict `json_schema` response format. Think → `reasoning_effort` on reasoning models (o-series, GPT-5). The model list keeps chat models (no embeddings, audio, images or dated snapshots); context windows are known per family. | `electron/cloud/openai.ts` |
+| Ollama Cloud | `https://ollama.com/api/chat`, `/api/tags` and `/api/show` with the key as a bearer token; redirects are refused. The request and the answer are Ollama's own. | `electron/cloud/ollamaCloud.ts` |
+| Answer schema | Claude's and OpenAI's structured outputs do not take the agent's `anyOf` of tool variants with length limits. `flattenSchema` merges the variants into one closed object (`action` as an enum, tool fields optional, `thought` first) and removes unsupported keywords. | `electron/cloud/schema.ts` |
+| Errors | Provider errors become codes: `no_key`, `auth`, `quota`, `rate_limit`, `overloaded`, `not_found`, `format_unsupported`, `think_unsupported`, `context_length`, `refusal`, `network`, `bad_request`. The interface shows them in its language; the agent switches the schema or the think parameter off after `format_unsupported` / `think_unsupported` and repeats the step. The SDKs retry 429, 5xx and connection errors twice. | `electron/cloud/errors.ts`, `src/lib/providers/errorText.ts` |
+
+**The agent on a cloud model.** `getModelRuntimeInfo` marks cloud models (and `-cloud` tags) as remote and never small. `resolveRequestProfile` then takes the context window from Settings › Cloud models (Automatic: 65,536 tokens, capped by the model) instead of the hardware, and allows 16,384 output tokens per step (capped by the model and half the window). The design-category question gets 1,024 output tokens, because cloud models may reason first. The first log line names the provider that receives the task. Everything else (prompt, schema, checks, approvals, isolation) is the same as for a local model; the chunk translation keeps `done_reason: "length"` and `prompt_eval_count`, so the output limit and the token estimate calibrate as with Ollama.
+
+**Interface.** Settings › Cloud models (`CloudSettings.tsx`) holds the keys, the Ollama Cloud sign-in hint and the context window. The model selector groups models by where they run (this computer, Ollama Cloud through Ollama, Ollama Cloud, Claude, GPT) and searches when there are many. Model Manager › Discover has a Cloud category; a model's cloud tags form their own group that is added, not downloaded. The model store lists the providers' models at start and after a key changes (`refreshCloud`, `applyCloudStatus`). The "Ollama not detected" banner appears only while a local model is selected.
+
+---
+
+## 14. Packaging and release
 
 | Step | What happens | Code |
 | --- | --- | --- |
@@ -211,20 +236,21 @@ Web access is on by default and can be switched off completely, or separately fo
 
 ---
 
-## 14. Tests
+## 15. Tests
 
-`npm test` runs these suites; none of them needs Ollama.
+`npm test` runs these suites; none of them needs Ollama or a cloud account.
 
 | Suite | Covers |
 | --- | --- |
-| `scripts/verify_functionality.js` | Static checks across the app: translation parity, the command allowlist, interface structure, packaging configuration |
+| `scripts/verify_functionality.js` | Static checks across the app: translation parity, the command allowlist, interface structure, packaging configuration, cloud keys staying in the main process |
 | `test_agent_reliability.ts` | Unit checks of the agent: parsing, file checks, guards, checklist splitting |
 | `test_agent_engine.ts` | The whole agent loop against a scripted model, including refused commands and follow-up tasks |
 | `test_production_architecture.ts` | State machine transitions, acceptance checks, validator, tool dispatcher, small-model detection |
 | `test_web_access.ts` | Web access switches, runtime refusal, address checks, untrusted-data markers, HTML to text, search intent in Turkish and English (code questions stay local), request ids and cancellation |
 | `test_design_theme.ts` | Theme contrast, color and font mapping, page repairs |
 | `test_site_wizard.ts`, `test_tool_wizard.ts` | Wizard requests, catalogs, the script safety module in Python and Node.js |
-| `test_model_library.ts` | Parsing of saved ollama.com pages (`test_fixtures/ollama`), sizes, quantizations, verification |
+| `test_model_library.ts` | Parsing of saved ollama.com pages (`test_fixtures/ollama`), sizes, quantizations, verification, the Cloud category and cloud tags |
+| `test_cloud_providers.ts` | Model references, the flattened answer schema, the requests Claude, GPT and Ollama Cloud get, their streams translated into Ollama chunks, error codes, the key store (encrypted file, session-only keys, environment), the main-process request checks, the gateway (routing, errors, stopping), the runtime profile of cloud models and a whole agent task on a scripted cloud model |
 | `test_projects.ts` | Project folders, name rules, grouping of tasks |
 | `test_markdown.ts` | Numbered and nested lists in chat answers |
 | `test_security.ts` | Command rules, credential and runner settings files, web address checks, search page parsing, read-only git against a repository with hostile settings |

@@ -4,6 +4,25 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+### Added
+- Cloud models next to the local ones: **Ollama Cloud**, **Claude** (Anthropic) and **GPT** (OpenAI) in the chat and in the Code tab. Settings › Cloud models takes an API key per provider; the key is checked with the provider before it is saved, and the provider's models appear in the model selector under their own heading with a cloud icon.
+- Ollama Cloud works two ways: with an ollama.com API key (no local Ollama needed), or through a local Ollama signed in with `ollama signin`. Model Manager › Discover has a Cloud category, and a model's cloud tags (`gpt-oss:120b-cloud`) form their own group that is added, not downloaded.
+- API keys stay in the main process. They are kept in `cloud_keys.json`, encrypted with the system's key store (DPAPI on Windows, GNOME Keyring or KWallet on Linux), never in `emir_code_data.json`, and the interface only sees their last four characters. Without a system key store a key lasts until the app closes. `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` and `OLLAMA_API_KEY` are used when no key is saved; the agent's commands never get them.
+- Each provider has one fixed address (`api.anthropic.com`, `api.openai.com`, `ollama.com`); base URLs in the environment are ignored and ollama.com redirects are refused.
+- The agent on a cloud model: the context window follows Settings › Cloud models › Context window (Automatic: 64K tokens, capped by the model) instead of this computer's memory, one step may write up to 16K tokens, and the full tool list is offered. The answer schema goes as structured output (merged into one object for Claude and OpenAI), the static prompt and the history are cached by Claude (and automatically by OpenAI), "Think before each step" turns on Claude's adaptive thinking and GPT's reasoning effort, and a request declined by Claude's safety classifiers is retried by Anthropic on its recommended fallback model. If a provider rejects the schema or the thinking setting, the agent continues without it.
+- Errors of cloud providers are explained in the interface language: invalid key, no quota, rate limit, busy provider, unknown model, prompt too long, declined request, no connection, and "ollama signin" for Ollama Cloud models of a local Ollama that is not signed in.
+- Replies of cloud models show their token use (input, cached input, output).
+- The setup wizard offers "Set up cloud models" for computers without Ollama; the command palette has "Cloud models" and switches to cloud models; the model selector has "Add cloud models" and a search box when there are many models.
+- `test_cloud_providers.ts` (part of `npm test`, no network): model references, the answer schema, the requests and streams of every provider, error codes, the key store, the main-process checks, the gateway and a whole agent task on a scripted cloud model. The static checks make sure keys never reach the interface, the settings file or the agent's commands.
+- The plan and design of cloud models, in Turkish: `docs/PLAN_BULUT_MODELLERI.md`.
+
+### Changed
+- Every model call of the chat and the agent goes through one gateway (`src/lib/providers/ModelGateway.ts`), which sends local models to Ollama and cloud models to the main process.
+- Models are stored as `provider::model` for cloud providers; plain names saved earlier still mean local Ollama models.
+- The "Ollama not detected" banner appears only while a local model is selected, and the chat's start screen offers both a download and cloud models when no model exists.
+- Settings › Agent › Context length applies to local models; Settings › Generation notes that Claude and GPT use their provider's sampling.
+- Documentation: the README, the Turkish guide, the architecture (new section "Cloud models"), the security model (new section "Cloud models"), the examples, the contributing guide and the security policy describe cloud models, where keys are kept and what leaves the computer.
+
 ## [1.9.0] - 2026-10-02
 
 ### Added

@@ -86,3 +86,22 @@ What happens:
 - For models up to about 4.5B parameters the tool list is shorter: `search_code` and `delete_file` are not offered.
 - If the model runs a program that is not installed, the result is `[COMMAND UNAVAILABLE] … Do not call it again`, and the program is listed as unavailable in every following state line.
 - A repeated action is answered with `[REPEATED]` and a way out ("If the task is complete, reply with finish now"). Three repeats in a row, or ten steps without progress, stop the task with a message.
+
+## 8. A task on a cloud model
+
+**Setup**: an Anthropic API key in Settings › Cloud models, `claude-sonnet-5-5` selected under **Claude** in the model selector.
+
+**Request**:
+```
+The cart total is wrong after a discount is applied. Fix it and verify with npm test.
+```
+
+What happens:
+- The first log line says that the model runs at Anthropic and that the task, the files the agent reads, command output and web results are sent there.
+- The context window comes from Settings › Cloud models (Automatic: 64K tokens), not from this computer's memory, and one step may write up to 16K tokens. The full tool list is offered; there is no small-model shortcut.
+- Every step goes from the agent engine through `ModelGateway` to the main process, which sends it to the Anthropic API with the key. The system prompt and the history so far are read from Anthropic's prompt cache, so a step pays the full price only for what is new.
+- The answer schema goes as structured output. If the provider rejects it, the log says so and the agent continues with the schema in the prompt only, as with an Ollama server that has no schema support.
+- Everything else is as in example 3: the file checks, the approval of `npm test` (or its isolated run under Autonomous), the refusal to change existing tests and the completion card.
+- The Logs panel shows the tokens of every step (prompt and answer) and how long it took. If the key is wrong, the quota is used up or Anthropic limits requests, the task stops with a message that says which of these it is.
+
+With an Ollama Cloud model added through a signed-in Ollama (`gpt-oss:120b-cloud`) the same happens through the local Ollama, which forwards the request to ollama.com.

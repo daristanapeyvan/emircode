@@ -1,6 +1,6 @@
 # Security Policy
 
-Emir Code lets a local model read and change files in a project folder and run a small set of commands. What the app allows, what it blocks and where the limits are is described in [docs/SECURITY_MODEL.md](./docs/SECURITY_MODEL.md).
+Emir Code lets a local model, or a cloud model the user chose (Ollama Cloud, Claude, GPT), read and change files in a project folder and run a small set of commands. What the app allows, what it blocks and where the limits are is described in [docs/SECURITY_MODEL.md](./docs/SECURITY_MODEL.md).
 
 ## Supported versions
 
@@ -12,7 +12,8 @@ Please report anything that lets the agent, a project file, a web page or a mode
 - read or change files outside the chosen project folder, or files the access rules block (such as `.env` or key files),
 - start a program that is not on the command allowlist, or pass shell syntax to an allowed one,
 - reach a private or local network address through web access,
-- run code in the Electron main process or get access to Node.js from the interface.
+- run code in the Electron main process or get access to Node.js from the interface,
+- read a cloud provider's API key, or send it anywhere but that provider's own address.
 
 ## How to report
 

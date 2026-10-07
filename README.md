@@ -4,7 +4,7 @@
 
 # Emir Code
 
-**AI models on your own computer: chat with one, or let a coding agent build and fix your project while you review every change.**
+**AI models on your own computer, or Ollama Cloud, Claude and GPT when you want them: chat with one, or let a coding agent build and fix your project while you review every change.**
 
 [![Latest release](https://img.shields.io/github/v/release/daristanapeyvan/emircode?label=Download&color=2ea44f)](https://github.com/daristanapeyvan/emircode/releases/latest)
 [![Platform](https://img.shields.io/badge/Windows%20x64%20%7C%20Linux%20x64-blue.svg)](https://github.com/daristanapeyvan/emircode/releases)
@@ -19,7 +19,7 @@
 
 </div>
 
-Emir Code is a desktop app for Windows and Linux. It runs models through [Ollama](https://ollama.com) on your machine, with no account and no telemetry.
+Emir Code is a desktop app for Windows and Linux. It runs models through [Ollama](https://ollama.com) on your machine, with no account and no telemetry. When a task needs a bigger model, add **Ollama Cloud**, **Claude** (Anthropic) or **GPT** (OpenAI) with your own API key and pick them in the same model selector.
 
 ## ✨ What you get
 
@@ -31,6 +31,7 @@ Emir Code is a desktop app for Windows and Linux. It runs models through [Ollama
 | 🔒 **Isolated commands** | Programs the agent runs are kept away from your other files and from the network, as far as your system provides it. |
 | 🧙 **Wizards** | Website, Mini App and Script wizards turn a few choices into a detailed request. |
 | 📦 **Model manager** | Browse the Ollama library, see what fits your memory, download and verify. |
+| ☁️ **Cloud models** | Ollama Cloud, Claude and GPT next to your local models, with your own API key, kept encrypted by your system. |
 | 🌐 **Web when you want it** | Current questions are searched and the page is read; switch it off any time. |
 | 🌍 **English and Turkish** | The interface comes in both; write requests in any language your model understands. |
 
@@ -56,6 +57,8 @@ ollama pull qwen2.5-coder:7b
 
 The setup wizard on first start checks Ollama and Node.js and can install them for you. If Ollama is installed but not running, Emir Code starts it. Node.js 18 or newer is optional; the agent needs it to run `npm` commands in your projects.
 
+No Ollama, or a slow computer? Skip step 1 and add a cloud model instead: the setup wizard's **Set up cloud models** opens Settings › Cloud models (see Cloud models below).
+
 **2. Download Emir Code** from the [Releases page](https://github.com/daristanapeyvan/emircode/releases/latest).
 
 | System | File | How |
@@ -70,7 +73,7 @@ The setup wizard on first start checks Ollama and Node.js and can install them f
 
 **3. Open it.**
 
-1. Pick a model in the selector in the title bar.
+1. Pick a model in the selector in the title bar (local models, and cloud models under their provider).
 2. **Chat:** type a question. Switch on **Web** (the globe) for questions about current events.
 3. **Code:** press **New Project** or open a folder, choose the approval level in the project bar and describe the task.
 
@@ -86,7 +89,8 @@ The setup wizard on first start checks Ollama and Node.js and can install them f
 ## 💬 Chat
 
 - Ask coding questions; code blocks have syntax highlighting and a copy button.
-- Attach a text or code file, or an image, and ask about it. Images need a model that accepts image input.
+- Attach a text or code file, or an image, and ask about it. Images need a model that accepts image input (for example `gemma3`, Claude, `gpt-4o` or `gpt-5`).
+- Replies of cloud models show the tokens they used (input, the part read from the provider's cache, output).
 - 🌐 With **Web** on, questions about current information (people, news, prices, weather) are searched on DuckDuckGo first, the first result page is read, and the answer is written from them. The message shows what was searched and read.
 - Programming questions are answered by the model itself and go to the web only when you ask ("search the web for…").
 - If a model still replies that it cannot go online, the app runs the search and generates the answer again.
@@ -135,7 +139,7 @@ Confirming a wizard puts the request into the message box; nothing runs until yo
 
 ## 📦 Models
 
-The Model Manager (**Ctrl+Shift+M**) lists the Ollama library from ollama.com by category (Recommended, Coding, Agents & tools, Reasoning, Vision & audio, Lightweight, Chat & general, Embedding). You can pick a size and quantization, see whether it fits this computer's memory and download it. Tags are checked against the Ollama registry before and after the download, and installed models show whether an update is available. The window also shows which models are loaded in memory and lets you unload or delete them.
+The Model Manager (**Ctrl+Shift+M**) lists the Ollama library from ollama.com by category (Recommended, Coding, Agents & tools, Reasoning, Vision & audio, Lightweight, Chat & general, Embedding, Cloud). You can pick a size and quantization, see whether it fits this computer's memory and download it. Tags are checked against the Ollama registry before and after the download, and installed models show whether an update is available. The window also shows which models are loaded in memory and lets you unload or delete them.
 
 **Which model to use.** Results of the agent benchmark (`scripts/agent-e2e.ts`) on a laptop without a GPU (AMD Ryzen 5 7530U, 16 GB RAM). Times depend on the hardware; with a GPU every step is much faster.
 
@@ -146,6 +150,25 @@ The Model Manager (**Ctrl+Shift+M**) lists the Ollama library from ollama.com by
 | `gemma2:2b` | 1.6 GB | Page repair 2.3 min · new web page 3.7 min in the latest run, inconsistent across runs | Chat and small edits |
 
 All listed runs passed their checks. Settings › Agent sets the context length, the maximum output per step and "Think before each step" for thinking models such as qwen3; *Auto* picks values for this computer.
+
+On a slow computer or for a large project, a cloud model is much faster; the benchmark has no measured cloud results yet.
+
+## ☁️ Cloud models (Ollama Cloud, Claude, GPT)
+
+Settings › **Cloud models** (also in the command palette and as **Add cloud models** in the model selector) takes an API key per provider:
+
+| Provider | Models | What you need |
+| :--- | :--- | :--- |
+| Ollama Cloud | Large open models on ollama.com (`gpt-oss:120b`, `qwen3-coder:480b`, `deepseek-v3.1:671b`, …) | An API key from ollama.com, **or** a signed-in Ollama (`ollama signin`) |
+| Claude (Anthropic) | Claude models such as `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-4-5` | An Anthropic API key |
+| GPT (OpenAI) | The GPT and o-series models of your account, such as `gpt-5`, `gpt-4.1` | An OpenAI API key |
+
+- **Keys.** A key is checked with the provider before it is saved. It is stored in its own file, `cloud_keys.json`, encrypted with the system's key store (DPAPI on Windows, GNOME Keyring or KWallet on Linux), never in `emir_code_data.json`, and it never reaches the window: the interface only sees its last four characters. Without a system key store a key lasts until the app closes. `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` and `OLLAMA_API_KEY` in the environment are used when no key is saved; the agent's commands do not get them.
+- **Ollama Cloud through Ollama.** Sign in once with `ollama signin`, then add a cloud tag in Models › Discover › Cloud (or `ollama pull gpt-oss:120b-cloud`). These models run on ollama.com through your Ollama, without a key in Emir Code.
+- **The agent** keeps every guard: approvals, file checks, isolated commands, undo. Its context window follows Settings › Cloud models › Context window (Automatic: 64K tokens, never more than the model takes), not this computer's memory; one step may write up to 16K tokens. Claude requests reuse the cached start of the task; OpenAI caches on its own. "Think before each step" turns on Claude's adaptive thinking (with a readable summary) and a higher reasoning effort on GPT's reasoning models. A request that Claude's safety classifiers decline is retried by Anthropic on its recommended fallback model.
+- **What leaves this computer.** With a cloud model, your messages and attachments, and in the Code tab the files the agent reads, command output and web results, go to that provider and are processed under its terms. Nothing changes for local models.
+
+The design and the security decisions are in [docs/PLAN_BULUT_MODELLERI.md](./docs/PLAN_BULUT_MODELLERI.md) (Turkish), [ARCHITECTURE.md](./ARCHITECTURE.md#13-cloud-models) and [docs/SECURITY_MODEL.md](./docs/SECURITY_MODEL.md#cloud-models).
 
 ## 🔒 Safety: approvals and isolation
 
@@ -218,6 +241,12 @@ Windows caches icons; unpin and pin the app again, or sign out and back in.
 </details>
 
 <details>
+<summary><b>A cloud model reports an invalid key, no quota or a rate limit</b></summary>
+
+Enter the key again in Settings › Cloud models (**Replace**). Quota and billing are settled on the provider's website; a rate limit usually passes within seconds, and Claude and GPT retry temporary errors twice on their own. An Ollama Cloud model added through Ollama that answers "unauthorized" needs `ollama signin` in a terminal.
+</details>
+
+<details>
 <summary><b>No answer from Ollama</b></summary>
 
 Check that Ollama is running and that Settings › Ollama › Ollama address is correct (default `http://localhost:11434`).
@@ -227,9 +256,10 @@ The **Logs** panel (button in the project bar) shows the agent's events and the 
 
 ## 🔐 Privacy
 
-- 🚫 No telemetry, analytics or accounts. Chats, settings and tasks are stored on this computer (`emir_code_data.json` in the app's data folder).
-- 🏠 Prompts and code go only to the Ollama address in Settings (`http://localhost:11434` by default).
-- 🌐 Emir Code connects to the internet only for:
+- 🚫 No telemetry, analytics or accounts. Chats, settings and tasks are stored on this computer (`emir_code_data.json` in the app's data folder); API keys of cloud providers are in `cloud_keys.json`, encrypted by the system.
+- 🏠 With a local model, prompts and code go only to the Ollama address in Settings (`http://localhost:11434` by default).
+- ☁️ With a cloud model (Ollama Cloud, Claude, GPT), prompts, attachments and, for the agent, the files it reads, command output and web results go to that provider: `ollama.com`, `api.anthropic.com` or `api.openai.com`. Saving a key or refreshing the list reads the provider's model list.
+- 🌐 Apart from the cloud models you choose, Emir Code connects to the internet only for:
   - web access, which is on by default and can be switched off completely or separately for chat and the agent in Settings › Web access. Searches go to DuckDuckGo; chat reads the first result page and the agent can open web pages. Addresses on this computer or the local network are never opened;
   - the Model Manager, which reads the model list from ollama.com and checks tags with registry.ollama.ai (the source `ollama pull` uses) while its Discover or Installed tab is open;
   - the setup wizard, when you ask it to download Ollama or Node.js;
@@ -265,7 +295,8 @@ Pushing a `vX.Y.Z` tag starts the release workflow: it builds the Windows and Li
 | :--- | :--- |
 | 🇹🇷 [docs/KULLANIM.md](./docs/KULLANIM.md) | Turkish user guide |
 | 🧪 [docs/EXAMPLES.md](./docs/EXAMPLES.md) | What happens during typical agent tasks |
-| 🏗️ [ARCHITECTURE.md](./ARCHITECTURE.md) | Processes, agent loop, checks, themes, wizards, model library, packaging |
+| ☁️ [docs/PLAN_BULUT_MODELLERI.md](./docs/PLAN_BULUT_MODELLERI.md) | Plan and design of cloud models: Ollama Cloud, Claude, GPT (Turkish) |
+| 🏗️ [ARCHITECTURE.md](./ARCHITECTURE.md) | Processes, agent loop, checks, themes, wizards, model library, cloud models, packaging |
 | 🔒 [docs/SECURITY_MODEL.md](./docs/SECURITY_MODEL.md) | What the app allows and blocks, and where the limits are |
 | 🚨 [SECURITY.md](./SECURITY.md) | How to report a vulnerability |
 | 🤝 [CONTRIBUTING.md](./CONTRIBUTING.md) | Development setup, tests and conventions |
